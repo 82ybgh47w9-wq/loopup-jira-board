@@ -235,7 +235,7 @@ function saveConfig(){
 const auth=()=>"Basic "+btoa(cfg.email+":"+cfg.token);
 
 const PROXY="https://jira-proxy.82ybgh47w9.workers.dev";
-const API_BASE="https://api.atlassian.com/ex/jira/b956012f-2d72-45a8-a09f-bcc3eb14fb9e";
+const API_BASE="https://loopup.atlassian.net";
 async function jiraGet(path){
   const target=encodeURIComponent(API_BASE+path);
   const r=await fetch(PROXY+"?target="+target,{headers:{Authorization:auth(),Accept:"application/json"}});
@@ -286,9 +286,8 @@ async function fetchIssues(projectKey){
   const fields="summary,status,assignee,priority,issuetype,updated,parent,subtasks,description"; // comma-separated
   let all=[],start=0;
   while(true){
-    const r=await jiraPost("/rest/api/3/search",{jql:"project="+projectKey+" ORDER BY status ASC,updated DESC",fields:fields.split(","),maxResults:100,startAt:start});
-    if(!r.ok)throw new Error("Jira "+r.status+": "+r.statusText+" — check your credentials");
-    const d=await r.json();
+    const jql=encodeURIComponent("project="+projectKey+" ORDER BY status ASC,updated DESC");
+    const d=await jiraGet("/rest/api/3/search/jql?jql="+jql+"&fields="+fields+"&maxResults=100&startAt="+start);
     const issues=d.issues||[];
     all=all.concat(issues.map(i=>{
       const f=i.fields;
