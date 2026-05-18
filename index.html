@@ -234,8 +234,10 @@ function saveConfig(){
 /* ─── Jira REST (direct — no CORS issues) ───── */
 const auth=()=>"Basic "+btoa(cfg.email+":"+cfg.token);
 
+const PROXY="https://jira-proxy.82ybgh47w9.workers.dev";
 async function jiraGet(path){
-  const r=await fetch(cfg.url+path,{headers:{Authorization:auth(),Accept:"application/json"}});
+  const target=encodeURIComponent(cfg.url+path);
+  const r=await fetch(PROXY+"?target="+target,{headers:{Authorization:auth(),Accept:"application/json"}});
   if(!r.ok)throw new Error("Jira "+r.status+": "+r.statusText+" — check your credentials");
   return r.json();
 }
@@ -283,7 +285,8 @@ async function fetchComments(key){
 
 async function postComment(key,text){
   try{
-    const r=await fetch(cfg.url+"/rest/api/3/issue/"+key+"/comment",{method:"POST",
+    const target=encodeURIComponent(cfg.url+"/rest/api/3/issue/"+key+"/comment");
+    const r=await fetch(PROXY+"?target="+target,{method:"POST",
       headers:{Authorization:auth(),Accept:"application/json","Content-Type":"application/json"},
       body:JSON.stringify({body:{type:"doc",version:1,content:[{type:"paragraph",content:[{type:"text",text}]}]}})});
     return r.ok;
@@ -296,7 +299,8 @@ async function transitionIssue(key,targetStatus){
     const t=(d.transitions||[]).find(t=>t.name.toLowerCase()===targetStatus.toLowerCase())||
              (d.transitions||[]).find(t=>t.to?.name?.toLowerCase()===targetStatus.toLowerCase());
     if(!t)return false;
-    const r=await fetch(cfg.url+"/rest/api/3/issue/"+key+"/transitions",{method:"POST",
+    const ttarget=encodeURIComponent(cfg.url+"/rest/api/3/issue/"+key+"/transitions");
+    const r=await fetch(PROXY+"?target="+ttarget,{method:"POST",
       headers:{Authorization:auth(),Accept:"application/json","Content-Type":"application/json"},
       body:JSON.stringify({transition:{id:t.id}})});
     return r.ok||r.status===204;
@@ -305,7 +309,8 @@ async function transitionIssue(key,targetStatus){
 
 async function updatePriority(key,priority){
   try{
-    const r=await fetch(cfg.url+"/rest/api/3/issue/"+key,{method:"PUT",
+    const ptarget=encodeURIComponent(cfg.url+"/rest/api/3/issue/"+key);
+    const r=await fetch(PROXY+"?target="+ptarget,{method:"PUT",
       headers:{Authorization:auth(),Accept:"application/json","Content-Type":"application/json"},
       body:JSON.stringify({fields:{priority:{name:priority}}})});
     return r.ok||r.status===204;
