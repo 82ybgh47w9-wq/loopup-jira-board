@@ -268,10 +268,17 @@ function parseIssue(i){
 }
 
 async function fetchIssues(projectKey){
-  const fields="summary,status,assignee,priority,issuetype,updated,parent,subtasks,description";
+  const fields=["summary","status","assignee","priority","issuetype","updated","parent","subtasks","description"];
   let all=[],start=0;
   while(true){
-    const d=await jiraGet("/rest/api/3/search?jql="+encodeURIComponent("project="+projectKey+" ORDER BY status ASC,updated DESC")+"&fields="+fields+"&maxResults=100&startAt="+start);
+    const target=encodeURIComponent(cfg.url+"/rest/api/3/search");
+    const r=await fetch(PROXY+"?target="+target,{
+      method:"POST",
+      headers:{Authorization:auth(),Accept:"application/json","Content-Type":"application/json"},
+      body:JSON.stringify({jql:"project="+projectKey+" ORDER BY status ASC,updated DESC",fields,maxResults:100,startAt:start})
+    });
+    if(!r.ok)throw new Error("Jira "+r.status+": "+r.statusText+" — check your credentials");
+    const d=await r.json();
     const issues=d.issues||[];all=all.concat(issues.map(parseIssue));start+=issues.length;
     if(start>=(d.total||0)||issues.length===0)break;
   }
