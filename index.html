@@ -1008,37 +1008,51 @@ function renderSettings(){
   }else if(settingsTab==="groups"){
     const gnames=Object.keys(groups);
     body.innerHTML=`
-      <div style="font-size:12px;color:#9EA0A4;margin-bottom:12px">Create named groups to filter the board (e.g. Marketing, Com Ops). Click people to add/remove them.</div>
-      <div style="display:flex;gap:8px;margin-bottom:14px">
-        <input class="form-input" id="new-group-name" placeholder="New group name (e.g. Marketing)…" style="flex:1">
+      <div style="font-size:12px;color:#9EA0A4;margin-bottom:12px">Create named groups to filter the board to a subset of people (e.g. Marketing, Com Ops).</div>
+
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <input class="form-input" id="new-group-name" placeholder="New group name (e.g. Marketing)…" style="flex:1" onkeydown="if(event.key==='Enter')createGroup()">
         <button class="primary-btn" onclick="createGroup()">+ Create group</button>
       </div>
-      ${gnames.length===0?'<div style="font-size:13px;color:#9EA0A4;font-style:italic;padding:8px 0">No groups yet. Create one above.</div>':""}
-      <div id="groups-list" style="display:flex;flex-direction:column;gap:16px">
-        ${gnames.map(g=>`
-          <div style="border:1px solid #E4E6E8;border-radius:10px;overflow:hidden">
+
+      ${gnames.length===0
+        ? '<div style="font-size:13px;color:#9EA0A4;font-style:italic;padding:8px 0">No groups yet — create one above.</div>'
+        : gnames.map(g=>`
+          <div style="border:1px solid #E4E6E8;border-radius:10px;overflow:hidden;margin-bottom:14px">
             <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#F7F8F9;border-bottom:1px solid #E4E6E8">
               <span style="font-size:13px;font-weight:700;flex:1">${g}</span>
               <span style="font-size:11px;color:#9EA0A4">${(groups[g]||[]).length} members</span>
-              <button onclick="deleteGroup('${g.replace(/'/g,"\'")}');renderSettings()" style="background:none;border:none;cursor:pointer;color:#D6202B;font-size:18px;padding:2px 6px">×</button>
+              <button onclick="deleteGroup('${g.replace(/'/g,"\'")}');renderSettings()" style="background:none;border:none;cursor:pointer;color:#D6202B;font-size:18px;line-height:1">×</button>
             </div>
             <div style="padding:12px 14px">
-              <div style="font-size:11px;color:#9EA0A4;margin-bottom:8px;font-weight:700;text-transform:uppercase;letter-spacing:.05em">Click to add/remove members</div>
-              <div style="display:flex;flex-wrap:wrap;gap:6px">
+
+              <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Search for users</div>
+              <div style="display:flex;gap:8px;margin-bottom:10px">
+                <input class="form-input" id="grp-search-${g.replace(/\s/g,'_')}" placeholder="Search Jira users…"
+                  oninput="searchGroupUsers('${g.replace(/'/g,"\'")}',this.value)" style="flex:1">
+              </div>
+              <div id="grp-results-${g.replace(/\s/g,'_')}" style="display:flex;flex-direction:column;gap:4px;max-height:120px;overflow-y:auto;margin-bottom:12px"></div>
+
+              <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">All team members</div>
+              <div style="display:flex;flex-direction:column;gap:4px;max-height:220px;overflow-y:auto">
                 ${[...teamMembers].sort().map(m=>{
                   const inGroup=(groups[g]||[]).includes(m);
                   return`<div onclick="toggleGroupMember('${g.replace(/'/g,"\'")}','${m.replace(/'/g,"\'")}',${!inGroup});renderSettings()"
-                    style="display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:20px;cursor:pointer;border:2px solid ${inGroup?"#2E99CE":"#E4E6E8"};background:${inGroup?"#E0F0F8":"#fff"};transition:.15s">
-                    ${ava(m,22)}
-                    <span style="font-size:12px;font-weight:${inGroup?"700":"400"};color:${inGroup?"#125462":"#5D7987"}">${m}</span>
-                    ${inGroup?'<span style="font-size:12px;color:#2E99CE">✓</span>':''}
+                    style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;cursor:pointer;background:${inGroup?"#E0F0F8":"#F7F8F9"};border:1px solid ${inGroup?"#2E99CE":"#E4E6E8"};transition:.12s">
+                    ${ava(m,24)}
+                    <span style="flex:1;font-size:13px;font-weight:${inGroup?"700":"400"};color:${inGroup?"#125462":"#292E37"}">${m}</span>
+                    <span style="font-size:14px;color:${inGroup?"#2E99CE":"#C9CACC"}">${inGroup?"✓":"+"}</span>
                   </div>`;
                 }).join("")}
               </div>
-              ${(groups[g]||[]).length>0?`<div style="margin-top:10px;font-size:11px;color:#5E8E38;font-weight:700">✓ ${(groups[g]||[]).length} member${(groups[g]||[]).length===1?"":"s"} selected: ${(groups[g]||[]).join(", ")}</div>`:'<div style="margin-top:8px;font-size:11px;color:#9EA0A4">No members selected yet</div>'}
+
+              ${(groups[g]||[]).length>0
+                ? `<div style="margin-top:10px;padding:8px 10px;background:#F0FBF0;border-radius:6px;font-size:12px;color:#3B6D11;font-weight:600">
+                    ✓ ${(groups[g]||[]).length} member${(groups[g]||[]).length===1?"":"s"}: ${[...(groups[g]||[])].sort().join(", ")}
+                  </div>`
+                : `<div style="margin-top:8px;font-size:12px;color:#9EA0A4;font-style:italic">No members yet — click names above to add</div>`}
             </div>
-          </div>`).join("")}
-      </div>`;
+          </div>`).join("")}`;
   }else if(settingsTab==="projects"){
     body.innerHTML=`
       <div style="font-size:12px;color:#9EA0A4">Excluded projects won't appear in project filter or epic search.</div>
@@ -1100,6 +1114,37 @@ function toggleGroupMember(group,member,add){
   if(add){if(!groups[group].includes(member))groups[group].push(member);}
   else{groups[group]=groups[group].filter(m=>m!==member);}
   saveAll();populateGroupSelector();
+}
+
+
+async function searchGroupUsers(groupName, query){
+  const safeGroup = groupName.replace(/\s/g,'_');
+  const el = document.getElementById('grp-results-'+safeGroup);
+  if(!el) return;
+  if(query.length < 2){ el.innerHTML=''; return; }
+  el.innerHTML=`<div style="font-size:12px;color:#9EA0A4;padding:4px">${spinHtml(14)} Searching…</div>`;
+  try{
+    const d = await jiraGet('/rest/api/3/user/search?query='+encodeURIComponent(query)+'&maxResults=8');
+    const users = Array.isArray(d)?d:(d.values||[]);
+    if(!users.length){ el.innerHTML='<div style="font-size:12px;color:#9EA0A4;padding:4px">No users found</div>'; return; }
+    el.innerHTML = users.map(u=>{
+      const name = u.displayName||'';
+      const inGroup = (groups[groupName]||[]).includes(name);
+      const inTeam = teamMembers.includes(name);
+      return`<div onclick="
+          if(!teamMembers.includes('${name.replace(/'/g,"\'")}'))teamMembers.push('${name.replace(/'/g,"\'")}');
+          toggleGroupMember('${groupName.replace(/'/g,"\'")}','${name.replace(/'/g,"\'")}',${!inGroup});
+          renderSettings();"
+        style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;cursor:pointer;background:${inGroup?'#E0F0F8':'#fff'};border:1px solid ${inGroup?'#2E99CE':'#E4E6E8'}">
+        ${ava(name,24)}
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:600">${name}</div>
+          <div style="font-size:10px;color:#9EA0A4">${u.emailAddress||''}</div>
+        </div>
+        <span style="font-size:14px;color:${inGroup?'#2E99CE':'#C9CACC'}">${inGroup?'✓':'+'}</span>
+      </div>`;
+    }).join('');
+  }catch{ el.innerHTML='<div style="font-size:12px;color:#D6202B;padding:4px">Search failed</div>'; }
 }
 
 
