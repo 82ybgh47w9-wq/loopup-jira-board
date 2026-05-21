@@ -1104,3 +1104,13 @@ function toggleGroupMember(group,member,add){
   saveAll();populateGroupSelector();
 }
 
+
+/* ══ BOOT ══ */
+loadAll();
+document.getElementById("iam-sel").value=currentIam||"";
+document.querySelectorAll("#level-seg button").forEach((b,i)=>b.classList.toggle("active",["all","epics","tasks"][i]===currentLevel));
+if(cfg.email&&cfg.token&&cfg.url){document.getElementById("setup-overlay").style.display="none";updateManagerVisibility();init();}
+else showSetup();
+</script>
+</body>
+</html>
