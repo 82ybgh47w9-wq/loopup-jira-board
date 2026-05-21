@@ -704,9 +704,9 @@ function renderPaneHdr(i){
   document.getElementById("pane-hdr").innerHTML=`
     <div style="display:flex;justify-content:space-between;align-items:flex-start">
       <div style="flex:1;margin-right:10px">
-        <div style="display:flex;gap:6px;align-items:center;margin-bottom:5px;flex-wrap:wrap">
-          <a href="${BASE()}${i.key}" target="_blank" style="font-size:11px;font-weight:700;color:#8FC7E4;font-family:monospace">${i.key} ↗</a>
-          ${i.parent_key?`<span style="font-size:11px;color:rgba(255,255,255,.5)">↑ <a href="${BASE()}${i.parent_key}" target="_blank" style="color:#8FC7E4;font-family:monospace">${i.parent_key}</a></span>`:""}
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:5px;flex-wrap:wrap">
+          <a href="${BASE()}${i.key}" target="_blank" style="font-size:15px;font-weight:700;color:#8FC7E4;font-family:monospace">${i.key} ↗</a>
+          ${i.parent_key?`<span style="font-size:11px;color:rgba(255,255,255,.5)">↑ <a href="${BASE()}${i.parent_key}" target="_blank" style="color:#8FC7E4;font-family:monospace;font-size:12px">${i.parent_key}</a></span>`:""}
         </div>
         <div style="font-size:14px;font-weight:700;color:#fff;line-height:1.35;margin-bottom:7px">${i.summary}</div>
         <div style="display:flex;gap:5px;flex-wrap:wrap">${tbadge(i.type)}${spill(i.status)}${pbadge(i.priority)}</div>
@@ -751,7 +751,17 @@ function renderPaneMain(){
 
   buildChain(i.key).then(chain=>{
     const isActive=activeFlags[i.assignee]===i.key;
-    const chainRows=chain.map(node=>hierRow(node.type,node.key,node.summary,node.type)).join("");
+    const chainRows=chain.map((node,idx)=>{
+      const isCurrent=node.key===i.key;
+      if(isCurrent){
+        return`<div class="hierarchy-row" style="background:#F0F9FF;border-radius:6px;padding:5px 8px;border-left:3px solid #2E99CE">
+          <span class="hierarchy-label" style="font-weight:700;color:#125462">${node.type}</span>
+          <span class="hierarchy-key"><a href="${BASE()}${node.key}" target="_blank" style="color:#125462;font-family:monospace;font-size:13px;font-weight:700">${node.key}</a></span>
+          <span class="hierarchy-val" style="font-size:13px;font-weight:700;color:#292E37">${node.summary}</span>
+        </div>`;
+      }
+      return hierRow(node.type,node.key,node.summary,node.type);
+    }).join("");
 
     document.getElementById("pane-body").innerHTML=`
     <div class="pane-section">
@@ -787,14 +797,15 @@ function renderPaneMain(){
     </div>
     <div class="pane-section" id="comments-section">
       <div class="pane-section-title">Comments <span id="cmt-count"></span></div>
-      <div id="cmt-list"><div style="display:flex;align-items:center;gap:6px;color:#9EA0A4">${spinHtml()} Loading…</div></div>
-      <div style="margin-top:10px">
-        <textarea class="cmt-input" id="cmt-text" placeholder="Add a comment…"></textarea>
-        <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+      <div style="margin-bottom:12px">
+        <textarea class="cmt-input" id="cmt-text" placeholder="Add a comment…" style="min-height:75px"></textarea>
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:6px">
+          <span id="post-msg" style="font-size:12px;margin-right:auto"></span>
+          <a href="${BASE()}${i.key}" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;padding:7px 12px;border:1px solid #2E99CE;border-radius:6px;white-space:nowrap">View in Jira ↗</a>
           <button class="post-btn" id="post-btn" onclick="submitPaneComment('${i.key}')">Post to Jira</button>
-          <span id="post-msg" style="font-size:12px"></span>
         </div>
       </div>
+      <div id="cmt-list" style="overflow-y:auto;max-height:300px;display:flex;flex-direction:column;gap:8px"><div style="display:flex;align-items:center;gap:6px;color:#9EA0A4">${spinHtml()} Loading…</div></div>
     </div>`;
     loadPaneComments(i.key);
   }).catch(err=>{
