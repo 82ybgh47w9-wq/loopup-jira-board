@@ -730,93 +730,78 @@ function setPaneTab(t){
 
 function renderPaneMain(){
   const i=openIssue;
-  // Fetch full hierarchy chain from Jira
   const hierRow=(label,key,summary,type)=>key?`<div class="hierarchy-row">
     <span class="hierarchy-label">${label}</span>
     <span class="hierarchy-key"><a href="${BASE()}${key}" target="_blank" style="color:#257AA5;font-family:monospace;font-size:10px">${key}</a></span>
     <span class="hierarchy-val">${tbadge(type||"")} <span style="font-size:12px">${summary||""}</span></span>
   </div>`:"";
 
-  // Build chain: walk up through parents up to 4 levels
-  async function buildChain(issueKey, depth=0, chain=[]){
-    if(depth>4||!issueKey)return chain;
-    // Check allIssues first, then fetch
-    let node = allIssues.map(gm).find(x=>x.key===issueKey);
-    if(!node){try{const d=await jiraGet("/rest/api/3/issue/"+issueKey+"?fields=summary,issuetype,parent,project");node=parseIssue(d);}catch{return chain;}}
+  // Show loading
+  document.getElementById("pane-body").innerHTML=`<div class="pane-section"><div style="color:#9EA0A4;font-size:13px">${spinHtml()} Loading details…</div></div>`;
+
+  // Build hierarchy chain by walking up parent links
+  async function buildChain(key,depth=0,chain=[]){
+    if(depth>5||!key)return chain;
+    let node=allIssues.map(gm).find(x=>x.key===key);
+    if(!node){try{const d=await jiraGet("/rest/api/3/issue/"+key+"?fields=summary,issuetype,parent,project");node=parseIssue(d);}catch{return chain;}}
     chain.unshift(node);
     if(node.parent_key)await buildChain(node.parent_key,depth+1,chain);
     return chain;
   }
 
-  // Show loading while fetching
-  document.getElementById("pane-body").innerHTML=`<div class="pane-section"><div style="color:#9EA0A4;font-size:13px">${spinHtml()} Loading details…</div></div>`;
-
   buildChain(i.key).then(chain=>{
-  // chain[0]=top ancestor, chain[last]=current issue
-  const typeLabels=["Initiative","Legend","Epic","Task","Sub-task"];
-  // Map chain items to hierarchy labels
-  const chainRows=chain.map((node,idx)=>{
-    const label=node.type||typeLabels[idx]||"Item";
-    return hierRow(label,node.key,node.summary,node.type);
-  }).join("");
+    const isActive=activeFlags[i.assignee]===i.key;
+    const chainRows=chain.map(node=>hierRow(node.type,node.key,node.summary,node.type)).join("");
 
-  document.getElementById("pane-body").innerHTML=`
-    <!-- HIERARCHY -->
+    document.getElementById("pane-body").innerHTML=`
     <div class="pane-section">
       <div class="pane-section-title">Hierarchy</div>
       ${hierRow("Project",i.project,i.projectName,"")}
-      ${hierRow(greatgrand?.type||"Initiative",greatgrand?.key,greatgrand?.summary,greatgrand?.type)}
-      ${hierRow(grandparent?.type||"Legend",grandparent?.key,grandparent?.summary,grandparent?.type)}
-      ${hierRow(parent?.type||"Epic",parent?.key,parent?.summary,parent?.type)}
-      <div class="hierarchy-row">
-        <span class="hierarchy-label">${i.type}</span>
-        <span class="hierarchy-key"><a href="${BASE()}${i.key}" target="_blank" style="color:#257AA5;font-family:monospace;font-size:10px">${i.key}</a></span>
-        <span class="hierarchy-val">${i.summary}</span>
-      </div>
+      ${chainRows}
     </div>
-    <!-- INFO -->
     <div class="pane-section">
       <div class="two-col">
         <div class="info-cell"><div class="info-cell-label">Assignee</div><div class="info-cell-val" style="display:flex;align-items:center;gap:6px">${ava(i.assignee,20)} ${i.assignee}</div></div>
         <div class="info-cell"><div class="info-cell-label">Updated</div><div class="info-cell-val">${i.updated}</div></div>
         <div class="info-cell"><div class="info-cell-label">Type</div><div class="info-cell-val">${tbadge(i.type)}</div></div>
         <div class="info-cell"><div class="info-cell-label">Priority</div><div class="info-cell-val">${pbadge(i.priority)}</div></div>
+        <div class="info-cell"><div class="info-cell-label">Project</div><div class="info-cell-val">${i.project||"—"}</div></div>
+        <div class="info-cell"><div class="info-cell-label">Status</div><div class="info-cell-val">${spill(i.status)}</div></div>
       </div>
     </div>
-    <!-- EDIT STATUS -->
     <div class="pane-section">
       <div class="pane-section-title">Status</div>
       <div style="display:flex;flex-wrap:wrap;gap:4px">
         ${Object.entries(SC).filter(([s])=>!s.includes("Development")||i.status===s).map(([s,c])=>`<button class="edit-option" style="${i.status===s?`border:2px solid ${c.c};background:${c.bg};color:${c.c}`:""}" onclick="doPaneStatus('${s}')">${s}</button>`).join("")}
       </div>
     </div>
-    <!-- EDIT PRIORITY -->
     <div class="pane-section">
       <div class="pane-section-title">Priority</div>
       <div style="display:flex;flex-wrap:wrap;gap:4px">
         ${Object.keys(PC).map(p=>{const c=PC[p];return`<button class="edit-option" style="${i.priority===p?`border:2px solid ${c.d};background:${c.bg};color:${c.c}`:""}" onclick="doPanePriority('${p}')">${p}</button>`;}).join("")}
       </div>
     </div>
-    <!-- DESCRIPTION -->
     <div class="pane-section">
       <div class="pane-section-title">Description</div>
       ${i.description?`<div class="desc-box">${i.description}</div>`:`<div style="font-size:13px;color:#9EA0A4;font-style:italic">No description.</div>`}
     </div>
-    <!-- COMMENTS -->
     <div class="pane-section" id="comments-section">
       <div class="pane-section-title">Comments <span id="cmt-count"></span></div>
-      <div style="margin-bottom:10px">
+      <div id="cmt-list"><div style="display:flex;align-items:center;gap:6px;color:#9EA0A4">${spinHtml()} Loading…</div></div>
+      <div style="margin-top:10px">
         <textarea class="cmt-input" id="cmt-text" placeholder="Add a comment…"></textarea>
         <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
           <button class="post-btn" id="post-btn" onclick="submitPaneComment('${i.key}')">Post to Jira</button>
           <span id="post-msg" style="font-size:12px"></span>
         </div>
       </div>
-      <div id="cmt-list"><div style="display:flex;align-items:center;gap:6px;color:#9EA0A4">${spinHtml()} Loading…</div></div>
     </div>`;
-  });// end buildChain.then
-  loadPaneComments(i.key);
+    loadPaneComments(i.key);
+  }).catch(err=>{
+    document.getElementById("pane-body").innerHTML=`<div class="pane-section"><div style="color:#D6202B;font-size:13px">Failed to load details: ${err.message}</div></div>`;
+  });
 }
+
 
 async function loadPaneComments(key){
   if(!commentsCache[key]){try{commentsCache[key]=await fetchComments(key);}catch{commentsCache[key]=[];}}
@@ -1011,36 +996,38 @@ function renderSettings(){
     renderTeamList();
   }else if(settingsTab==="groups"){
     const gnames=Object.keys(groups);
-    let html=`<div style="font-size:12px;color:#9EA0A4;margin-bottom:8px">Click a person chip to add/remove them from a group.</div>
-      <div style="display:flex;gap:8px;padding:10px;background:#F7F8F9;border-radius:8px;align-items:center;margin-bottom:10px">
+    body.innerHTML=`
+      <div style="font-size:12px;color:#9EA0A4;margin-bottom:12px">Create named groups to filter the board (e.g. Marketing, Com Ops). Click people to add/remove them.</div>
+      <div style="display:flex;gap:8px;margin-bottom:14px">
         <input class="form-input" id="new-group-name" placeholder="New group name (e.g. Marketing)…" style="flex:1">
         <button class="primary-btn" onclick="createGroup()">+ Create group</button>
+      </div>
+      ${gnames.length===0?'<div style="font-size:13px;color:#9EA0A4;font-style:italic;padding:8px 0">No groups yet. Create one above.</div>':""}
+      <div id="groups-list" style="display:flex;flex-direction:column;gap:16px">
+        ${gnames.map(g=>`
+          <div style="border:1px solid #E4E6E8;border-radius:10px;overflow:hidden">
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#F7F8F9;border-bottom:1px solid #E4E6E8">
+              <span style="font-size:13px;font-weight:700;flex:1">${g}</span>
+              <span style="font-size:11px;color:#9EA0A4">${(groups[g]||[]).length} members</span>
+              <button onclick="deleteGroup('${g.replace(/'/g,"\'")}');renderSettings()" style="background:none;border:none;cursor:pointer;color:#D6202B;font-size:18px;padding:2px 6px">×</button>
+            </div>
+            <div style="padding:12px 14px">
+              <div style="font-size:11px;color:#9EA0A4;margin-bottom:8px;font-weight:700;text-transform:uppercase;letter-spacing:.05em">Click to add/remove members</div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px">
+                ${[...teamMembers].sort().map(m=>{
+                  const inGroup=(groups[g]||[]).includes(m);
+                  return`<div onclick="toggleGroupMember('${g.replace(/'/g,"\'")}','${m.replace(/'/g,"\'")}',${!inGroup});renderSettings()"
+                    style="display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:20px;cursor:pointer;border:2px solid ${inGroup?"#2E99CE":"#E4E6E8"};background:${inGroup?"#E0F0F8":"#fff"};transition:.15s">
+                    ${ava(m,22)}
+                    <span style="font-size:12px;font-weight:${inGroup?"700":"400"};color:${inGroup?"#125462":"#5D7987"}">${m}</span>
+                    ${inGroup?'<span style="font-size:12px;color:#2E99CE">✓</span>':''}
+                  </div>`;
+                }).join("")}
+              </div>
+              ${(groups[g]||[]).length>0?`<div style="margin-top:10px;font-size:11px;color:#5E8E38;font-weight:700">✓ ${(groups[g]||[]).length} member${(groups[g]||[]).length===1?"":"s"} selected: ${(groups[g]||[]).join(", ")}</div>`:'<div style="margin-top:8px;font-size:11px;color:#9EA0A4">No members selected yet</div>'}
+            </div>
+          </div>`).join("")}
       </div>`;
-    if(gnames.length===0){html+=`<div style="font-size:13px;color:#9EA0A4;font-style:italic;padding:8px">No groups yet. Create one above.</div>`;}
-    gnames.forEach(g=>{
-      const members=groups[g]||[];
-      html+=`<div style="border:1px solid #E4E6E8;border-radius:10px;overflow:hidden;margin-bottom:8px">
-        <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#F7F8F9">
-          <span style="font-size:13px;font-weight:700;flex:1">${g}</span>
-          <span style="font-size:11px;color:#9EA0A4">${members.length} member${members.length!==1?"s":""}</span>
-          <button onclick="deleteGroup('${g}')" style="background:none;border:none;cursor:pointer;color:#D6202B;font-size:18px;line-height:1;padding:0 6px" title="Delete group">×</button>
-        </div>
-        <div style="padding:10px 14px;display:flex;flex-wrap:wrap;gap:6px">
-          ${teamMembers.map(m=>{
-            const inGroup=members.includes(m);
-            return `<div onclick="toggleGroupMember('${g}','${m}',${!inGroup});renderSettings()" 
-              style="display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:20px;cursor:pointer;
-              border:1.5px solid ${inGroup?"#2E99CE":"#E4E6E8"};background:${inGroup?"#E0F0F8":"#fff"}">
-              ${ava(m,18)}
-              <span style="font-size:11px;font-weight:${inGroup?"700":"400"};color:${inGroup?"#125462":"#5D7987"}">${m.split(" ")[0]}</span>
-              ${inGroup?'<span style="color:#2E99CE;font-size:11px;font-weight:700">✓</span>':""}
-            </div>`;
-          }).join("")}
-          ${teamMembers.length===0?`<div style="font-size:12px;color:#9EA0A4">Add people via the Team tab first</div>`:""}
-        </div>
-      </div>`;
-    });
-    body.innerHTML=html;
   }else if(settingsTab==="projects"){
     body.innerHTML=`
       <div style="font-size:12px;color:#9EA0A4">Excluded projects won't appear in project filter or epic search.</div>
