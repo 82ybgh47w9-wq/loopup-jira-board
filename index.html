@@ -6,37 +6,44 @@
 <title>LoopUp Jira Board</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:Calibri,Arial,sans-serif;background:#F7F8F9;font-size:13px;color:#292E37;height:100vh;overflow:hidden;display:flex;flex-direction:column}
+html,body{height:100%;max-height:100vh}
+body{font-family:Calibri,Arial,sans-serif;background:#F7F8F9;font-size:13px;color:#292E37;height:100vh;display:flex;flex-direction:column;overflow:hidden}
 @keyframes spin{to{transform:rotate(360deg)}}
-.spinner{animation:spin .75s linear infinite;display:inline-block;vertical-align:middle}
+.spinner{animation:spin .75s linear infinite;display:inline-block;vertical-align:middle;flex-shrink:0}
 a{text-decoration:none}
 button,select,textarea,input{font-family:inherit}
-/* Setup modal */
-#setup-overlay{position:fixed;inset:0;z-index:500;background:rgba(41,46,55,.6);display:flex;align-items:center;justify-content:center}
+
+/* ── Setup modal ── */
+#setup-overlay{position:fixed;inset:0;z-index:500;background:rgba(41,46,55,.6);display:flex;align-items:center;justify-content:center;overflow-y:auto;padding:20px}
 #setup-modal{background:#fff;border-radius:12px;padding:28px 32px;width:480px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,.2)}
 .setup-title{font-size:17px;font-weight:700;color:#292E37;margin-bottom:6px}
 .setup-sub{font-size:12px;color:#9EA0A4;margin-bottom:20px;line-height:1.6}
-.setup-label{font-size:11px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px;display:block}
-.setup-input{width:100%;padding:8px 11px;border:1px solid #C9CACC;border-radius:7px;font-size:13px;color:#292E37;margin-bottom:14px;outline:none}
+.setup-label{font-size:11px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px;display:block;margin-top:12px}
+.setup-input{width:100%;padding:8px 11px;border:1px solid #C9CACC;border-radius:7px;font-size:13px;color:#292E37;outline:none}
 .setup-input:focus{border-color:#2E99CE}
-.setup-btn{width:100%;padding:10px;border-radius:7px;border:none;background:#125462;color:#fff;cursor:pointer;font-size:13px;font-weight:700}
-.setup-btn:hover{background:#0e3f4d}
+.setup-btn{width:100%;padding:10px;border-radius:7px;border:none;background:#125462;color:#fff;cursor:pointer;font-size:13px;font-weight:700;margin-top:16px}
 .setup-help{font-size:11px;color:#9EA0A4;margin-top:14px;line-height:1.7}
 .setup-help a{color:#2E99CE}
-/* Topbar */
-#topbar{background:#fff;border-bottom:1px solid #E4E6E8;padding:8px 15px;display:flex;align-items:center;gap:10px;flex-shrink:0;flex-wrap:wrap}
+
+/* ── Topbar ── */
+#topbar{background:#fff;border-bottom:1px solid #E4E6E8;padding:8px 15px;display:flex;align-items:center;gap:10px;flex-shrink:0;flex-wrap:wrap;min-height:46px}
 .logo-mark{width:24px;height:24px;border-radius:50%;border:2.5px solid #2E99CE;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#2E99CE;flex-shrink:0}
-.proj-select{font-size:12px;padding:4px 8px;border:1px solid #C9CACC;border-radius:6px;background:#fff;color:#292E37;cursor:pointer;max-width:220px}
+.topbar-title{font-size:14px;font-weight:700;white-space:nowrap}
+.iam-select{font-size:12px;padding:5px 10px;border:1.5px solid #2E99CE;border-radius:20px;background:#E0F0F8;color:#125462;cursor:pointer;font-weight:700;max-width:180px}
+.proj-select{font-size:12px;padding:4px 8px;border:1px solid #C9CACC;border-radius:6px;background:#fff;color:#292E37;cursor:pointer;max-width:200px}
 .proj-select:disabled{opacity:.5;cursor:default}
-.go-btn{padding:5px 14px;border-radius:6px;border:none;background:#125462;color:#fff;cursor:pointer;font-size:12px;font-weight:700}
-.go-btn:disabled{opacity:.5;cursor:default}
-.refresh-btn{display:flex;align-items:center;gap:5px;padding:5px 12px;border-radius:6px;border:1px solid #C9CACC;background:#fff;color:#5D7987;cursor:pointer;font-size:12px;font-weight:700}
-.refresh-btn:disabled{opacity:.5;cursor:default}
+.icon-btn{padding:5px 10px;border-radius:6px;border:1px solid #C9CACC;background:#fff;color:#5D7987;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:4px;font-size:12px;font-weight:600}
+.icon-btn:hover{background:#F7F8F9}
+.primary-btn{padding:5px 14px;border-radius:6px;border:none;background:#125462;color:#fff;cursor:pointer;font-size:12px;font-weight:700}
+.primary-btn:disabled{opacity:.5;cursor:default}
 .divider{width:1px;height:22px;background:#E4E6E8;flex-shrink:0}
-/* Stats */
+.admin-badge{background:#8F6AC8;color:#fff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px}
+
+/* ── Stats bar ── */
 #statsbar{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:8px 15px;background:#fff;border-bottom:1px solid #E4E6E8;flex-shrink:0}
-.stat-card{border-radius:6px;padding:7px 10px}
-/* Controls */
+.stat-card{border-radius:6px;padding:7px 10px;cursor:default}
+
+/* ── Controls ── */
 #controls{display:flex;align-items:center;gap:8px;padding:7px 15px;background:#fff;border-bottom:1px solid #E4E6E8;flex-shrink:0;flex-wrap:wrap}
 .seg{display:flex;background:#EEF1F3;border-radius:7px;padding:2px;gap:1px}
 .seg button{padding:4px 11px;font-size:12px;font-weight:700;cursor:pointer;border:none;background:transparent;color:#9EA0A4;border-radius:5px}
@@ -44,58 +51,114 @@ button,select,textarea,input{font-family:inherit}
 .ctrl-select{font-size:12px;padding:4px 8px;border:1px solid #C9CACC;border-radius:6px;background:#fff;color:#292E37;cursor:pointer}
 .search-box{display:flex;align-items:center;gap:5px;border:1px solid #C9CACC;border-radius:6px;padding:3px 9px;background:#fff}
 .search-box input{border:none;background:transparent;font-size:12px;color:#292E37;outline:none;width:120px}
-/* Main */
-#main{flex:1;overflow:hidden;display:flex;flex-direction:column}
-/* Board */
-.lane{min-width:0;display:flex;flex-direction:column;border-right:1px solid #E4E6E8}
-.lane:last-child{border-right:none}
-.lane-hdr{padding:9px 14px;background:#F7F8F9;border-bottom:1px solid #E4E6E8;display:flex;align-items:center;gap:8px}
-.lane-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
-.lane-title{font-size:12px;font-weight:700;color:#292E37}
-.lane-count{margin-left:auto;font-size:11px;border-radius:10px;padding:1px 8px;font-weight:700}
-.lane-body{overflow-y:auto;padding:9px;display:flex;flex-direction:column;gap:8px;flex:1}
-/* Cards */
-.card{background:#fff;border:1px solid #E4E6E8;border-radius:8px;padding:10px 12px;cursor:pointer;transition:box-shadow .15s}
+
+/* ── Main ── */
+#main{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+
+/* ── My Tasks view ── */
+#page-mytasks{flex:1;display:none;flex-direction:column;min-height:0;overflow:hidden}
+.matrix-wrap{flex:1;overflow:auto;padding:12px}
+.matrix-table{width:100%;border-collapse:separate;border-spacing:0}
+.matrix-table th{position:sticky;top:0;background:#F7F8F9;padding:8px 12px;font-size:11px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.06em;border-bottom:2px solid #E4E6E8;z-index:2;white-space:nowrap}
+.matrix-table th.pri-Highest{color:#A32D2D;background:#FCEBEB}
+.matrix-table th.pri-High{color:#854F0B;background:#FAEEDA}
+.matrix-table th.pri-Medium{color:#185FA5;background:#E0F0F8}
+.matrix-table th.pri-Low{color:#3B6D11;background:#EAF3DE}
+.row-hdr{background:#F7F8F9;cursor:pointer;user-select:none}
+.row-hdr:hover{background:#EEF1F3}
+.row-hdr td{padding:8px 14px;font-size:12px;font-weight:700;border-bottom:1px solid #E4E6E8;white-space:nowrap}
+.row-hdr td:first-child{display:flex;align-items:center;gap:8px}
+.matrix-cell{padding:6px;vertical-align:top;border-bottom:1px solid #EEF1F3;min-width:160px}
+.matrix-cell-inner{display:flex;flex-direction:column;gap:5px;min-height:40px}
+
+/* ── Manager Board ── */
+#page-manager{flex:1;display:none;overflow:hidden;min-height:0}
+.manager-wrap{height:100%;overflow-x:auto;overflow-y:hidden;display:flex}
+.person-col{min-width:220px;max-width:260px;flex-shrink:0;display:flex;flex-direction:column;border-right:1px solid #E4E6E8;height:100%}
+.person-col-hdr{padding:10px 12px;background:#F7F8F9;border-bottom:1px solid #E4E6E8;display:flex;align-items:center;gap:8px;flex-shrink:0}
+.person-col-name{font-size:12px;font-weight:700;color:#292E37}
+.person-col-body{overflow-y:auto;flex:1;padding:8px;display:flex;flex-direction:column;gap:6px;min-height:0}
+.active-card-wrap{background:linear-gradient(135deg,#125462,#257AA5);border-radius:8px;padding:2px;margin-bottom:4px}
+.active-card-inner{background:#fff;border-radius:6px;padding:8px 10px}
+.active-label{font-size:9px;font-weight:700;color:#fff;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;display:flex;align-items:center;gap:4px}
+
+/* ── Cards ── */
+.card{background:#fff;border:1px solid #E4E6E8;border-radius:8px;padding:9px 11px;cursor:pointer;transition:box-shadow .15s;position:relative}
 .card:hover{box-shadow:0 3px 12px rgba(37,122,165,.13)}
-.card-keyrow{display:flex;align-items:center;gap:5px;margin-bottom:4px;flex-wrap:wrap}
+.card.is-active{border:2px solid #2E99CE;background:#F0F9FF}
+.card-keyrow{display:flex;align-items:center;gap:5px;margin-bottom:3px;flex-wrap:wrap}
 .card-key{font-size:10px;font-weight:700;color:#257AA5;font-family:monospace}
-.card-summary{font-size:12px;font-weight:700;color:#292E37;line-height:1.4;margin-bottom:8px}
-.card-meta{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
-/* People/Done */
-.person-card{background:#fff;border:1px solid #E4E6E8;border-radius:10px;overflow:hidden;margin-bottom:0}
+.card-summary{font-size:11px;font-weight:600;color:#292E37;line-height:1.4;margin-bottom:6px}
+.card-meta{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.active-btn{position:absolute;top:6px;right:6px;font-size:9px;padding:2px 6px;border-radius:8px;border:1px solid #2E99CE;background:#E0F0F8;color:#125462;cursor:pointer;font-weight:700}
+.active-btn.is-active{background:#125462;color:#fff;border-color:#125462}
+.active-btn:hover{background:#125462;color:#fff}
+
+/* ── People view ── */
+#page-people{flex:1;display:none;flex-direction:column;gap:8px;overflow-y:auto;padding:12px;min-height:0}
+.person-card{background:#fff;border:1px solid #E4E6E8;border-radius:10px;overflow:hidden}
 .person-hdr{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer}
 .person-hdr:hover{background:#F7F8F9}
 .person-body{padding:8px 10px;display:flex;flex-direction:column;gap:5px}
 .issue-row{display:flex;align-items:center;gap:7px;padding:6px 10px;border-radius:6px;cursor:pointer;border:1px solid #EEF1F3;background:#fff}
 .issue-row:hover{background:#F7F8F9}
 .issue-sum{font-size:12px;color:#292E37;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ── Done view ── */
+#page-done{flex:1;display:none;flex-direction:column;gap:8px;overflow-y:auto;padding:12px;min-height:0}
 .done-row{display:flex;align-items:center;gap:7px;padding:6px 10px;border-radius:6px;cursor:pointer;border:1px solid #EEF1F3}
 .done-row:hover{background:#F7F8F9}
 .done-sum{font-size:12px;color:#9EA0A4;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-decoration:line-through}
-/* Badges */
-.badge{font-size:10px;padding:2px 7px;border-radius:4px;font-weight:700;white-space:nowrap;display:inline-flex;align-items:center;gap:3px}
+
+/* ── Loading/error/welcome ── */
+#page-welcome,#page-loading,#page-error{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:32px;text-align:center}
+
+/* ── Badges ── */
+.badge{font-size:10px;padding:2px 6px;border-radius:4px;font-weight:700;white-space:nowrap;display:inline-flex;align-items:center;gap:3px}
 .pri-dot{width:5px;height:5px;border-radius:50%}
 .ava{border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;flex-shrink:0}
-/* Drawer */
+
+/* ── Drawer ── */
 #drawer-overlay{position:fixed;inset:0;z-index:300;background:rgba(41,46,55,.45);display:none;justify-content:flex-end}
 #drawer-overlay.open{display:flex}
-#drawer{width:440px;background:#fff;display:flex;flex-direction:column;box-shadow:-4px 0 28px rgba(0,0,0,.15);overflow-y:auto}
+#drawer{width:460px;background:#fff;display:flex;flex-direction:column;box-shadow:-4px 0 28px rgba(0,0,0,.15);overflow-y:auto}
 #drawer-hdr{background:linear-gradient(135deg,#125462,#257AA5);padding:16px 18px;flex-shrink:0}
 #drawer-tabs{display:flex;border-bottom:1px solid #EEF1F3;flex-shrink:0}
-#drawer-tabs button{padding:8px 16px;font-size:12px;font-weight:700;cursor:pointer;border:none;background:transparent;border-bottom:2px solid transparent;color:#9EA0A4}
+#drawer-tabs button{padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer;border:none;background:transparent;border-bottom:2px solid transparent;color:#9EA0A4}
 #drawer-tabs button.active{border-bottom-color:#2E99CE;color:#2E99CE}
 #drawer-body{flex:1;overflow-y:auto;padding:16px 18px;display:flex;flex-direction:column;gap:14px}
 .field-label{font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;display:block}
-.desc-box{font-size:13px;color:#292E37;line-height:1.65;background:#F7F8F9;border-radius:6px;padding:10px 12px;white-space:pre-wrap;max-height:240px;overflow-y:auto}
+.desc-box{font-size:13px;color:#292E37;line-height:1.65;background:#F7F8F9;border-radius:6px;padding:10px 12px;white-space:pre-wrap;max-height:220px;overflow-y:auto}
 .meta-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .meta-cell{background:#F7F8F9;border-radius:6px;padding:8px 10px}
 .meta-cell-label{font-size:10px;color:#9EA0A4;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
 .meta-cell-val{font-size:12px;color:#292E37;font-weight:600;word-break:break-word}
 .comment-item{background:#F7F8F9;border-radius:8px;padding:10px 12px;border-left:3px solid #8FC7E4}
-.cmt-input{width:100%;min-height:80px;padding:8px 10px;border-radius:6px;border:1px solid #C9CACC;font-size:13px;color:#292E37;resize:vertical;line-height:1.5}
-.post-btn{padding:7px 16px;border-radius:6px;border:none;background:#125462;color:#fff;cursor:pointer;font-size:12px;font-weight:700;display:inline-flex;align-items:center;gap:5px}
+.cmt-input{width:100%;min-height:70px;padding:8px 10px;border-radius:6px;border:1px solid #C9CACC;font-size:13px;color:#292E37;resize:vertical;line-height:1.5}
+.post-btn{padding:7px 14px;border-radius:6px;border:none;background:#125462;color:#fff;cursor:pointer;font-size:12px;font-weight:700;display:inline-flex;align-items:center;gap:5px}
 .post-btn:disabled{background:#9EA0A4;cursor:default}
-.edit-option{padding:7px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid #C9CACC;background:#fff;color:#5D7987}
+.edit-option{padding:6px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid #C9CACC;background:#fff;color:#5D7987}
+
+/* ── Settings panel ── */
+#settings-overlay{position:fixed;inset:0;z-index:400;background:rgba(41,46,55,.5);display:none;align-items:center;justify-content:center;padding:20px}
+#settings-overlay.open{display:flex}
+#settings-panel{background:#fff;border-radius:12px;width:560px;max-width:95vw;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.2)}
+.settings-hdr{padding:16px 20px;border-bottom:1px solid #EEF1F3;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.settings-tabs{display:flex;border-bottom:1px solid #EEF1F3;flex-shrink:0;padding:0 20px}
+.settings-tabs button{padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer;border:none;background:transparent;border-bottom:2px solid transparent;color:#9EA0A4}
+.settings-tabs button.active{border-bottom-color:#2E99CE;color:#2E99CE}
+.settings-body{flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:12px}
+.team-member-row{display:flex;align-items:center;gap:10px;padding:8px 12px;background:#F7F8F9;border-radius:8px}
+.user-search-wrap{display:flex;gap:8px}
+.user-search-input{flex:1;padding:7px 10px;border:1px solid #C9CACC;border-radius:6px;font-size:13px;color:#292E37;outline:none}
+.user-search-input:focus{border-color:#2E99CE}
+.user-result{padding:8px 10px;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:8px;border:1px solid #EEF1F3}
+.user-result:hover{background:#E0F0F8}
+.admin-row{display:flex;align-items:center;gap:10px;padding:8px 12px;background:#F7F8F9;border-radius:8px}
+
+/* ── Collapsible row ── */
+.collapse-chevron{font-size:13px;color:#9EA0A4;transition:.15s;display:inline-block}
+.collapse-chevron.open{transform:rotate(90deg)}
 </style>
 </head>
 <body>
@@ -104,7 +167,7 @@ button,select,textarea,input{font-family:inherit}
 <div id="setup-overlay">
   <div id="setup-modal">
     <div class="setup-title">🔗 Connect to Jira</div>
-    <div class="setup-sub">Your credentials are saved only in your browser (localStorage) and sent directly to Jira — never anywhere else.</div>
+    <div class="setup-sub">Your credentials are saved only in your browser and sent directly to Jira — never anywhere else.</div>
     <label class="setup-label">Jira site URL</label>
     <input class="setup-input" id="cfg-url" type="text" placeholder="https://yourcompany.atlassian.net">
     <label class="setup-label">Your Atlassian email address</label>
@@ -113,29 +176,44 @@ button,select,textarea,input{font-family:inherit}
     <input class="setup-input" id="cfg-token" type="password" placeholder="Paste your Atlassian API token">
     <button class="setup-btn" onclick="saveConfig()">Connect →</button>
     <div class="setup-help">
-      <strong>How to get your API token:</strong><br>
-      1. Go to <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank">id.atlassian.com → Security → API tokens</a><br>
-      2. Click <strong>Create API token</strong>, name it anything, copy it<br>
-      3. Paste it above — you only need to do this once
+      Get your API token at <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank">id.atlassian.com → Security → API tokens</a>
     </div>
+  </div>
+</div>
+
+<!-- SETTINGS PANEL -->
+<div id="settings-overlay" onclick="if(event.target===this)closeSettings()">
+  <div id="settings-panel">
+    <div class="settings-hdr">
+      <span style="font-size:15px;font-weight:700">Settings</span>
+      <button onclick="closeSettings()" style="background:none;border:none;cursor:pointer;font-size:18px;color:#9EA0A4">✕</button>
+    </div>
+    <div class="settings-tabs">
+      <button class="active" onclick="setSettingsTab('team')">Team members</button>
+      <button onclick="setSettingsTab('admin')">Admin access</button>
+      <button onclick="setSettingsTab('credentials')">Credentials</button>
+    </div>
+    <div class="settings-body" id="settings-body"></div>
   </div>
 </div>
 
 <!-- TOPBAR -->
 <div id="topbar">
   <div class="logo-mark">◎</div>
-  <span style="font-size:13px;font-weight:700;white-space:nowrap">LoopUp Jira</span>
+  <span class="topbar-title">LoopUp Jira</span>
   <div class="divider"></div>
-  <span style="font-size:11px;color:#9EA0A4;white-space:nowrap">Project</span>
-  <select class="proj-select" id="project-sel" onchange="onProjectChange()"><option value="">— loading —</option></select>
-  <span style="font-size:11px;color:#9EA0A4;white-space:nowrap">Board</span>
-  <select class="proj-select" id="board-sel" disabled><option value="">— select project first —</option></select>
-  <button class="go-btn" id="go-btn" onclick="doLoad()" disabled>Load board</button>
+  <span style="font-size:11px;color:#9EA0A4;white-space:nowrap">I am</span>
+  <select class="iam-select" id="iam-sel" onchange="onIamChange()"><option value="">— select —</option></select>
   <div class="divider"></div>
-  <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
-  <button class="refresh-btn" id="refresh-btn" onclick="doRefresh()" disabled>↻ Refresh</button>
-  <a id="jira-link" href="#" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;white-space:nowrap;display:none">Open in Jira ↗</a>
-  <button onclick="showSetup()" style="margin-left:auto;padding:4px 9px;border-radius:6px;border:1px solid #C9CACC;background:#fff;color:#5D7987;cursor:pointer;font-size:13px" title="Change credentials">⚙</button>
+  <select class="proj-select" id="proj-filter" onchange="onProjFilter()">
+    <option value="">All projects</option>
+  </select>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
+    <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
+    <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none">Open Jira ↗</a>
+    <button class="icon-btn" onclick="openSettings('team')" id="settings-btn">⚙ Settings</button>
+  </div>
 </div>
 
 <!-- STATS -->
@@ -149,43 +227,58 @@ button,select,textarea,input{font-family:inherit}
 <!-- CONTROLS -->
 <div id="controls">
   <div class="seg" id="view-seg">
-    <button class="active" onclick="setView('board')">Board</button>
-    <button onclick="setView('people')">By person</button>
+    <button class="active" onclick="setView('mytasks')">My Tasks</button>
+    <button onclick="setView('people')" id="btn-people">Team</button>
     <button onclick="setView('done')">Done</button>
+    <button onclick="setView('manager')" id="btn-manager" style="display:none">Manager ★</button>
   </div>
   <div class="seg" id="level-seg">
-    <button class="active" onclick="setLevel('epics')">Epics</button>
-    <button onclick="setLevel('all')">All tasks</button>
+    <button class="active" onclick="setLevel('all')">All</button>
+    <button onclick="setLevel('epics')">Epics</button>
+    <button onclick="setLevel('tasks')">Tasks</button>
   </div>
-  <select class="ctrl-select" id="person-filter" onchange="renderMain()"><option value="">All people</option></select>
-  <div class="search-box"><span style="color:#C9CACC">⌕</span><input id="search-input" placeholder="Search…" oninput="renderMain()"></div>
+  <div class="search-box">
+    <span style="color:#C9CACC">⌕</span>
+    <input id="search-input" placeholder="Search…" oninput="renderMain()">
+  </div>
 </div>
 
 <!-- MAIN -->
 <div id="main">
-  <div id="page-welcome" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:32px;text-align:center">
+  <div id="page-welcome">
     <div style="font-size:36px">◎</div>
-    <div style="font-size:17px;font-weight:700">LoopUp Jira Board Viewer</div>
-    <div style="font-size:13px;color:#9EA0A4;max-width:340px">Select a project and board above, then click <strong>Load board</strong>. Your selection will be remembered next time.</div>
+    <div style="font-size:17px;font-weight:700">LoopUp Jira Board</div>
+    <div style="font-size:13px;color:#9EA0A4;max-width:340px">Select who you are above to get started.</div>
   </div>
-  <div id="page-loading" style="flex:1;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px">
+  <div id="page-loading" style="display:none">
     <svg class="spinner" width="36" height="36" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="#2E99CE" stroke-width="3" stroke-dasharray="42 20"/></svg>
     <div id="loading-msg" style="font-size:13px;color:#9EA0A4">Loading…</div>
   </div>
-  <div id="page-error" style="flex:1;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px;text-align:center">
+  <div id="page-error" style="display:none">
     <div style="font-size:28px">⚠</div>
     <div style="font-size:14px;font-weight:700;color:#D6202B">Could not load data</div>
     <div id="error-msg" style="font-size:12px;color:#9EA0A4;max-width:320px"></div>
-    <button style="padding:8px 20px;border-radius:6px;border:none;background:#125462;color:#fff;cursor:pointer;font-size:13px;font-weight:700" onclick="doLoad()">Retry</button>
-    <button style="padding:6px 16px;border-radius:6px;border:1px solid #C9CACC;background:#fff;color:#5D7987;cursor:pointer;font-size:12px" onclick="showSetup()">Check credentials ⚙</button>
+    <button style="padding:8px 20px;border-radius:6px;border:none;background:#125462;color:#fff;cursor:pointer;font-size:13px;font-weight:700" onclick="doFetch()">Retry</button>
+    <button class="icon-btn" onclick="openSettings('credentials')">Check credentials ⚙</button>
   </div>
-  <div id="page-board" style="flex:1;display:none;grid-template-columns:1fr 1fr 1fr;overflow:hidden">
-    <div class="lane"><div class="lane-hdr"><div class="lane-dot" style="background:#2E99CE"></div><span class="lane-title">In progress</span><span class="lane-count" style="background:#E0F0F8;color:#2E99CE" id="lc-ip">0</span></div><div class="lane-body" id="lb-ip"></div></div>
-    <div class="lane"><div class="lane-hdr"><div class="lane-dot" style="background:#5E8E38"></div><span class="lane-title">Selected — next up</span><span class="lane-count" style="background:#F1F7EC;color:#5E8E38" id="lc-sel">0</span></div><div class="lane-body" id="lb-sel"></div></div>
-    <div class="lane"><div class="lane-hdr"><div class="lane-dot" style="background:#9EA0A4"></div><span class="lane-title">Backlog</span><span class="lane-count" style="background:#EEF1F3;color:#9EA0A4" id="lc-back">0</span></div><div class="lane-body" id="lb-back"></div></div>
+
+  <!-- MY TASKS VIEW -->
+  <div id="page-mytasks" style="display:none">
+    <div class="matrix-wrap">
+      <table class="matrix-table" id="matrix-table"></table>
+    </div>
   </div>
-  <div id="page-people" style="flex:1;display:none;flex-direction:column;gap:8px;overflow-y:auto;padding:12px"></div>
-  <div id="page-done" style="flex:1;display:none;flex-direction:column;gap:8px;overflow-y:auto;padding:12px"></div>
+
+  <!-- MANAGER VIEW -->
+  <div id="page-manager" style="display:none">
+    <div class="manager-wrap" id="manager-wrap"></div>
+  </div>
+
+  <!-- TEAM VIEW -->
+  <div id="page-people" style="display:none"></div>
+
+  <!-- DONE VIEW -->
+  <div id="page-done" style="display:none"></div>
 </div>
 
 <!-- DRAWER -->
@@ -195,326 +288,762 @@ button,select,textarea,input{font-family:inherit}
     <div id="drawer-tabs">
       <button class="active" onclick="setTab('details')">Details</button>
       <button onclick="setTab('comments')">Comments</button>
-      <button onclick="setTab('edit')">Edit fields</button>
+      <button onclick="setTab('edit')">Edit</button>
     </div>
     <div id="drawer-body"></div>
   </div>
 </div>
 
 <script>
-/* ─── State ─────────────────────────────────── */
-const STOR = "loopup-jira-v4";
+/* ════════════════════════════════════════════
+   CONSTANTS & STATE
+════════════════════════════════════════════ */
+const STOR = "loopup-v5";
+const PROXY = "https://jira-proxy.82ybgh47w9.workers.dev";
+const KV_WORKER = "https://jira-proxy.82ybgh47w9.workers.dev/kv";
+const ADMIN_USER = "marcus.greensit@loopup.com";
+
+const DEFAULT_TEAM = [
+  "Steve O'Reilly","Tim Hutchinson","Harry Newman","Marcus Greensit",
+  "Karl Smith","Graham Cropley","Andrew McIntyre","Elin Morgan","Steve Kirk"
+];
+
 let cfg = {url:"https://loopup.atlassian.net", email:"", token:""};
-let allIssues=[], locStat={}, locPri={};
-let currentView="board", currentLevel="epics";
-let currentProjectKey="", currentBoardId="", currentBoardName="";
-let openIssue=null, commentsCache={}, expandState={};
+let allIssues = [], locStat = {}, locPri = {};
+let currentView = "mytasks", currentLevel = "all";
+let currentIam = "", currentProjFilter = "";
+let openIssue = null, commentsCache = {};
+let expandState = {};
+let teamMembers = [...DEFAULT_TEAM];
+let adminUsers = [ADMIN_USER];
+let activeFlags = {}; // { "displayName": "ISSUE-KEY" }
+let rowCollapsed = { Done: true, "In Progress": false, Selected: false, Backlog: false };
+let settingsTab = "team";
+let jiraUsers = [];
 
-/* ─── Persistence ───────────────────────────── */
-function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentProjectKey,currentBoardId,currentBoardName}));}catch{}}
-function loadAll(){try{const d=JSON.parse(localStorage.getItem(STOR)||"{}");if(d.cfg)cfg=d.cfg;if(d.locStat)locStat=d.locStat;if(d.locPri)locPri=d.locPri;if(d.currentProjectKey)currentProjectKey=d.currentProjectKey;if(d.currentBoardId)currentBoardId=d.currentBoardId;if(d.currentBoardName)currentBoardName=d.currentBoardName;}catch{}}
-
-/* ─── Setup modal ───────────────────────────── */
-function showSetup(){
-  document.getElementById("cfg-url").value=cfg.url||"https://loopup.atlassian.net";
-  document.getElementById("cfg-email").value=cfg.email||"";
-  document.getElementById("cfg-token").value=cfg.token||"";
-  document.getElementById("setup-overlay").style.display="flex";
+/* ════════════════════════════════════════════
+   PERSISTENCE
+════════════════════════════════════════════ */
+function saveAll() {
+  try {
+    localStorage.setItem(STOR, JSON.stringify({
+      cfg, locStat, locPri, currentIam, currentProjFilter,
+      teamMembers, adminUsers, currentView, currentLevel, rowCollapsed
+    }));
+  } catch {}
 }
-function saveConfig(){
-  const url=(document.getElementById("cfg-url").value||"").trim().replace(/\/$/,"");
-  const email=(document.getElementById("cfg-email").value||"").trim();
-  const token=(document.getElementById("cfg-token").value||"").trim();
-  if(!url||!email||!token){alert("Please fill in all three fields.");return;}
-  cfg={url,email,token};saveAll();
-  document.getElementById("setup-overlay").style.display="none";
-  loadProjects();
+function loadAll() {
+  try {
+    const d = JSON.parse(localStorage.getItem(STOR) || "{}");
+    if (d.cfg) cfg = d.cfg;
+    if (d.locStat) locStat = d.locStat;
+    if (d.locPri) locPri = d.locPri;
+    if (d.currentIam) currentIam = d.currentIam;
+    if (d.currentProjFilter) currentProjFilter = d.currentProjFilter;
+    if (d.teamMembers) teamMembers = d.teamMembers;
+    if (d.adminUsers) adminUsers = d.adminUsers;
+    if (d.currentView) currentView = d.currentView;
+    if (d.currentLevel) currentLevel = d.currentLevel;
+    if (d.rowCollapsed) rowCollapsed = {...rowCollapsed, ...d.rowCollapsed};
+  } catch {}
 }
 
-/* ─── Jira REST (direct — no CORS issues) ───── */
-const auth=()=>"Basic "+btoa(cfg.email+":"+cfg.token);
+/* ════════════════════════════════════════════
+   CLOUDFLARE KV (active flags)
+════════════════════════════════════════════ */
+async function kvGet(key) {
+  try {
+    const r = await fetch(KV_WORKER + "?action=get&key=" + encodeURIComponent(key));
+    if (!r.ok) return null;
+    const d = await r.json();
+    return d.value || null;
+  } catch { return null; }
+}
+async function kvSet(key, value) {
+  try {
+    const r = await fetch(KV_WORKER + "?action=set&key=" + encodeURIComponent(key) + "&value=" + encodeURIComponent(value));
+    return r.ok;
+  } catch { return false; }
+}
+async function kvGetAll() {
+  try {
+    const r = await fetch(KV_WORKER + "?action=getall");
+    if (!r.ok) return {};
+    return await r.json();
+  } catch { return {}; }
+}
 
-const PROXY="https://jira-proxy.82ybgh47w9.workers.dev";
-const API_BASE="https://loopup.atlassian.net";
-async function jiraGet(path){
-  const target=encodeURIComponent(API_BASE+path);
-  const r=await fetch(PROXY+"?target="+target,{headers:{Authorization:auth(),Accept:"application/json"}});
-  if(!r.ok)throw new Error("Jira "+r.status+": "+r.statusText+" — check your credentials");
+async function loadActiveFlags() {
+  const flags = await kvGetAll();
+  activeFlags = flags || {};
+}
+
+async function setActiveFlag(displayName, issueKey) {
+  activeFlags[displayName] = issueKey;
+  await kvSet("active:" + displayName, issueKey);
+  renderMain();
+}
+
+async function clearActiveFlag(displayName) {
+  delete activeFlags[displayName];
+  await kvSet("active:" + displayName, "");
+  renderMain();
+}
+
+/* ════════════════════════════════════════════
+   SETUP MODAL
+════════════════════════════════════════════ */
+function showSetup() {
+  document.getElementById("cfg-url").value = cfg.url || "https://loopup.atlassian.net";
+  document.getElementById("cfg-email").value = cfg.email || "";
+  document.getElementById("cfg-token").value = cfg.token || "";
+  document.getElementById("setup-overlay").style.display = "flex";
+}
+function saveConfig() {
+  const url = (document.getElementById("cfg-url").value || "").trim().replace(/\/$/,"");
+  const email = (document.getElementById("cfg-email").value || "").trim();
+  const token = (document.getElementById("cfg-token").value || "").trim();
+  if (!url || !email || !token) { alert("Please fill in all fields."); return; }
+  cfg = {url, email, token};
+  saveAll();
+  document.getElementById("setup-overlay").style.display = "none";
+  init();
+}
+
+/* ════════════════════════════════════════════
+   SETTINGS PANEL
+════════════════════════════════════════════ */
+function openSettings(tab) {
+  settingsTab = tab || "team";
+  document.getElementById("settings-overlay").classList.add("open");
+  renderSettings();
+}
+function closeSettings() {
+  document.getElementById("settings-overlay").classList.remove("open");
+  saveAll();
+  renderIamSelector();
+  renderMain();
+}
+function setSettingsTab(t) {
+  settingsTab = t;
+  document.querySelectorAll(".settings-tabs button").forEach((b,i) =>
+    b.classList.toggle("active", ["team","admin","credentials"][i] === t));
+  renderSettings();
+}
+
+function renderSettings() {
+  const body = document.getElementById("settings-body");
+  if (settingsTab === "team") {
+    body.innerHTML = `
+      <div style="font-size:12px;color:#9EA0A4;margin-bottom:4px">Search for Jira users to add to your team:</div>
+      <div class="user-search-wrap">
+        <input class="user-search-input" id="user-search" placeholder="Type a name…" oninput="searchJiraUsers(this.value)">
+      </div>
+      <div id="user-results" style="display:flex;flex-direction:column;gap:4px;max-height:150px;overflow-y:auto"></div>
+      <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-top:12px;margin-bottom:6px">Current team</div>
+      <div id="team-list" style="display:flex;flex-direction:column;gap:6px"></div>`;
+    renderTeamList();
+  } else if (settingsTab === "admin") {
+    const isAdmin = adminUsers.includes(cfg.email);
+    if (!isAdmin && cfg.email !== ADMIN_USER) {
+      body.innerHTML = `<div style="font-size:13px;color:#9EA0A4;font-style:italic">Only Marcus Greensit can manage admin access.</div>`;
+      return;
+    }
+    body.innerHTML = `
+      <div style="font-size:12px;color:#9EA0A4;margin-bottom:8px">Users with Manager Board access:</div>
+      <div id="admin-list" style="display:flex;flex-direction:column;gap:6px"></div>
+      <div style="margin-top:12px;display:flex;gap:8px">
+        <input class="user-search-input" id="admin-email-input" placeholder="Enter email to grant access…" style="flex:1">
+        <button class="primary-btn" onclick="grantAdmin()">Grant</button>
+      </div>`;
+    renderAdminList();
+  } else {
+    body.innerHTML = `
+      <label class="setup-label">Jira site URL</label>
+      <input class="setup-input" id="cfg-url2" type="text" value="${cfg.url}">
+      <label class="setup-label">Email</label>
+      <input class="setup-input" id="cfg-email2" type="email" value="${cfg.email}">
+      <label class="setup-label">API Token</label>
+      <input class="setup-input" id="cfg-token2" type="password" value="${cfg.token}">
+      <button class="primary-btn" style="margin-top:12px;width:100%;padding:9px" onclick="updateCredentials()">Save credentials</button>`;
+  }
+}
+
+function renderTeamList() {
+  const el = document.getElementById("team-list");
+  if (!el) return;
+  el.innerHTML = teamMembers.map((m,i) => `
+    <div class="team-member-row">
+      ${ava(m,28)}
+      <span style="flex:1;font-size:13px;font-weight:600">${m}</span>
+      <button onclick="removeTeamMember(${i})" style="background:none;border:none;cursor:pointer;color:#D6202B;font-size:16px;padding:2px 6px">×</button>
+    </div>`).join("");
+}
+
+function renderAdminList() {
+  const el = document.getElementById("admin-list");
+  if (!el) return;
+  el.innerHTML = adminUsers.map((e,i) => `
+    <div class="admin-row">
+      <span style="flex:1;font-size:13px">${e}</span>
+      ${e === ADMIN_USER ? '<span style="font-size:11px;color:#9EA0A4">owner</span>' :
+        `<button onclick="revokeAdmin(${i})" style="background:none;border:none;cursor:pointer;color:#D6202B;font-size:12px">Revoke</button>`}
+    </div>`).join("");
+}
+
+async function searchJiraUsers(query) {
+  const el = document.getElementById("user-results");
+  if (!el) return;
+  if (query.length < 2) { el.innerHTML = ""; return; }
+  el.innerHTML = `<div style="font-size:12px;color:#9EA0A4;padding:6px">${spinHtml(14)} Searching…</div>`;
+  try {
+    const d = await jiraGet("/rest/api/3/user/search?query=" + encodeURIComponent(query) + "&maxResults=8");
+    const users = Array.isArray(d) ? d : (d.values || []);
+    if (!users.length) { el.innerHTML = '<div style="font-size:12px;color:#9EA0A4;padding:6px">No users found</div>'; return; }
+    el.innerHTML = users.map(u => `
+      <div class="user-result" onclick="addTeamMember('${(u.displayName||"").replace(/'/g,"\\'")}')">
+        ${ava(u.displayName||"",24)}
+        <div>
+          <div style="font-size:12px;font-weight:600">${u.displayName||""}</div>
+          <div style="font-size:10px;color:#9EA0A4">${u.emailAddress||""}</div>
+        </div>
+      </div>`).join("");
+  } catch { el.innerHTML = '<div style="font-size:12px;color:#D6202B;padding:6px">Search failed</div>'; }
+}
+
+function addTeamMember(name) {
+  if (!teamMembers.includes(name)) {
+    teamMembers.push(name);
+    saveAll();
+    renderTeamList();
+    renderIamSelector();
+  }
+}
+function removeTeamMember(i) {
+  teamMembers.splice(i, 1);
+  saveAll();
+  renderTeamList();
+  renderIamSelector();
+}
+function grantAdmin() {
+  const email = (document.getElementById("admin-email-input").value || "").trim();
+  if (!email || adminUsers.includes(email)) return;
+  adminUsers.push(email);
+  saveAll();
+  renderAdminList();
+}
+function revokeAdmin(i) {
+  if (adminUsers[i] === ADMIN_USER) return;
+  adminUsers.splice(i, 1);
+  saveAll();
+  renderAdminList();
+}
+function updateCredentials() {
+  cfg.url = document.getElementById("cfg-url2").value.trim().replace(/\/$/,"");
+  cfg.email = document.getElementById("cfg-email2").value.trim();
+  cfg.token = document.getElementById("cfg-token2").value.trim();
+  saveAll();
+  closeSettings();
+  init();
+}
+
+/* ════════════════════════════════════════════
+   JIRA REST API
+════════════════════════════════════════════ */
+const auth = () => "Basic " + btoa(cfg.email + ":" + cfg.token);
+
+async function jiraGet(path) {
+  const target = encodeURIComponent(cfg.url + path);
+  const r = await fetch(PROXY + "?target=" + target, {
+    headers: { Authorization: auth(), Accept: "application/json" }
+  });
+  if (!r.ok) throw new Error("Jira " + r.status + ": " + r.statusText);
   return r.json();
 }
-async function jiraPost(path,body){
-  const target=encodeURIComponent(API_BASE+path);
-  const r=await fetch(PROXY+"?target="+target,{method:"POST",headers:{Authorization:auth(),Accept:"application/json","Content-Type":"application/json"},body:JSON.stringify(body)});
-  return r;
+async function jiraPost(path, body) {
+  const target = encodeURIComponent(cfg.url + path);
+  return fetch(PROXY + "?target=" + target, {
+    method: "POST",
+    headers: { Authorization: auth(), Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
 }
-async function jiraPut(path,body){
-  const target=encodeURIComponent(API_BASE+path);
-  const r=await fetch(PROXY+"?target="+target,{method:"PUT",headers:{Authorization:auth(),Accept:"application/json","Content-Type":"application/json"},body:JSON.stringify(body)});
-  return r;
-}
-
-async function fetchProjects(){
-  const d=await jiraGet("/rest/api/3/project/search?maxResults=100&orderBy=name&action=browse");
-  return(d.values||[]).map(p=>({key:p.key,name:p.name}));
-}
-
-async function fetchBoards(projectKey){
-  const btarget=encodeURIComponent(cfg.url+"/rest/agile/1.0/board?projectKeyOrId="+projectKey+"&maxResults=50");
-  const br=await fetch(PROXY+"?target="+btarget,{headers:{Authorization:auth(),Accept:"application/json"}});
-  const d=br.ok?await br.json():{values:[]};
-  return(d.values||[]).map(b=>({id:b.id,name:b.name}));
+async function jiraPut(path, body) {
+  const target = encodeURIComponent(cfg.url + path);
+  return fetch(PROXY + "?target=" + target, {
+    method: "PUT",
+    headers: { Authorization: auth(), Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
 }
 
-function extractText(doc){
-  if(!doc)return"";
-  if(typeof doc==="string")return doc.slice(0,500);
-  // ADF format (api v3)
-  let t="";
-  function walk(n){if(!n)return;if(n.type==="text")t+=n.text||"";if(n.type==="hardBreak")t+="\n";if(n.content)n.content.forEach(walk);if(["paragraph","heading","listItem","bulletList","orderedList"].includes(n.type))t+="\n";}
-  walk(doc);return t.trim().slice(0,500);
-}
-
-function parseIssue(i){
-  const f=i.fields;
-  return{key:i.key,summary:f.summary||"",type:f.issuetype?.name||"Task",status:f.status?.name||"Backlog",
-    assignee:f.assignee?.displayName||"Unassigned",priority:f.priority?.name||"Medium",
-    updated:(f.updated||"").slice(0,10),parent_key:f.parent?.key||null,
-    parent_summary:f.parent?.fields?.summary||"",description:extractText(f.description)};
-}
-
-async function fetchIssues(projectKey){
-  const fields="summary,status,assignee,priority,issuetype,updated,parent,subtasks,description"; // comma-separated
-  let all=[],start=0;
-  while(true){
-    const jql=encodeURIComponent("project="+projectKey+" ORDER BY status ASC,updated DESC");
-    const d=await jiraGet("/rest/api/3/search/jql?jql="+jql+"&fields="+fields+"&maxResults=100&startAt="+start);
-    const issues=d.issues||[];
-    all=all.concat(issues.map(i=>{
-      const f=i.fields;
-      return{key:i.key,summary:f.summary||"",type:f.issuetype?.name||"Task",status:f.status?.name||"Backlog",
-        assignee:f.assignee?.displayName||"Unassigned",priority:f.priority?.name||"Medium",
-        updated:(f.updated||"").slice(0,10),parent_key:f.parent?.key||null,
-        parent_summary:f.parent?.fields?.summary||"",description:extractText(f.description)};
-    }));
-    start+=issues.length;
-    if(start>=(d.total||0)||issues.length===0)break;
+function extractText(doc) {
+  if (!doc) return "";
+  if (typeof doc === "string") return doc.slice(0, 500);
+  let t = "";
+  function walk(n) {
+    if (!n) return;
+    if (n.type === "text") t += n.text || "";
+    if (n.type === "hardBreak") t += "\n";
+    if (n.content) n.content.forEach(walk);
+    if (["paragraph","heading","listItem","bulletList","orderedList"].includes(n.type)) t += "\n";
   }
+  walk(doc); return t.trim().slice(0, 500);
+}
+
+function parseIssue(i) {
+  const f = i.fields;
+  return {
+    key: i.key,
+    summary: f.summary || "",
+    type: f.issuetype?.name || "Task",
+    status: f.status?.name || "Backlog",
+    assignee: f.assignee?.displayName || "Unassigned",
+    assigneeEmail: f.assignee?.emailAddress || "",
+    priority: f.priority?.name || "Medium",
+    updated: (f.updated || "").slice(0, 10),
+    parent_key: f.parent?.key || null,
+    parent_summary: f.parent?.fields?.summary || "",
+    description: extractText(f.description),
+    project: f.project?.key || i.key.split("-")[0],
+    projectName: f.project?.name || "",
+  };
+}
+
+async function fetchAllTeamIssues() {
+  const fields = "summary,status,assignee,priority,issuetype,updated,parent,description,project";
+  const assignees = teamMembers.map(m => '"' + m + '"').join(",");
+  let jql = "assignee in (" + assignees + ") AND statusCategory != Done ORDER BY updated DESC";
+  if (currentProjFilter) jql = "project = " + currentProjFilter + " AND " + jql;
+
+  let all = [], start = 0;
+  while (true) {
+    const d = await jiraGet(
+      "/rest/api/3/search/jql?jql=" + encodeURIComponent(jql) +
+      "&fields=" + fields + "&maxResults=100&startAt=" + start
+    );
+    const issues = d.issues || [];
+    all = all.concat(issues.map(parseIssue));
+    start += issues.length;
+    if (start >= (d.total || 0) || issues.length === 0) break;
+  }
+
+  // Also fetch recently done (last 2 weeks)
+  let doneJql = "assignee in (" + assignees + ") AND statusCategory = Done AND updated >= -14d ORDER BY updated DESC";
+  if (currentProjFilter) doneJql = "project = " + currentProjFilter + " AND " + doneJql;
+  try {
+    const dd = await jiraGet(
+      "/rest/api/3/search/jql?jql=" + encodeURIComponent(doneJql) +
+      "&fields=" + fields + "&maxResults=50&startAt=0"
+    );
+    all = all.concat((dd.issues || []).map(parseIssue));
+  } catch {}
+
   return all;
 }
 
-async function fetchComments(key){
-  const d=await jiraGet("/rest/api/3/issue/"+key+"/comment?maxResults=50&orderBy=created");
-  return(d.comments||[]).map(c=>({id:c.id,author:c.author?.displayName||"Unknown",body:extractText(c.body),created:(c.created||"").slice(0,16).replace("T"," ")}));
+async function fetchProjects() {
+  const d = await jiraGet("/rest/api/3/project/search?maxResults=100&orderBy=name&action=browse");
+  return (d.values || []).map(p => ({ key: p.key, name: p.name }));
 }
 
-async function postComment(key,text){
-  try{
-    const r=await jiraPost("/rest/api/3/issue/"+key+"/comment",{body:{type:"doc",version:1,content:[{type:"paragraph",content:[{type:"text",text}]}]}});
+async function fetchComments(key) {
+  const d = await jiraGet("/rest/api/3/issue/" + key + "/comment?maxResults=50&orderBy=created");
+  return (d.comments || []).map(c => ({
+    id: c.id, author: c.author?.displayName || "Unknown",
+    body: extractText(c.body), created: (c.created || "").slice(0, 16).replace("T", " ")
+  }));
+}
+async function postComment(key, text) {
+  try {
+    const r = await jiraPost("/rest/api/3/issue/" + key + "/comment", {
+      body: { type: "doc", version: 1, content: [{ type: "paragraph", content: [{ type: "text", text }] }] }
+    });
     return r.ok;
-  }catch{return false;}
+  } catch { return false; }
+}
+async function transitionIssue(key, targetStatus) {
+  try {
+    const d = await jiraGet("/rest/api/3/issue/" + key + "/transitions");
+    const t = (d.transitions || []).find(t => t.name.toLowerCase() === targetStatus.toLowerCase()) ||
+              (d.transitions || []).find(t => t.to?.name?.toLowerCase() === targetStatus.toLowerCase());
+    if (!t) return false;
+    const r = await jiraPost("/rest/api/3/issue/" + key + "/transitions", { transition: { id: t.id } });
+    return r.ok || r.status === 204;
+  } catch { return false; }
+}
+async function updatePriority(key, priority) {
+  try {
+    const r = await jiraPut("/rest/api/3/issue/" + key, { fields: { priority: { name: priority } } });
+    return r.ok || r.status === 204;
+  } catch { return false; }
 }
 
-async function transitionIssue(key,targetStatus){
-  try{
-    const d=await jiraGet("/rest/api/3/issue/"+key+"/transitions");
-    const t=(d.transitions||[]).find(t=>t.name.toLowerCase()===targetStatus.toLowerCase())||
-             (d.transitions||[]).find(t=>t.to?.name?.toLowerCase()===targetStatus.toLowerCase());
-    if(!t)return false;
-    const r=await jiraPost("/rest/api/3/issue/"+key+"/transitions",{transition:{id:t.id}});
-    return r.ok||r.status===204;
-  }catch{return false;}
+/* ════════════════════════════════════════════
+   UI HELPERS
+════════════════════════════════════════════ */
+const AVC = ["#125462","#257AA5","#5E8E38","#2E99CE","#8F6AC8","#C47A3A","#D6202B","#5A8A7A","#76B246","#5D7987"];
+const avCol = n => { let h=0; for(const c of n) h=(h*31+c.charCodeAt(0))%AVC.length; return AVC[h]; };
+const ini = n => n.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase();
+const SC = {"In Progress":{c:"#2E99CE",bg:"#E0F0F8"},"Selected":{c:"#5E8E38",bg:"#F1F7EC"},"Selected for Development":{c:"#5E8E38",bg:"#F1F7EC"},"Backlog":{c:"#9EA0A4",bg:"#EEF1F3"},"Done":{c:"#73777C",bg:"#F4F4F5"}};
+const PC = {Highest:{bg:"#FCEBEB",c:"#A32D2D",d:"#D6202B"},High:{bg:"#FAEEDA",c:"#854F0B",d:"#E08000"},Medium:{bg:"#E0F0F8",c:"#185FA5",d:"#8FC7E4"},Low:{bg:"#EAF3DE",c:"#3B6D11",d:"#B3D599"}};
+const TC = {Initiative:{bg:"#F3EEFF",c:"#6B3FA0"},Legend:{bg:"#FFF0E6",c:"#9A4500"},Epic:{bg:"#E0F0F8",c:"#125462"},Milestone:{bg:"#E0F0F8",c:"#125462"},Task:{bg:"#F1F7EC",c:"#3D6B1E"},"Sub-task":{bg:"#F7F8F9",c:"#73777C"}};
+const PO = {Highest:0,High:1,Medium:2,Low:3};
+const BASE = () => cfg.url + "/browse/";
+
+const ava = (n,sz=24) => !n||n==="Unassigned"
+  ? `<div class="ava" style="width:${sz}px;height:${sz}px;font-size:${sz*.36}px;background:#EEF1F3;color:#9EA0A4">?</div>`
+  : `<div class="ava" title="${n}" style="width:${sz}px;height:${sz}px;font-size:${sz*.36}px;background:${avCol(n)}">${ini(n)}</div>`;
+
+const spill = s => { const c=SC[s]||SC.Backlog; return `<span class="badge" style="background:${c.bg};color:${c.c}">${s}</span>`; };
+const pbadge = p => { const c=PC[p]||PC.Medium; return `<span class="badge" style="background:${c.bg};color:${c.c}"><span class="pri-dot" style="background:${c.d}"></span>${p}</span>`; };
+const tbadge = t => { const c=TC[t]||TC.Task; return `<span class="badge" style="background:${c.bg};color:${c.c}">${t}</span>`; };
+const klink = k => `<a href="${BASE()}${k}" target="_blank" onclick="event.stopPropagation()" class="card-key">${k}</a>`;
+const spinHtml = (sz=16,col="#2E99CE") => `<svg class="spinner" width="${sz}" height="${sz}" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="${col}" stroke-width="3" stroke-dasharray="42 20"/></svg>`;
+
+const gm = i => ({ ...i, status: locStat[i.key]||i.status, priority: locPri[i.key]||i.priority });
+
+function normStatus(s) {
+  if (!s) return "Backlog";
+  const l = s.toLowerCase();
+  if (l.includes("progress")) return "In Progress";
+  if (l.includes("select") || l.includes("development")) return "Selected";
+  if (l.includes("done") || l.includes("complet") || l.includes("resolv") || l.includes("closed")) return "Done";
+  return "Backlog";
 }
 
-async function updatePriority(key,priority){
-  try{
-    const r=await jiraPut("/rest/api/3/issue/"+key,{fields:{priority:{name:priority}}});
-    return r.ok||r.status===204;
-  }catch{return false;}
-}
-
-/* ─── UI helpers ────────────────────────────── */
-const AVC=["#125462","#257AA5","#5E8E38","#2E99CE","#8F6AC8","#C47A3A","#D6202B","#5A8A7A","#76B246","#5D7987"];
-const avCol=n=>{let h=0;for(const c of n)h=(h*31+c.charCodeAt(0))%AVC.length;return AVC[h];};
-const ini=n=>n.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase();
-const SC={"In Progress":{c:"#2E99CE",bg:"#E0F0F8"},Selected:{c:"#5E8E38",bg:"#F1F7EC"},Backlog:{c:"#9EA0A4",bg:"#EEF1F3"},Done:{c:"#73777C",bg:"#F4F4F5"}};
-const PC={Highest:{bg:"#FCEBEB",c:"#A32D2D",d:"#D6202B"},High:{bg:"#FAEEDA",c:"#854F0B",d:"#E08000"},Medium:{bg:"#E0F0F8",c:"#185FA5",d:"#8FC7E4"},Low:{bg:"#EAF3DE",c:"#3B6D11",d:"#B3D599"}};
-const TC={Milestone:{bg:"#E0F0F8",c:"#125462"},Initiative:{bg:"#EEF1F3",c:"#5D7987"},Task:{bg:"#F1F7EC",c:"#3D6B1E"},"Sub-task":{bg:"#F7F8F9",c:"#73777C"}};
-const PO={Highest:0,High:1,Medium:2,Low:3};
-const BASE=()=>cfg.url+"/browse/";
-const ava=(n,sz=24)=>!n||n==="Unassigned"?`<div class="ava" style="width:${sz}px;height:${sz}px;font-size:${sz*.36}px;background:#EEF1F3;color:#9EA0A4;">?</div>`:`<div class="ava" title="${n}" style="width:${sz}px;height:${sz}px;font-size:${sz*.36}px;background:${avCol(n)};">${ini(n)}</div>`;
-const spill=s=>{const c=SC[s]||SC.Backlog;return`<span class="badge" style="background:${c.bg};color:${c.c}">${s}</span>`;};
-const pbadge=p=>{const c=PC[p]||PC.Medium;return`<span class="badge" style="background:${c.bg};color:${c.c}"><span class="pri-dot" style="background:${c.d}"></span>${p}</span>`;};
-const tbadge=t=>{const c=TC[t]||TC.Task;return`<span class="badge" style="background:${c.bg};color:${c.c}">${t}</span>`;};
-const klink=k=>`<a href="${BASE()}${k}" target="_blank" onclick="event.stopPropagation()" class="card-key">${k}</a>`;
-const spin=(sz=16,col="#2E99CE")=>`<svg class="spinner" width="${sz}" height="${sz}" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="${col}" stroke-width="3" stroke-dasharray="42 20"/></svg>`;
-const gm=i=>({...i,status:locStat[i.key]||i.status,priority:locPri[i.key]||i.priority});
-
-function filtered(){
-  const person=document.getElementById("person-filter").value;
-  const search=document.getElementById("search-input").value.toLowerCase();
-  const epicTypes=["Milestone","Initiative","Epic"];
-  return allIssues.map(gm).filter(i=>{
-    if(person&&i.assignee!==person)return false;
-    if(search&&!i.summary.toLowerCase().includes(search)&&!i.key.toLowerCase().includes(search))return false;
-    if(currentLevel==="epics"&&currentView!=="done"&&!epicTypes.includes(i.type))return false;
+function getFiltered(forPerson) {
+  const search = document.getElementById("search-input").value.toLowerCase();
+  const epicTypes = ["Initiative","Legend","Epic","Milestone"];
+  const taskTypes = ["Task","Sub-task"];
+  return allIssues.map(gm).filter(i => {
+    if (forPerson && i.assignee !== forPerson) return false;
+    if (search && !i.summary.toLowerCase().includes(search) && !i.key.toLowerCase().includes(search)) return false;
+    if (currentLevel === "epics" && !epicTypes.includes(i.type)) return false;
+    if (currentLevel === "tasks" && !taskTypes.includes(i.type)) return false;
     return true;
   });
 }
 
-/* ─── Pages ─────────────────────────────────── */
-const pages=["welcome","loading","error","board","people","done"];
-function showPage(name,display="flex"){
-  pages.forEach(p=>{const el=document.getElementById("page-"+p);if(el)el.style.display=p===name?display:"none";});
-}
-
-/* ─── Projects & boards ─────────────────────── */
-async function loadProjects(){
-  const sel=document.getElementById("project-sel");
-  sel.innerHTML='<option value="">Loading…</option>';
-  try{
-    const projects=await fetchProjects();
-    sel.innerHTML='<option value="">— select project —</option>'+projects.map(p=>`<option value="${p.key}">${p.key} — ${p.name}</option>`).join("");
-    if(currentProjectKey){sel.value=currentProjectKey;await loadBoards(currentProjectKey);}
-    else showPage("welcome");
-  }catch(e){sel.innerHTML='<option value="">Failed — check credentials</option>';showPage("error");document.getElementById("error-msg").textContent=e.message;}
-}
-
-async function onProjectChange(){
-  currentProjectKey=document.getElementById("project-sel").value;
-  currentBoardId="";if(!currentProjectKey)return;
-  await loadBoards(currentProjectKey);
-}
-
-async function loadBoards(projectKey){
-  const sel=document.getElementById("board-sel");
-  sel.disabled=true;sel.innerHTML='<option value="">Loading boards…</option>';
-  document.getElementById("go-btn").disabled=true;
-  try{
-    const boards=await fetchBoards(projectKey);
-    if(boards.length){
-      sel.innerHTML=boards.map(b=>`<option value="${b.id}">${b.name}</option>`).join("");
-      sel.disabled=false;
-      if(currentBoardId)sel.value=currentBoardId;
-      if(!sel.value)sel.value=boards[0].id;
-    }else{sel.innerHTML='<option value="">No boards (will load all project issues)</option>';}
-    document.getElementById("go-btn").disabled=false;
-  }catch{sel.innerHTML='<option value="">Could not load boards</option>';document.getElementById("go-btn").disabled=false;}
-}
-
-/* ─── Fetch & load ──────────────────────────── */
-async function doLoad(){
-  currentProjectKey=document.getElementById("project-sel").value;
-  currentBoardId=document.getElementById("board-sel").value;
-  currentBoardName=document.getElementById("board-sel").options[document.getElementById("board-sel").selectedIndex]?.text||"";
-  if(!currentProjectKey){alert("Please select a project.");return;}
-  saveAll();await doFetch(false);
-}
-
-async function doRefresh(){await doFetch(true);}
-
-async function doFetch(silent=false){
-  const rb=document.getElementById("refresh-btn");
-  rb.disabled=true;rb.innerHTML=spin(13)+" Refresh";
-  document.getElementById("go-btn").disabled=true;
-  if(!silent){showPage("loading","flex");document.getElementById("loading-msg").textContent="Fetching "+currentProjectKey+" from Jira…";}
-  try{
-    allIssues=await fetchIssues(currentProjectKey);
-    commentsCache={};
-    populatePeopleFilter();updateStats();renderMain();
-    const now=new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
-    const st=document.getElementById("sync-time");
-    st.textContent=currentProjectKey+(currentBoardName?" · "+currentBoardName:"")+" · Synced "+now;st.style.display="inline";
-    const jl=document.getElementById("jira-link");
-    jl.href=currentBoardId?cfg.url+"/jira/software/c/projects/"+currentProjectKey+"/boards/"+currentBoardId:cfg.url+"/jira/software/projects/"+currentProjectKey;
-    jl.style.display="inline";
-  }catch(e){
-    showPage("error","flex");
-    document.getElementById("error-msg").textContent=e.message;
-  }
-  rb.disabled=false;rb.innerHTML="↻ Refresh";
-  document.getElementById("go-btn").disabled=false;
-  document.getElementById("refresh-btn").disabled=false;
-}
-
-/* ─── Render ────────────────────────────────── */
-function populatePeopleFilter(){
-  const sel=document.getElementById("person-filter"),cur=sel.value;
-  sel.innerHTML='<option value="">All people</option>';
-  [...new Set(allIssues.map(i=>i.assignee).filter(a=>a!=="Unassigned"))].sort()
-    .forEach(p=>{const o=document.createElement("option");o.value=p;o.textContent=p;if(p===cur)o.selected=true;sel.appendChild(o);});
-}
-
-function updateStats(){
-  const m=allIssues.map(gm);
-  document.getElementById("cnt-ip").textContent=m.filter(i=>i.status==="In Progress").length;
-  document.getElementById("cnt-sel").textContent=m.filter(i=>i.status==="Selected").length;
-  document.getElementById("cnt-back").textContent=m.filter(i=>i.status==="Backlog").length;
-  document.getElementById("cnt-done").textContent=m.filter(i=>i.status==="Done").length;
-}
-
-function setView(v){currentView=v;document.querySelectorAll("#view-seg button").forEach((b,i)=>b.classList.toggle("active",["board","people","done"][i]===v));renderMain();}
-function setLevel(l){currentLevel=l;document.querySelectorAll("#level-seg button").forEach((b,i)=>b.classList.toggle("active",["epics","all"][i]===l));renderMain();}
-
-function renderMain(){
-  if(!allIssues.length)return;
-  const f=filtered();
-  if(currentView==="board"){showPage("board","grid");renderBoard(f.filter(i=>i.status!=="Done"));}
-  else if(currentView==="people"){showPage("people","flex");renderPeople(f.filter(i=>i.status!=="Done"));}
-  else{showPage("done","flex");renderDone(allIssues.map(gm).filter(i=>{
-    const p=document.getElementById("person-filter").value,s=document.getElementById("search-input").value.toLowerCase();
-    if(p&&i.assignee!==p)return false;if(s&&!i.summary.toLowerCase().includes(s)&&!i.key.toLowerCase().includes(s))return false;
-    return i.status==="Done";
-  }));}
-  updateStats();
-}
-
-function cardHtml(i){
-  const lc=i.type==="Initiative"?"#8F6AC8":i.type==="Milestone"?"#2E99CE":"#5E8E38";
-  const par=i.parent_key?`<span style="font-size:10px;color:#C9CACC">↑</span>${klink(i.parent_key)}${i.parent_summary?`<span style="font-size:10px;color:#C9CACC">· ${i.parent_summary.slice(0,26)}${i.parent_summary.length>26?"…":""}</span>`:""}`:""
-  return`<div class="card" style="border-left:3px solid ${lc}" onclick="openDrawer('${i.key}')">
-    <div class="card-keyrow">${klink(i.key)}${par}</div>
-    <div class="card-summary">${i.summary}</div>
-    <div class="card-meta">${tbadge(i.type)}${pbadge(i.priority)}<div style="margin-left:auto">${ava(i.assignee,22)}</div></div>
+/* ════════════════════════════════════════════
+   CARD HTML
+════════════════════════════════════════════ */
+function cardHtml(issue, showActiveBtn=false, compact=false) {
+  const isActive = activeFlags[issue.assignee] === issue.key;
+  const lc = TC[issue.type] ? (TC[issue.type].c) : "#5E8E38";
+  const par = issue.parent_key
+    ? `<span style="font-size:10px;color:#C9CACC">↑</span>${klink(issue.parent_key)}${issue.parent_summary ? `<span style="font-size:10px;color:#C9CACC">· ${issue.parent_summary.slice(0,22)}${issue.parent_summary.length>22?"…":""}</span>` : ""}`
+    : "";
+  const activeBtnHtml = showActiveBtn
+    ? `<button class="active-btn ${isActive?"is-active":""}" onclick="event.stopPropagation();toggleActive('${issue.assignee.replace(/'/g,"\\'")}','${issue.key}')" title="${isActive?"Clear active":"Set as actively working on"}">${isActive?"● Active":"○ Set active"}</button>`
+    : "";
+  return `<div class="card ${isActive?"is-active":""}" style="border-left:3px solid ${lc}" onclick="openDrawer('${issue.key}')">
+    ${activeBtnHtml}
+    <div class="card-keyrow">${klink(issue.key)}${par}</div>
+    <div class="card-summary">${issue.summary}</div>
+    <div class="card-meta">${tbadge(issue.type)}${pbadge(issue.priority)}${compact?"":ava(issue.assignee,20)}</div>
   </div>`;
 }
 
-function renderBoard(issues){
-  [["In Progress","ip"],["Selected","sel"],["Backlog","back"]].forEach(([s,sfx])=>{
-    const items=issues.filter(i=>i.status===s).sort((a,b)=>PO[a.priority]-PO[b.priority]);
-    document.getElementById("lc-"+sfx).textContent=items.length;
-    document.getElementById("lb-"+sfx).innerHTML=items.length?items.map(cardHtml).join(""):'<div style="text-align:center;padding:28px;font-size:12px;color:#C9CACC">No items</div>';
-  });
+async function toggleActive(personName, issueKey) {
+  const current = activeFlags[personName];
+  if (current === issueKey) {
+    await clearActiveFlag(personName);
+  } else {
+    await setActiveFlag(personName, issueKey);
+  }
 }
 
-function renderPeople(issues){
-  const people=[...new Set(issues.map(i=>i.assignee).filter(a=>a!=="Unassigned"))].sort();
-  document.getElementById("page-people").innerHTML=people.map(p=>{
-    const pi=issues.filter(i=>i.assignee===p);
-    const ip=pi.filter(i=>i.status==="In Progress"),sel=pi.filter(i=>i.status==="Selected"),back=pi.filter(i=>i.status==="Backlog");
-    const open=expandState[p]!==false;
-    const stats=[ip.length?`<span class="badge" style="background:#E0F0F8;color:#185FA5">${ip.length} active</span>`:"",sel.length?`<span class="badge" style="background:#F1F7EC;color:#3B6D11">${sel.length} next</span>`:"",back.length?`<span class="badge" style="background:#EEF1F3;color:#73777C">${back.length} backlog</span>`:""].join("");
-    const rows=[...ip,...sel,...back].map(i=>`<div class="issue-row" onclick="openDrawer('${i.key}')">
-      ${spill(i.status)}${klink(i.key)}
-      ${i.parent_key?`<span style="font-size:10px;color:#C9CACC;font-family:monospace;flex-shrink:0">↑${i.parent_key}</span>`:""}
-      <span class="issue-sum">${i.summary}</span>${pbadge(i.priority)}
-    </div>`).join("");
-    return`<div class="person-card">
-      <div class="person-hdr" onclick="togglePerson('${p.replace(/'/g,"\\'")}')" style="${open?"border-bottom:1px solid #E4E6E8":""}">
-        ${ava(p,30)}<span style="font-size:13px;font-weight:700">${p}</span>
+/* ════════════════════════════════════════════
+   INIT & FETCH
+════════════════════════════════════════════ */
+function showPage(name) {
+  ["welcome","loading","error","mytasks","manager","people","done"].forEach(p => {
+    const el = document.getElementById("page-"+p);
+    if (el) el.style.display = "none";
+  });
+  const el = document.getElementById("page-"+name);
+  if (el) el.style.display = "flex";
+  if (name === "manager") el.style.display = "block";
+  if (name === "mytasks") el.style.display = "flex";
+}
+
+async function init() {
+  populateIamSelector();
+  try {
+    const projects = await fetchProjects();
+    const sel = document.getElementById("proj-filter");
+    sel.innerHTML = '<option value="">All projects</option>' +
+      projects.map(p => `<option value="${p.key}" ${p.key===currentProjFilter?"selected":""}>${p.key} — ${p.name}</option>`).join("");
+  } catch {}
+  if (currentIam) {
+    document.getElementById("iam-sel").value = currentIam;
+    await doFetch(false);
+  } else {
+    showPage("welcome");
+  }
+}
+
+async function doFetch(silent=false) {
+  const rb = document.getElementById("refresh-btn");
+  rb.disabled = true; rb.innerHTML = spinHtml(13) + " Refresh";
+  if (!silent) showPage("loading");
+  document.getElementById("loading-msg").textContent = "Loading team tasks from Jira…";
+  try {
+    allIssues = await fetchAllTeamIssues();
+    await loadActiveFlags();
+    updateStats();
+    renderMain();
+    const now = new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+    const st = document.getElementById("sync-time");
+    st.textContent = "Synced " + now; st.style.display = "inline";
+    document.getElementById("jira-link").style.display = "inline";
+  } catch(e) {
+    showPage("error");
+    document.getElementById("error-msg").textContent = e.message;
+  }
+  rb.disabled=false; rb.innerHTML="↻ Refresh";
+}
+
+async function doRefresh() { await doFetch(true); }
+
+function onIamChange() {
+  currentIam = document.getElementById("iam-sel").value;
+  saveAll();
+  updateManagerVisibility();
+  if (currentIam) doFetch(false);
+  else showPage("welcome");
+}
+
+function onProjFilter() {
+  currentProjFilter = document.getElementById("proj-filter").value;
+  saveAll();
+  if (currentIam) doFetch(false);
+}
+
+function populateIamSelector() {
+  const sel = document.getElementById("iam-sel");
+  sel.innerHTML = '<option value="">— select —</option>' +
+    teamMembers.map(m => `<option value="${m}" ${m===currentIam?"selected":""}>${m}</option>`).join("");
+}
+
+function renderIamSelector() {
+  populateIamSelector();
+}
+
+function updateManagerVisibility() {
+  const isAdmin = adminUsers.includes(cfg.email) || cfg.email === ADMIN_USER;
+  const btn = document.getElementById("btn-manager");
+  if (btn) btn.style.display = isAdmin ? "inline-block" : "none";
+  if (!isAdmin && currentView === "manager") {
+    currentView = "mytasks";
+    setView("mytasks");
+  }
+}
+
+/* ════════════════════════════════════════════
+   STATS
+════════════════════════════════════════════ */
+function updateStats() {
+  const m = allIssues.map(gm);
+  const ns = i => normStatus(i.status);
+  document.getElementById("cnt-ip").textContent  = m.filter(i=>ns(i)==="In Progress").length;
+  document.getElementById("cnt-sel").textContent = m.filter(i=>ns(i)==="Selected").length;
+  document.getElementById("cnt-back").textContent= m.filter(i=>ns(i)==="Backlog").length;
+  document.getElementById("cnt-done").textContent= m.filter(i=>ns(i)==="Done").length;
+}
+
+/* ════════════════════════════════════════════
+   VIEW SWITCHING
+════════════════════════════════════════════ */
+function setView(v) {
+  currentView=v;
+  document.querySelectorAll("#view-seg button").forEach(b=>b.classList.remove("active"));
+  const btns = document.querySelectorAll("#view-seg button");
+  const map = {mytasks:0,people:1,done:2,manager:3};
+  if(btns[map[v]]) btns[map[v]].classList.add("active");
+  saveAll();
+  renderMain();
+}
+function setLevel(l) {
+  currentLevel=l;
+  document.querySelectorAll("#level-seg button").forEach((b,i)=>b.classList.toggle("active",["all","epics","tasks"][i]===l));
+  saveAll();
+  renderMain();
+}
+
+function renderMain() {
+  if (!allIssues.length) return;
+  if (currentView === "mytasks") { showPage("mytasks"); renderMyTasks(); }
+  else if (currentView === "manager") { showPage("manager"); renderManager(); }
+  else if (currentView === "people") { showPage("people"); renderPeople(); }
+  else { showPage("done"); renderDone(); }
+  updateStats();
+}
+
+/* ════════════════════════════════════════════
+   MY TASKS VIEW (Status rows × Priority cols)
+════════════════════════════════════════════ */
+const STATUS_ROWS = ["Done","In Progress","Selected","Backlog"];
+const PRI_COLS = ["Highest","High","Medium","Low"];
+
+function renderMyTasks() {
+  const person = currentIam || null;
+  const issues = getFiltered(person);
+  const table = document.getElementById("matrix-table");
+  const ns = i => normStatus(i.status);
+
+  let html = `<thead><tr>
+    <th style="min-width:110px;text-align:left">Status</th>
+    ${PRI_COLS.map(p=>`<th class="pri-${p}">${p}</th>`).join("")}
+  </tr></thead><tbody>`;
+
+  STATUS_ROWS.forEach(rowStatus => {
+    const rowIssues = issues.filter(i => ns(i) === rowStatus);
+    const collapsed = rowCollapsed[rowStatus];
+    const statusCfg = SC[rowStatus] || SC.Backlog;
+    const countBadge = `<span style="font-size:10px;background:${statusCfg.bg};color:${statusCfg.c};border-radius:10px;padding:1px 7px;font-weight:700">${rowIssues.length}</span>`;
+
+    html += `<tr class="row-hdr" onclick="toggleRowCollapse('${rowStatus}')">
+      <td colspan="5">
+        <span class="collapse-chevron ${collapsed?"":"open"}">›</span>
+        <span style="color:${statusCfg.c}">${rowStatus}</span>
+        ${countBadge}
+        ${rowStatus==="Done"?'<span style="font-size:10px;color:#9EA0A4;margin-left:4px">(last 14 days)</span>':""}
+      </td>
+    </tr>`;
+
+    if (!collapsed) {
+      const showActive = !!(currentIam);
+      html += `<tr>`;
+      // status label column (empty in data rows)
+      html += `<td class="matrix-cell" style="width:110px"></td>`;
+      PRI_COLS.forEach(pri => {
+        const cell = rowIssues
+          .filter(i => i.priority === pri)
+          .sort((a,b) => a.summary.localeCompare(b.summary));
+        html += `<td class="matrix-cell">
+          <div class="matrix-cell-inner">
+            ${cell.length ? cell.map(i=>cardHtml(i, showActive, true)).join("") : '<div style="font-size:11px;color:#E4E6E8;padding:4px">—</div>'}
+          </div>
+        </td>`;
+      });
+      html += `</tr>`;
+    }
+  });
+
+  html += "</tbody>";
+  table.innerHTML = html;
+}
+
+function toggleRowCollapse(status) {
+  rowCollapsed[status] = !rowCollapsed[status];
+  saveAll();
+  renderMyTasks();
+}
+
+/* ════════════════════════════════════════════
+   MANAGER VIEW (Person columns)
+════════════════════════════════════════════ */
+function renderManager() {
+  const wrap = document.getElementById("manager-wrap");
+  const ns = i => normStatus(i.status);
+  const statusOrder = {"In Progress":0,"Selected":1,"Backlog":2,"Done":3};
+
+  wrap.innerHTML = teamMembers.map(person => {
+    const issues = getFiltered(person);
+    const activeKey = activeFlags[person];
+    const activeIssue = activeKey ? issues.find(i=>i.key===activeKey) : null;
+    const otherIssues = issues.filter(i=>i.key!==activeKey)
+      .sort((a,b)=>(statusOrder[ns(a)]||0)-(statusOrder[ns(b)]||0));
+
+    const activeHtml = activeIssue ? `
+      <div class="active-card-wrap">
+        <div class="active-card-inner">
+          <div class="active-label">● Actively working on</div>
+          <div style="font-size:11px;font-weight:700;color:#292E37;margin-bottom:4px">${activeIssue.summary}</div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap">${tbadge(activeIssue.type)}${pbadge(activeIssue.priority)}${spill(activeIssue.status)}</div>
+          <div style="margin-top:4px">${klink(activeIssue.key)}</div>
+        </div>
+      </div>` : `<div style="font-size:11px;color:#C9CACC;padding:4px 0 8px;font-style:italic">Nothing marked active</div>`;
+
+    const ip = otherIssues.filter(i=>ns(i)==="In Progress");
+    const sel = otherIssues.filter(i=>ns(i)==="Selected");
+    const back = otherIssues.filter(i=>ns(i)==="Backlog");
+
+    const section = (label, items, color) => items.length ? `
+      <div style="font-size:10px;font-weight:700;color:${color};text-transform:uppercase;letter-spacing:.05em;margin:6px 0 3px">${label} (${items.length})</div>
+      ${items.slice(0,5).map(i=>cardHtml(i,false,true)).join("")}
+      ${items.length>5?`<div style="font-size:11px;color:#9EA0A4;padding:4px">+${items.length-5} more</div>`:""}
+    ` : "";
+
+    return `<div class="person-col">
+      <div class="person-col-hdr">
+        ${ava(person,28)}
+        <div>
+          <div class="person-col-name">${person}</div>
+          <div style="font-size:10px;color:#9EA0A4">${issues.length} items</div>
+        </div>
+      </div>
+      <div class="person-col-body">
+        ${activeHtml}
+        ${section("In progress", ip, "#2E99CE")}
+        ${section("Selected", sel, "#5E8E38")}
+        ${section("Backlog", back, "#9EA0A4")}
+        ${!ip.length&&!sel.length&&!back.length?'<div style="font-size:12px;color:#C9CACC;padding:4px;font-style:italic">No open items</div>':""}
+      </div>
+    </div>`;
+  }).join("");
+}
+
+/* ════════════════════════════════════════════
+   TEAM VIEW
+════════════════════════════════════════════ */
+function renderPeople() {
+  const el = document.getElementById("page-people");
+  el.innerHTML = teamMembers.map(person => {
+    const pi = getFiltered(person).filter(i=>normStatus(i.status)!=="Done");
+    const ip=pi.filter(i=>normStatus(i.status)==="In Progress");
+    const sel=pi.filter(i=>normStatus(i.status)==="Selected");
+    const back=pi.filter(i=>normStatus(i.status)==="Backlog");
+    const open = expandState[person] !== false;
+    const activeKey = activeFlags[person];
+    const stats = [
+      ip.length?`<span class="badge" style="background:#E0F0F8;color:#185FA5">${ip.length} active</span>`:"",
+      sel.length?`<span class="badge" style="background:#F1F7EC;color:#3B6D11">${sel.length} next</span>`:"",
+      back.length?`<span class="badge" style="background:#EEF1F3;color:#73777C">${back.length} backlog</span>`:""
+    ].join("");
+    const rows = [...ip,...sel,...back].map(i => {
+      const isActive = activeKey === i.key;
+      return `<div class="issue-row ${isActive?"is-active":""}" onclick="openDrawer('${i.key}')">
+        ${isActive?'<span style="font-size:9px;font-weight:700;color:#125462;background:#E0F0F8;padding:1px 5px;border-radius:8px">●</span>':""}
+        ${spill(i.status)}${klink(i.key)}
+        ${i.parent_key?`<span style="font-size:10px;color:#C9CACC;font-family:monospace">↑${i.parent_key}</span>`:""}
+        <span class="issue-sum">${i.summary}</span>${pbadge(i.priority)}
+      </div>`;
+    }).join("");
+    return `<div class="person-card">
+      <div class="person-hdr" onclick="togglePersonExpand('${person.replace(/'/g,"\\'")}')" style="${open?"border-bottom:1px solid #E4E6E8":""}">
+        ${ava(person,30)}<span style="font-size:13px;font-weight:700">${person}</span>
+        ${activeKey?'<span style="font-size:10px;background:#E0F0F8;color:#125462;border-radius:10px;padding:2px 7px;font-weight:700">● Active</span>':""}
         <div style="margin-left:auto;display:flex;gap:5px;align-items:center">${stats}<span style="font-size:16px;color:#C9CACC;transform:${open?"rotate(90deg)":"none"};display:inline-block;transition:.15s;margin-left:4px">›</span></div>
       </div>
       ${open?`<div class="person-body">${rows||'<div style="font-size:12px;color:#C9CACC;padding:4px 10px">No open items</div>'}</div>`:""}
     </div>`;
   }).join("");
 }
-function togglePerson(p){expandState[p]=expandState[p]===false?true:false;renderPeople(filtered().filter(i=>i.status!=="Done"));}
+function togglePersonExpand(p) { expandState[p]=expandState[p]===false?true:false; renderPeople(); }
 
-function renderDone(issues){
-  const sorted=[...issues].sort((a,b)=>b.updated.localeCompare(a.updated));
-  const byP=sorted.reduce((a,i)=>{(a[i.assignee]=a[i.assignee]||[]).push(i);return a;},{});
-  const el=document.getElementById("page-done");
-  if(!sorted.length){el.innerHTML='<div style="text-align:center;padding:48px;font-size:13px;color:#C9CACC">No done items</div>';return;}
-  el.innerHTML=Object.entries(byP).map(([p,items])=>`<div class="person-card">
+/* ════════════════════════════════════════════
+   DONE VIEW
+════════════════════════════════════════════ */
+function renderDone() {
+  const el = document.getElementById("page-done");
+  const done = getFiltered(null).filter(i=>normStatus(i.status)==="Done")
+    .sort((a,b)=>b.updated.localeCompare(a.updated));
+  const byP = done.reduce((a,i)=>{(a[i.assignee]=a[i.assignee]||[]).push(i);return a;},{});
+  if (!done.length) { el.innerHTML='<div style="text-align:center;padding:48px;font-size:13px;color:#C9CACC">No done items in last 14 days</div>'; return; }
+  el.innerHTML = Object.entries(byP).map(([p,items])=>`<div class="person-card">
     <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#F7F8F9;border-bottom:1px solid #E4E6E8">
       ${ava(p,28)}<span style="font-size:13px;font-weight:700">${p}</span>
       <span class="badge" style="margin-left:auto;background:#F4F4F5;color:#5F5E5A">${items.length} done</span>
@@ -529,16 +1058,21 @@ function renderDone(issues){
   </div>`).join("");
 }
 
-/* ─── Drawer ────────────────────────────────── */
-function openDrawer(key){
-  const i=allIssues.map(gm).find(i=>i.key===key);if(!i)return;
-  openIssue=i;renderDrawerHdr(i);setTab("details");
+/* ════════════════════════════════════════════
+   DRAWER
+════════════════════════════════════════════ */
+function openDrawer(key) {
+  const i = allIssues.map(gm).find(i=>i.key===key);
+  if (!i) return;
+  openIssue=i;
+  renderDrawerHdr(i); setTab("details");
   document.getElementById("drawer-overlay").classList.add("open");
 }
-function closeDrawer(){document.getElementById("drawer-overlay").classList.remove("open");openIssue=null;}
+function closeDrawer() { document.getElementById("drawer-overlay").classList.remove("open"); openIssue=null; }
 
-function renderDrawerHdr(i){
-  const par=i.parent_key?`<span style="font-size:11px;color:rgba(255,255,255,.5)">↑ <a href="${BASE()}${i.parent_key}" target="_blank" style="color:#8FC7E4;font-family:monospace">${i.parent_key}</a>${i.parent_summary?` · ${i.parent_summary.slice(0,30)}`:""}</span>`:"";
+function renderDrawerHdr(i) {
+  const par = i.parent_key ? `<span style="font-size:11px;color:rgba(255,255,255,.5)">↑ <a href="${BASE()}${i.parent_key}" target="_blank" style="color:#8FC7E4;font-family:monospace">${i.parent_key}</a>${i.parent_summary?` · ${i.parent_summary.slice(0,28)}`:""}</span>` : "";
+  const isActive = activeFlags[i.assignee] === i.key;
   document.getElementById("drawer-hdr").innerHTML=`
     <div style="display:flex;justify-content:space-between;align-items:flex-start">
       <div style="flex:1;margin-right:10px">
@@ -553,36 +1087,44 @@ function renderDrawerHdr(i){
     <div style="display:flex;align-items:center;gap:8px;margin-top:12px">
       ${ava(i.assignee,26)}<span style="font-size:12px;color:rgba(255,255,255,.75)">${i.assignee}</span>
       <span style="font-size:11px;color:rgba(255,255,255,.4);margin-left:auto">Updated ${i.updated}</span>
+    </div>
+    <div style="margin-top:10px">
+      <button onclick="toggleActive('${i.assignee.replace(/'/g,"\\'")}','${i.key}')" 
+        style="font-size:11px;padding:4px 12px;border-radius:12px;border:none;cursor:pointer;font-weight:700;${isActive?"background:#fff;color:#125462":"background:rgba(255,255,255,.2);color:#fff"}">
+        ${isActive?"● Currently active — click to clear":"○ Mark as actively working on"}
+      </button>
     </div>`;
 }
 
-function setTab(t){
+function setTab(t) {
   document.querySelectorAll("#drawer-tabs button").forEach((b,i)=>b.classList.toggle("active",["details","comments","edit"][i]===t));
-  if(t==="details")renderDetails();else if(t==="comments")renderComments();else renderEdit();
+  if(t==="details") renderDetails();
+  else if(t==="comments") renderComments();
+  else renderEdit();
 }
 
-function renderDetails(){
+function renderDetails() {
   const i=openIssue;
   document.getElementById("drawer-body").innerHTML=`
-    ${i.description?`<span class="field-label">Description</span><div class="desc-box">${i.description}</div>`:`<div style="font-size:13px;color:#9EA0A4;font-style:italic">No description on this issue.</div>`}
+    ${i.description?`<span class="field-label">Description</span><div class="desc-box">${i.description}</div>`:`<div style="font-size:13px;color:#9EA0A4;font-style:italic">No description.</div>`}
     <div class="meta-grid">
-      ${[["Key",i.key],["Type",i.type],["Status",i.status],["Priority",i.priority],["Assignee",i.assignee],["Updated",i.updated],["Parent key",i.parent_key||"—"],["Parent",(i.parent_summary||"—").slice(0,38)]]
+      ${[["Key",i.key],["Type",i.type],["Status",i.status],["Priority",i.priority],["Assignee",i.assignee],["Updated",i.updated],["Project",i.project||"—"],["Parent",(i.parent_summary||"—").slice(0,36)]]
         .map(([l,v])=>`<div class="meta-cell"><div class="meta-cell-label">${l}</div><div class="meta-cell-val">${v}</div></div>`).join("")}
     </div>`;
 }
 
-async function renderComments(){
+async function renderComments() {
   const key=openIssue.key;
-  document.getElementById("drawer-body").innerHTML=`<div style="display:flex;align-items:center;gap:8px;color:#9EA0A4">${spin()} Loading comments…</div>`;
+  document.getElementById("drawer-body").innerHTML=`<div style="display:flex;align-items:center;gap:8px;color:#9EA0A4">${spinHtml()} Loading comments…</div>`;
   if(!commentsCache[key]){try{commentsCache[key]=await fetchComments(key);}catch{commentsCache[key]=[];}}
   document.querySelectorAll("#drawer-tabs button")[1].textContent=`Comments (${commentsCache[key].length})`;
   const cmts=commentsCache[key].length
-    ?commentsCache[key].map(c=>`<div class="comment-item"><div style="display:flex;align-items:center;gap:7px;margin-bottom:6px">${ava(c.author,22)}<span style="font-size:12px;font-weight:700">${c.author}</span><span style="font-size:11px;color:#C9CACC;margin-left:auto">${c.created}</span></div><div style="font-size:13px;color:#292E37;line-height:1.55;white-space:pre-wrap">${c.body}</div></div>`).join("")
+    ?commentsCache[key].map(c=>`<div class="comment-item"><div style="display:flex;align-items:center;gap:7px;margin-bottom:6px">${ava(c.author,22)}<span style="font-size:12px;font-weight:700">${c.author}</span><span style="font-size:11px;color:#C9CACC;margin-left:auto">${c.created}</span></div><div style="font-size:13px;line-height:1.55;white-space:pre-wrap">${c.body}</div></div>`).join("")
     :`<div style="font-size:13px;color:#9EA0A4;font-style:italic">No comments yet.</div>`;
   document.getElementById("drawer-body").innerHTML=`
     <div style="display:flex;flex-direction:column;gap:8px">${cmts}</div>
     <div style="border-top:1px solid #EEF1F3;padding-top:14px">
-      <span class="field-label">Add comment to Jira</span>
+      <span class="field-label">Add comment</span>
       <textarea class="cmt-input" id="cmt-text" placeholder="Write a comment…"></textarea>
       <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
         <button class="post-btn" id="post-btn" onclick="submitComment('${key}')">Post to Jira</button>
@@ -591,47 +1133,52 @@ async function renderComments(){
     </div>`;
 }
 
-async function submitComment(key){
+async function submitComment(key) {
   const txt=document.getElementById("cmt-text").value.trim();if(!txt)return;
-  const btn=document.getElementById("post-btn");btn.disabled=true;btn.innerHTML=spin(13,"#fff")+" Posting…";
+  const btn=document.getElementById("post-btn");btn.disabled=true;btn.innerHTML=spinHtml(13,"#fff")+" Posting…";
   const ok=await postComment(key,txt);
   const msg=document.getElementById("post-msg");
   if(ok){msg.textContent="Posted ✓";msg.style.color="#5E8E38";delete commentsCache[key];await renderComments();doFetch(true);}
-  else{msg.textContent="Failed — check Jira permissions";msg.style.color="#D6202B";btn.disabled=false;btn.innerHTML="Post to Jira";}
-  setTimeout(()=>{if(msg)msg.textContent="";},3500);
+  else{msg.textContent="Failed";msg.style.color="#D6202B";btn.disabled=false;btn.innerHTML="Post to Jira";}
+  setTimeout(()=>{if(msg)msg.textContent="";},3000);
 }
 
-function renderEdit(){
+function renderEdit() {
   const i=openIssue;
   const sOpts=Object.entries(SC).map(([s,c])=>`<button class="edit-option" style="${i.status===s?`border:2px solid ${c.c};background:${c.bg};color:${c.c}`:""}" onclick="doEditStatus('${s}')">${s}</button>`).join("");
   const pOpts=Object.keys(PC).map(p=>{const c=PC[p];return`<button class="edit-option" style="${i.priority===p?`border:2px solid ${c.d};background:${c.bg};color:${c.c}`:""}" onclick="doEditPriority('${p}')">${p}</button>`;}).join("");
   document.getElementById("drawer-body").innerHTML=`
     <div><span class="field-label">Status</span><div style="display:flex;gap:8px;flex-wrap:wrap">${sOpts}</div></div>
     <div><span class="field-label">Priority</span><div style="display:flex;gap:8px;flex-wrap:wrap">${pOpts}</div></div>
-    <div style="font-size:12px;color:#9EA0A4;background:#F7F8F9;border-radius:6px;padding:8px 10px">Status changes trigger Jira workflow transitions. Priority updates the field directly. Board refreshes after each change.</div>`;
+    <div style="font-size:12px;color:#9EA0A4;background:#F7F8F9;border-radius:6px;padding:8px 10px">Changes push to Jira immediately.</div>`;
 }
 
-async function doEditStatus(val){
-  locStat[openIssue.key]=val;openIssue={...openIssue,status:val};saveAll();
-  renderDrawerHdr(openIssue);renderEdit();updateStats();renderMain();
-  await transitionIssue(openIssue.key,val);setTimeout(()=>doFetch(true),1500);
+async function doEditStatus(val) {
+  locStat[openIssue.key]=val; openIssue={...openIssue,status:val}; saveAll();
+  renderDrawerHdr(openIssue); renderEdit(); updateStats(); renderMain();
+  await transitionIssue(openIssue.key,val); setTimeout(()=>doFetch(true),1500);
 }
-async function doEditPriority(val){
-  locPri[openIssue.key]=val;openIssue={...openIssue,priority:val};saveAll();
-  renderDrawerHdr(openIssue);renderEdit();renderMain();
-  await updatePriority(openIssue.key,val);setTimeout(()=>doFetch(true),1500);
+async function doEditPriority(val) {
+  locPri[openIssue.key]=val; openIssue={...openIssue,priority:val}; saveAll();
+  renderDrawerHdr(openIssue); renderEdit(); renderMain();
+  await updatePriority(openIssue.key,val); setTimeout(()=>doFetch(true),1500);
 }
 
-/* ─── Boot ──────────────────────────────────── */
+/* ════════════════════════════════════════════
+   BOOT
+════════════════════════════════════════════ */
 loadAll();
-if(cfg.email&&cfg.token&&cfg.url){
-  document.getElementById("setup-overlay").style.display="none";
-  loadProjects().then(()=>{
-    if(currentProjectKey&&currentBoardId){
-      setTimeout(()=>{document.getElementById("board-sel").value=currentBoardId;doLoad();},600);
-    }
-  });
-}else{
+document.getElementById("iam-sel").value = currentIam || "";
+
+// Set initial level button state
+document.querySelectorAll("#level-seg button").forEach((b,i)=>
+  b.classList.toggle("active",["all","epics","tasks"][i]===currentLevel));
+
+if (cfg.email && cfg.token && cfg.url) {
+  document.getElementById("setup-overlay").style.display = "none";
+  updateManagerVisibility();
+  init();
+} else {
   showSetup();
 }
 </script>
