@@ -298,7 +298,7 @@ button,select,textarea,input{font-family:inherit}
   </div>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v38</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v39</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -447,18 +447,19 @@ let currentIam="", currentProjFilter="", currentGroup="";
 let openIssue=null, paneTab="main", commentsCache={}, subtasksCache={};
 let expandState={}, rowCollapsed={Done:true,"In Progress":false,Selected:false,Backlog:false};
 let teamMembers=[...DEFAULT_TEAM], adminUsers=[ADMIN_EMAIL];
-let groups={}, excludedProjects=[];
+let groups={}, excludedProjects=[], groupProjectAssignment={};
 let activeFlags={};
 const gm=i=>({...i,status:locStat[i.key]||i.status,priority:locPri[i.key]||i.priority});
-let settingsTab="team";
+let settingsTab="projects";
 let createDefaults={};
 let allProjects=[];
 let dragKey=null;
 
 /* ══ PERSISTENCE ══ */
-function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed}));}catch{}}
+function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,groupProjectAssignment,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed}));}catch{}}
 function loadAll(){try{const d=JSON.parse(localStorage.getItem(STOR)||"{}");if(d.cfg)cfg=d.cfg;if(d.locStat)locStat=d.locStat;if(d.locPri)locPri=d.locPri;if(d.currentIam)currentIam=d.currentIam;if(d.currentProjFilter)currentProjFilter=d.currentProjFilter;
-if(d.currentProjectGroup)currentProjectGroup=d.currentProjectGroup;if(d.currentGroup)currentGroup=d.currentGroup;if(d.teamMembers)teamMembers=d.teamMembers;if(d.adminUsers)adminUsers=d.adminUsers;if(d.groups)groups=d.groups;if(d.excludedProjects)excludedProjects=d.excludedProjects;if(d.currentView)currentView=d.currentView;if(d.currentLevel)currentLevel=d.currentLevel;if(d.rowCollapsed)rowCollapsed={...rowCollapsed,...d.rowCollapsed};if(d.swimCollapsed)swimCollapsed={...swimCollapsed,...d.swimCollapsed};}catch{}}
+if(d.currentProjectGroup)currentProjectGroup=d.currentProjectGroup;if(d.currentGroup)currentGroup=d.currentGroup;if(d.teamMembers)teamMembers=d.teamMembers;if(d.adminUsers)adminUsers=d.adminUsers;if(d.groups)groups=d.groups;
+if(d.groupProjectAssignment)groupProjectAssignment=d.groupProjectAssignment;if(d.excludedProjects)excludedProjects=d.excludedProjects;if(d.currentView)currentView=d.currentView;if(d.currentLevel)currentLevel=d.currentLevel;if(d.rowCollapsed)rowCollapsed={...rowCollapsed,...d.rowCollapsed};if(d.swimCollapsed)swimCollapsed={...swimCollapsed,...d.swimCollapsed};}catch{}}
 
 /* ══ KV (active flags) ══ */
 async function kvSet(k,v){
@@ -649,7 +650,16 @@ async function doFetch(silent=false){
 
 async function doRefresh(){await doFetch(true);}
 function onIamChange(){currentIam=document.getElementById("iam-sel").value;saveAll();updateManagerVisibility();if(currentIam)doFetch(false);else showPage("welcome");}
-function onGroupChange(){currentGroup=document.getElementById("group-sel").value;saveAll();if(currentIam)renderMain();}
+function onGroupChange(){
+  currentGroup=document.getElementById("group-sel").value;
+  if(currentGroup && groupProjectAssignment[currentGroup]){
+    currentProjectGroup=groupProjectAssignment[currentGroup];
+    populateProjGroupSelector();
+    populateProjFilter();
+  }
+  saveAll();
+  if(currentIam) doFetch(false);
+}
 function onProjFilter(){currentProjFilter=document.getElementById("proj-filter").value;saveAll();if(currentIam)doFetch(false);}
 
 function populateIamSelector(){const sel=document.getElementById("iam-sel");sel.innerHTML='<option value="">— select —</option>'+teamMembers.map(m=>`<option value="${m}" ${m===currentIam?"selected":""}>${m}</option>`).join("");}
@@ -1470,14 +1480,30 @@ async function renderMyEpics() {
       return;
     }
 
-    // Fetch ALL tasks for user's epics
+    // Fetch ALL tasks for user's epics - including tasks under child issues
     const epicKeys = myEpics.map(e=>e.key);
     try {
-      const jql = 'parent in ('+epicKeys.join(',')+')'+ ' ORDER BY rank ASC';
+      // Get direct children first
+      const jql = 'issueType in (Task,Sub-task,Story,Bug,Milestone) AND parent in ('+epicKeys.join(',')+')'+ ' ORDER BY rank ASC';
       const td = await jiraGet('/rest/api/3/search/jql?jql='+encodeURIComponent(jql)+'&fields=summary,status,assignee,priority,issuetype,updated,parent&maxResults=200');
       myEpicsTasks = (td.issues||[]).map(parseIssue);
+      // Also include any tasks from allIssues whose ancestry includes these epics
+      // (for tasks that may have been loaded already)
+      const extraTasks = allIssues.filter(i=>{
+        if(['Epic','Initiative','Legend','Milestone'].includes(i.type)) return false;
+        if(myEpicsTasks.find(t=>t.key===i.key)) return false;
+        // Walk up to see if any ancestor is one of our epics
+        let cur = i;
+        for(let d=0;d<4;d++){
+          if(!cur.parent_key) return false;
+          if(epicKeys.includes(cur.parent_key)) return true;
+          cur = allIssues.find(x=>x.key===cur.parent_key)||{};
+        }
+        return false;
+      });
+      myEpicsTasks = [...myEpicsTasks, ...extraTasks];
     } catch {
-      myEpicsTasks = allIssues.filter(i=>['Task','Sub-task'].includes(i.type)&&epicKeys.includes(i.parent_key));
+      myEpicsTasks = allIssues.filter(i=>!['Epic','Initiative','Legend','Milestone'].includes(i.type)&&epicKeys.includes(i.parent_key));
     }
 
     window._myEpics = myEpics;
@@ -1498,10 +1524,18 @@ function renderMyEpicsBoard() {
   const unassignedOnly = document.getElementById('unassigned-filter')?.checked||false;
   const search = (document.getElementById('search-input')?.value||'').toLowerCase();
 
-  const hierLink = (key,label,color,bg) => key
-    ? `<a href="${BASE()}${key}" target="_blank" onclick="event.stopPropagation()"
-        style="font-size:9px;font-weight:700;color:${color};background:${bg};padding:2px 6px;border-radius:3px;text-decoration:none;white-space:nowrap;display:inline-block;margin-right:3px">${key}${label?' · '+label.slice(0,18):''}</a>`
-    : '';
+  // Helper: walk up allIssues to find ancestor of a given type
+  const findAncestorOfType = (issue, types) => {
+    let cur = issue;
+    for(let depth=0; depth<5; depth++){
+      if(!cur || !cur.parent_key) return null;
+      const par = allIssues.find(x=>x.key===cur.parent_key);
+      if(!par) return null;
+      if(types.includes(par.type)) return par;
+      cur = par;
+    }
+    return null;
+  };
 
   el.innerHTML = '';
   myEpics.forEach(epic => {
@@ -1512,44 +1546,45 @@ function renderMyEpicsBoard() {
     if(search) tasks=tasks.filter(t=>t.summary.toLowerCase().includes(search)||t.key.toLowerCase().includes(search));
 
     const sc = SC[epic.status]||SC.Backlog;
-    const parent = allIssues.find(x=>x.key===epic.parent_key);
-    const grandparent = parent?allIssues.find(x=>x.key===parent.parent_key):null;
-    const greatgrand = grandparent?allIssues.find(x=>x.key===grandparent.parent_key):null;
+
+    // Determine hierarchy by actual TYPE, not depth
+    const legendIssue   = findAncestorOfType(epic, ['Legend']);
+    const initIssue     = findAncestorOfType(epic, ['Initiative']);
+    // The epic itself may be an Initiative or Legend - show what it is
+    const colType = epic.type; // "Epic", "Initiative", "Milestone", etc.
+
+    // Build hierarchy row helper - fixed height slot
+    const hierRow = (label, issue, color, bg) => {
+      const content_html = issue
+        ? `<a href="${BASE()}${issue.key}" target="_blank" onclick="event.stopPropagation()"
+            style="font-size:10px;font-weight:700;color:${color};background:${bg};padding:2px 7px;
+            border-radius:3px;text-decoration:none;overflow:hidden;text-overflow:ellipsis;
+            white-space:nowrap;max-width:170px;display:inline-block"
+            title="${issue.summary}">${issue.key} · ${issue.summary.slice(0,22)}${issue.summary.length>22?'…':''}</a>`
+        : `<span style="font-size:10px;color:#C9CACC;font-style:italic">—</span>`;
+      return `<div style="display:flex;align-items:center;gap:6px;height:22px">
+        <span style="font-size:9px;font-weight:700;color:#73777C;text-transform:uppercase;letter-spacing:.04em;min-width:58px;flex-shrink:0">${label}</span>
+        ${content_html}
+      </div>`;
+    };
 
     const col = document.createElement('div');
     col.className = 'pri-epic-col';
     col.innerHTML = `
-      <div class="pri-epic-hdr" style="background:#F0F9FF;border-bottom:2px solid #2E99CE;min-height:120px;display:flex;flex-direction:column;justify-content:space-between">
-        <!-- Hierarchy: Legend → Initiative → Epic -->
-        <div style="display:flex;flex-direction:column;gap:3px;margin-bottom:6px">
-          ${greatgrand?`<div style="display:flex;align-items:center;gap:4px">
-            <span style="font-size:9px;font-weight:700;color:#73777C;min-width:52px">Legend</span>
-            <a href="${BASE()}${greatgrand.key}" target="_blank" onclick="event.stopPropagation()"
-              style="font-size:10px;font-weight:700;color:#9A4500;background:#FFF0E6;padding:1px 6px;border-radius:3px;text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px"
-              title="${greatgrand.summary}">${greatgrand.key} · ${greatgrand.summary.slice(0,22)}${greatgrand.summary.length>22?'…':''}</a>
-          </div>`:''}
-          ${grandparent?`<div style="display:flex;align-items:center;gap:4px">
-            <span style="font-size:9px;font-weight:700;color:#73777C;min-width:52px">Initiative</span>
-            <a href="${BASE()}${grandparent.key}" target="_blank" onclick="event.stopPropagation()"
-              style="font-size:10px;font-weight:700;color:#6B3FA0;background:#F3EEFF;padding:1px 6px;border-radius:3px;text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px"
-              title="${grandparent.summary}">${grandparent.key} · ${grandparent.summary.slice(0,22)}${grandparent.summary.length>22?'…':''}</a>
-          </div>`:''}
-          ${parent&&!grandparent?`<div style="display:flex;align-items:center;gap:4px">
-            <span style="font-size:9px;font-weight:700;color:#73777C;min-width:52px">Initiative</span>
-            <a href="${BASE()}${parent.key}" target="_blank" onclick="event.stopPropagation()"
-              style="font-size:10px;font-weight:700;color:#6B3FA0;background:#F3EEFF;padding:1px 6px;border-radius:3px;text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px"
-              title="${parent.summary}">${parent.key} · ${parent.summary.slice(0,22)}${parent.summary.length>22?'…':''}</a>
-          </div>`:''}
+      <div class="pri-epic-hdr" style="background:#F0F9FF;border-bottom:2px solid #2E99CE;display:flex;flex-direction:column;padding:10px 12px;gap:4px">
+        <!-- Fixed-height hierarchy rows: Legend, Initiative, then the column type -->
+        ${hierRow('Legend',   legendIssue,  '#9A4500', '#FFF0E6')}
+        ${hierRow('Initiative', initIssue && initIssue.key !== (legendIssue?.key) ? initIssue : (epic.type==='Initiative'?null:initIssue), '#6B3FA0', '#F3EEFF')}
+        <!-- Divider -->
+        <div style="border-top:1px solid #C8E6F7;margin:3px 0"></div>
+        <!-- Column issue - larger -->
+        <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:2px">
+          <span style="font-size:9px;font-weight:700;color:#73777C;text-transform:uppercase;letter-spacing:.04em;min-width:58px;flex-shrink:0">${colType}</span>
+          <a href="${BASE()}${epic.key}" target="_blank" onclick="event.stopPropagation()"
+            style="font-size:10px;font-family:monospace;color:#125462;font-weight:700;text-decoration:none">${epic.key} ↗</a>
         </div>
-        <!-- Epic - prominent -->
-        <div style="margin-bottom:6px;border-top:1px solid #C8E6F7;padding-top:6px">
-          <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px">
-            <span style="font-size:9px;font-weight:700;color:#73777C;min-width:52px">Epic</span>
-            <a href="${BASE()}${epic.key}" target="_blank" onclick="event.stopPropagation()"
-              style="font-size:10px;font-family:monospace;color:#125462;font-weight:700;text-decoration:none">${epic.key} ↗</a>
-          </div>
-          <div style="font-size:14px;font-weight:700;color:#125462;line-height:1.3">${epic.summary}</div>
-        </div>
+        <div style="font-size:14px;font-weight:700;color:#125462;line-height:1.3;margin-bottom:6px">${epic.summary}</div>
+        <!-- Status / badges -->
         <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
           <span class="badge" style="background:${sc.bg};color:${sc.c}">${epic.status}</span>
           ${pbadge(epic.priority)}
@@ -2104,9 +2139,9 @@ function getActiveProjectsJQL() {
 function openSettings(tab){
   settingsTab=tab||"projects";
   document.getElementById("settings-overlay").classList.add("open");
-  // Always reload project groups from KV before rendering
   loadProjectGroups().then(()=>{
     renderSettings();
+    populateProjGroupSelector();
   });
 }
 function closeSettings(){
@@ -2215,11 +2250,19 @@ function renderSettings(){
             </div>
             ${activeGrp ? `
             <div>
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
                 <span style="font-size:14px;font-weight:700">${activeGrp}</span>
                 <button data-grp="${activeGrp.replace(/"/g,'&quot;')}" onclick="const g=this.getAttribute('data-grp');deleteGroup(g);window._activeGrpTab=null;renderSettings()"
                   style="border:1px solid #D6202B;color:#D6202B;background:none;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:12px">Delete team</button>
-              </div>
+              
+              <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#F7F8F9;border-radius:8px;margin-bottom:12px">
+                <span style="font-size:12px;color:#73777C;white-space:nowrap">Project group:</span>
+                <select data-grp="${activeGrp}" onchange="groupProjectAssignment[this.getAttribute('data-grp')]=this.value;saveAll()"
+                  style="flex:1;font-size:12px;padding:4px 8px;border:1px solid #C9CACC;border-radius:6px;background:#fff">
+                  <option value="">None (use global setting)</option>
+                  ${Object.keys(projectGroups).map(pg=>{const s=(groupProjectAssignment[activeGrp]||"")=== pg?"selected":"";return \`<option value="${pg}" \${s}>${pg}</option>\`;}).join("")}
+                </select>
+              </div></div>
               <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Search to add members</div>
               <input class="form-input" id="grp-search-input" placeholder="Search Jira users by name or email…"
                 data-grpname="${activeGrp}" oninput="searchGroupUsers(this.getAttribute('data-grpname'),this.value)" style="margin-bottom:8px">
@@ -2269,13 +2312,13 @@ function renderSettings(){
 }
 
 
-function createNewProjectGroup(){
+async function createNewProjectGroup(){
   const el=document.getElementById("new-pg-name");
   const name=el?el.value.trim():"";
   if(!name)return;
   if(projectGroups[name]){alert('A group called "'+name+'" already exists.');return;}
   projectGroups[name]=[];
-  saveProjectGroup(name,[]);
+  await saveProjectGroup(name,[]);
   window._activePGTab=name;
   if(el) el.value="";
   renderSettings();
