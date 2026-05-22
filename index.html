@@ -247,7 +247,7 @@ button,select,textarea,input{font-family:inherit}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <img src="https://raw.githubusercontent.com/82ybgh47w9-wq/loopup-jira-board/main/logo.png" height="28" style="flex-shrink:0" onerror="this.style.display='none'">
+  <img src="https://raw.githubusercontent.com/82ybgh47w9-wq/loopup-jira-board/main/logo.png" height="28" style="flex-shrink:0;background:#fff;border-radius:4px;padding:2px" onerror="this.style.display='none'">
   <span style="font-size:14px;font-weight:700;white-space:nowrap;color:#292E37">Jira</span>
   <div class="divider"></div>
   <span style="font-size:11px;color:#9EA0A4;white-space:nowrap">I am</span>
@@ -1497,7 +1497,7 @@ function renderCreateBody(){
     <div id="create-msg" style="font-size:12px;min-height:18px"></div>`;
 }
 
-let epicSearchTimer=null;
+epicSearchTimer=null;
 function debouncedEpicSearch(){clearTimeout(epicSearchTimer);epicSearchTimer=setTimeout(triggerEpicSearch,800);}
 async function triggerEpicSearch(){
   const summary=document.getElementById("ct-summary")?.value||"";
