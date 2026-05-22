@@ -257,7 +257,7 @@ button,select,textarea,input{font-family:inherit}
   <select class="proj-select" id="proj-filter" onchange="onProjFilter()"><option value="">All projects</option></select>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v23</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v25</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -1439,15 +1439,36 @@ function renderMyEpicsBoard() {
     const col = document.createElement('div');
     col.className = 'pri-epic-col';
     col.innerHTML = `
-      <div class="pri-epic-hdr" style="background:#F0F9FF;border-bottom:2px solid #2E99CE;min-height:110px;display:flex;flex-direction:column;justify-content:space-between">
-        <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-bottom:5px">
-          ${greatgrand?hierLink(greatgrand.key,greatgrand.summary,'#73777C','#F4F4F5'):''}
-          ${grandparent?hierLink(grandparent.key,grandparent.summary,'#9A4500','#FFF0E6'):''}
-          ${parent?hierLink(parent.key,parent.summary,'#6B3FA0','#F3EEFF'):''}
+      <div class="pri-epic-hdr" style="background:#F0F9FF;border-bottom:2px solid #2E99CE;min-height:120px;display:flex;flex-direction:column;justify-content:space-between">
+        <!-- Hierarchy: Legend → Initiative → Epic -->
+        <div style="display:flex;flex-direction:column;gap:3px;margin-bottom:6px">
+          ${greatgrand?`<div style="display:flex;align-items:center;gap:4px">
+            <span style="font-size:9px;font-weight:700;color:#73777C;min-width:52px">Legend</span>
+            <a href="${BASE()}${greatgrand.key}" target="_blank" onclick="event.stopPropagation()"
+              style="font-size:10px;font-weight:700;color:#9A4500;background:#FFF0E6;padding:1px 6px;border-radius:3px;text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px"
+              title="${greatgrand.summary}">${greatgrand.key} · ${greatgrand.summary.slice(0,22)}${greatgrand.summary.length>22?'…':''}</a>
+          </div>`:''}
+          ${grandparent?`<div style="display:flex;align-items:center;gap:4px">
+            <span style="font-size:9px;font-weight:700;color:#73777C;min-width:52px">Initiative</span>
+            <a href="${BASE()}${grandparent.key}" target="_blank" onclick="event.stopPropagation()"
+              style="font-size:10px;font-weight:700;color:#6B3FA0;background:#F3EEFF;padding:1px 6px;border-radius:3px;text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px"
+              title="${grandparent.summary}">${grandparent.key} · ${grandparent.summary.slice(0,22)}${grandparent.summary.length>22?'…':''}</a>
+          </div>`:''}
+          ${parent&&!grandparent?`<div style="display:flex;align-items:center;gap:4px">
+            <span style="font-size:9px;font-weight:700;color:#73777C;min-width:52px">Initiative</span>
+            <a href="${BASE()}${parent.key}" target="_blank" onclick="event.stopPropagation()"
+              style="font-size:10px;font-weight:700;color:#6B3FA0;background:#F3EEFF;padding:1px 6px;border-radius:3px;text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px"
+              title="${parent.summary}">${parent.key} · ${parent.summary.slice(0,22)}${parent.summary.length>22?'…':''}</a>
+          </div>`:''}
         </div>
-        <div style="margin-bottom:5px">
-          <a href="${BASE()}${epic.key}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;font-family:monospace;color:#125462;font-weight:700;text-decoration:none">${epic.key}</a>
-          <div style="font-size:12px;font-weight:700;color:#292E37;line-height:1.3;margin-top:2px">${epic.summary}</div>
+        <!-- Epic - prominent -->
+        <div style="margin-bottom:6px;border-top:1px solid #C8E6F7;padding-top:6px">
+          <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px">
+            <span style="font-size:9px;font-weight:700;color:#73777C;min-width:52px">Epic</span>
+            <a href="${BASE()}${epic.key}" target="_blank" onclick="event.stopPropagation()"
+              style="font-size:10px;font-family:monospace;color:#125462;font-weight:700;text-decoration:none">${epic.key} ↗</a>
+          </div>
+          <div style="font-size:14px;font-weight:700;color:#125462;line-height:1.3">${epic.summary}</div>
         </div>
         <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
           <span class="badge" style="background:${sc.bg};color:${sc.c}">${epic.status}</span>
@@ -1704,7 +1725,7 @@ function priCardDropEl(e, el) {
   const rankBody = before
     ? {issues:[priDragKey], rankBeforeIssue:targetKey}
     : {issues:[priDragKey], rankAfterIssue:targetKey};
-  jiraPost('/rest/agile/1.0/issue/rank', rankBody).catch(()=>{});
+  pushRankToJira(rankBody);
 
   priDragKey = null; priDragEpic = null;
 }
@@ -1738,10 +1759,11 @@ async function priDrop(e, epicKey) {
   if(currentView === 'myepics') renderMyEpicsBoard();
   else renderPriBoard();
 
-  const colTasks = priIssues.filter(t=>(t.parent_key||'__none__')===epicKey);
-  if(colTasks.length > 1) {
-    const last = colTasks[colTasks.length-2];
-    jiraPost('/rest/agile/1.0/issue/rank', {issues:[priDragKey], rankAfterIssue:last.key}).catch(()=>{});
+  const activeTasksInCol = (currentView==='myepics'?myEpicsTasks:priIssues)
+    .filter(t=>(t.parent_key||'__none__')===epicKey);
+  if(activeTasksInCol.length > 1) {
+    const last = activeTasksInCol[activeTasksInCol.length-2];
+    pushRankToJira({issues:[priDragKey], rankAfterIssue:last.key});
   }
 
   priDragKey = null; priDragEpic = null;
@@ -1804,6 +1826,36 @@ function quickAddTaskFromBtn(btn) {
   const epicKey = btn.getAttribute('data-epic-key') || '';
   const projectKey = document.getElementById('pri-proj')?.value || currentProjFilter || '';
   quickAddTask(epicKey, '', projectKey);
+}
+
+
+async function pushRankToJira(rankBody) {
+  // Show saving indicator
+  const indicator = document.createElement('div');
+  indicator.id = 'rank-saving';
+  indicator.style.cssText = 'position:fixed;bottom:16px;right:16px;background:#125462;color:#fff;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.2)';
+  indicator.textContent = '↑ Saving order to Jira…';
+  document.body.appendChild(indicator);
+
+  try {
+    const r = await jiraPost('/rest/agile/1.0/issue/rank', rankBody);
+    if(r.ok || r.status === 204) {
+      indicator.textContent = '✓ Order saved to Jira';
+      indicator.style.background = '#5E8E38';
+    } else {
+      const text = await r.text();
+      console.warn('Rank API response:', r.status, text);
+      // Try alternative: use lexorank via issue update
+      // Some Jira configs need rank via issue fields
+      indicator.textContent = '⚠ Reorder saved locally (Jira rank API unavailable)';
+      indicator.style.background = '#E08000';
+    }
+  } catch(e) {
+    console.warn('Rank error:', e);
+    indicator.textContent = '⚠ Could not save order to Jira';
+    indicator.style.background = '#D6202B';
+  }
+  setTimeout(() => { if(indicator.parentNode) indicator.parentNode.removeChild(indicator); }, 2500);
 }
 
 
