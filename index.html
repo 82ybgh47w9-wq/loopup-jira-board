@@ -42,6 +42,42 @@ button,select,textarea,input{font-family:inherit}
 .seg button{padding:4px 11px;font-size:12px;font-weight:700;cursor:pointer;border:none;background:transparent;color:#9EA0A4;border-radius:5px}
 .seg button.active{background:#fff;color:#125462;box-shadow:0 1px 3px rgba(0,0,0,.09)}
 .ctrl-select{font-size:12px;padding:4px 8px;border:1px solid #C9CACC;border-radius:6px;background:#fff;color:#292E37;cursor:pointer}
+.mention-dropdown {
+  position: fixed;
+  background: #fff;
+  border: 1px solid #C9CACC;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.15);
+  min-width: 240px;
+  max-width: 320px;
+  max-height: 280px;
+  overflow-y: auto;
+  z-index: 10000;
+  font-size: 13px;
+  padding: 4px;
+}
+.mention-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.mention-item:hover, .mention-item.active {
+  background: #E0F0F8;
+}
+.mention-item .mi-name { font-weight: 700; color: #292E37; }
+.mention-item .mi-email { font-size: 11px; color: #73777C; }
+.mention-loading {
+  padding: 12px;
+  color: #9EA0A4;
+  font-style: italic;
+  text-align: center;
+}
+.mention-empty {
+  padding: 12px;
+  color: #9EA0A4;
+  text-align: center;
+}
 .search-box{display:flex;align-items:center;gap:5px;border:1px solid #C9CACC;border-radius:6px;padding:3px 9px;background:#fff}
 .search-box input{border:none;background:transparent;font-size:12px;color:#292E37;outline:none;width:120px}
 
@@ -316,7 +352,7 @@ button,select,textarea,input{font-family:inherit}
   
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v63</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v64</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -655,6 +691,260 @@ function findMentionsInBody(doc) {
   return mentions;
 }
 
+/* ══ @MENTION TYPEAHEAD ════════════════════════════════════════════════════ */
+// State per textarea: trackedMentions[textareaId] = [{start, end, accountId, displayName}]
+const trackedMentions = {};
+// User cache to avoid hammering the API
+const userSearchCache = new Map(); // query → [{accountId, displayName, email}]
+let mentionDropdownEl = null;
+let mentionActiveTextarea = null;
+let mentionStartPos = -1; // position of '@' in textarea
+let mentionActiveIndex = 0;
+let mentionResults = [];
+let mentionSearchTimer = null;
+
+function attachMentionTypeahead(textareaId) {
+  const ta = document.getElementById(textareaId);
+  if(!ta || ta.dataset.mentionAttached === '1') return;
+  ta.dataset.mentionAttached = '1';
+  if(!trackedMentions[textareaId]) trackedMentions[textareaId] = [];
+
+  ta.addEventListener('keyup', e => onMentionKeyup(e, ta));
+  ta.addEventListener('keydown', e => onMentionKeydown(e, ta));
+  ta.addEventListener('blur', () => setTimeout(closeMentionDropdown, 200));
+  // If text changes (paste, etc), re-validate tracked mentions
+  ta.addEventListener('input', () => validateTrackedMentions(textareaId));
+}
+
+function onMentionKeyup(e, ta) {
+  // Skip if user is navigating the dropdown
+  if(mentionDropdownEl && ['ArrowDown','ArrowUp','Enter','Tab','Escape'].includes(e.key)) return;
+  const text = ta.value;
+  const cursor = ta.selectionStart;
+  // Find the most recent '@' before cursor that isn't preceded by a non-space character
+  let atPos = -1;
+  for(let i = cursor - 1; i >= 0; i--) {
+    const ch = text[i];
+    if(ch === '@') {
+      // Check the char before — must be start of string, whitespace, or newline
+      if(i === 0 || /\s/.test(text[i-1])) {
+        atPos = i;
+      }
+      break;
+    }
+    // If we hit whitespace before finding @, no active mention
+    if(/\s/.test(ch)) break;
+  }
+  if(atPos < 0) { closeMentionDropdown(); return; }
+  // Query = text between @ and cursor
+  const query = text.slice(atPos + 1, cursor);
+  // Skip if too long (probably not a mention)
+  if(query.length > 40) { closeMentionDropdown(); return; }
+  mentionActiveTextarea = ta;
+  mentionStartPos = atPos;
+  showMentionDropdown(ta, atPos, query);
+}
+
+function onMentionKeydown(e, ta) {
+  if(!mentionDropdownEl) return;
+  if(e.key === 'ArrowDown') {
+    e.preventDefault();
+    mentionActiveIndex = Math.min(mentionActiveIndex + 1, mentionResults.length - 1);
+    renderMentionDropdown();
+  } else if(e.key === 'ArrowUp') {
+    e.preventDefault();
+    mentionActiveIndex = Math.max(mentionActiveIndex - 1, 0);
+    renderMentionDropdown();
+  } else if(e.key === 'Enter' || e.key === 'Tab') {
+    if(mentionResults.length > 0) {
+      e.preventDefault();
+      selectMention(mentionActiveIndex);
+    }
+  } else if(e.key === 'Escape') {
+    e.preventDefault();
+    closeMentionDropdown();
+  }
+}
+
+async function showMentionDropdown(ta, atPos, query) {
+  // Position the dropdown near the cursor (below the textarea)
+  if(!mentionDropdownEl) {
+    mentionDropdownEl = document.createElement('div');
+    mentionDropdownEl.className = 'mention-dropdown';
+    document.body.appendChild(mentionDropdownEl);
+  }
+  const rect = ta.getBoundingClientRect();
+  // Position below the textarea, left-aligned with the cursor approx
+  mentionDropdownEl.style.left = rect.left + 'px';
+  mentionDropdownEl.style.top = (rect.bottom + 4) + 'px';
+  mentionDropdownEl.style.display = 'block';
+  mentionDropdownEl.innerHTML = '<div class="mention-loading">Searching…</div>';
+
+  // Debounce the search
+  if(mentionSearchTimer) clearTimeout(mentionSearchTimer);
+  mentionSearchTimer = setTimeout(async () => {
+    try {
+      const results = await searchUsersForMention(query);
+      mentionResults = results;
+      mentionActiveIndex = 0;
+      renderMentionDropdown();
+    } catch(e) {
+      mentionDropdownEl.innerHTML = '<div class="mention-empty">Search failed</div>';
+    }
+  }, 200);
+}
+
+async function searchUsersForMention(query) {
+  const key = query.toLowerCase().trim();
+  if(userSearchCache.has(key)) return userSearchCache.get(key);
+  // If empty, get most-likely candidates (recent / team)
+  const url = '/rest/api/3/user/search?query=' + encodeURIComponent(query) + '&maxResults=8';
+  const users = await jiraGet(url);
+  // jiraGet returns array directly for this endpoint
+  const list = (Array.isArray(users) ? users : []).map(u => ({
+    accountId: u.accountId,
+    displayName: u.displayName || '',
+    email: u.emailAddress || '',
+    avatarUrl: u.avatarUrls && u.avatarUrls['24x24'] || ''
+  })).filter(u => u.accountId && u.displayName);
+  userSearchCache.set(key, list);
+  return list;
+}
+
+function renderMentionDropdown() {
+  if(!mentionDropdownEl) return;
+  if(!mentionResults.length) {
+    mentionDropdownEl.innerHTML = '<div class="mention-empty">No matches — keep typing</div>';
+    return;
+  }
+  mentionDropdownEl.innerHTML = mentionResults.map((u, i) => `
+    <div class="mention-item ${i === mentionActiveIndex ? 'active' : ''}" 
+         onmousedown="event.preventDefault();selectMention(${i})">
+      ${ava(u.displayName, 22)}
+      <div style="display:flex;flex-direction:column;min-width:0;flex:1">
+        <div class="mi-name">${u.displayName}</div>
+        ${u.email ? `<div class="mi-email">${u.email}</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+function selectMention(idx) {
+  if(idx < 0 || idx >= mentionResults.length || !mentionActiveTextarea) {
+    closeMentionDropdown(); return;
+  }
+  const user = mentionResults[idx];
+  const ta = mentionActiveTextarea;
+  const cursor = ta.selectionStart;
+  const text = ta.value;
+  const mentionText = '@' + user.displayName;
+  // Replace from mentionStartPos to cursor
+  const newText = text.slice(0, mentionStartPos) + mentionText + ' ' + text.slice(cursor);
+  const newCursor = mentionStartPos + mentionText.length + 1;
+  ta.value = newText;
+  ta.setSelectionRange(newCursor, newCursor);
+  // Trigger oninput so createState updates if applicable
+  ta.dispatchEvent(new Event('input', {bubbles:true}));
+  // Record the mention range
+  if(!trackedMentions[ta.id]) trackedMentions[ta.id] = [];
+  trackedMentions[ta.id].push({
+    start: mentionStartPos,
+    end: mentionStartPos + mentionText.length,
+    accountId: user.accountId,
+    displayName: user.displayName,
+    text: mentionText
+  });
+  closeMentionDropdown();
+  ta.focus();
+}
+
+function closeMentionDropdown() {
+  if(mentionDropdownEl) {
+    mentionDropdownEl.style.display = 'none';
+  }
+  mentionResults = [];
+  mentionActiveIndex = 0;
+  mentionStartPos = -1;
+  if(mentionSearchTimer) { clearTimeout(mentionSearchTimer); mentionSearchTimer = null; }
+}
+
+function validateTrackedMentions(textareaId) {
+  // Remove tracked mentions whose text no longer matches in the textarea
+  const ta = document.getElementById(textareaId);
+  if(!ta) return;
+  const text = ta.value;
+  trackedMentions[textareaId] = (trackedMentions[textareaId]||[]).filter(m => {
+    return text.slice(m.start, m.end) === m.text;
+  });
+  // Adjust positions of mentions whose anchor shifted (simple impl: rebuild by searching)
+  // For simplicity, we re-scan: find each mention's text in the current string
+  const updated = [];
+  const seen = new Set();
+  for(const m of (trackedMentions[textareaId]||[])) {
+    // Find first occurrence of m.text not already claimed
+    let searchFrom = 0;
+    while(true) {
+      const idx = text.indexOf(m.text, searchFrom);
+      if(idx < 0) break;
+      const claimKey = idx + ':' + m.text;
+      if(seen.has(claimKey)) { searchFrom = idx + 1; continue; }
+      seen.add(claimKey);
+      updated.push({...m, start: idx, end: idx + m.text.length});
+      break;
+    }
+  }
+  trackedMentions[textareaId] = updated;
+}
+
+// Convert textarea content + tracked mentions into ADF body
+function buildADFFromTextarea(textareaId) {
+  const ta = document.getElementById(textareaId);
+  if(!ta) return null;
+  const text = ta.value;
+  const mentions = (trackedMentions[textareaId]||[]).slice().sort((a,b)=>a.start - b.start);
+
+  // Split text into paragraphs by newline, then within each paragraph, weave in mentions
+  // Approach: build a flat content array for one paragraph, splitting by \n into multiple paragraphs
+  const paragraphs = text.split('\n');
+  const docContent = [];
+  let charPos = 0;
+  for(let pIdx = 0; pIdx < paragraphs.length; pIdx++) {
+    const para = paragraphs[pIdx];
+    const paraStart = charPos;
+    const paraEnd = charPos + para.length;
+    // Find mentions within this paragraph
+    const pMentions = mentions.filter(m => m.start >= paraStart && m.end <= paraEnd);
+    const paraContent = [];
+    let cursor = paraStart;
+    for(const m of pMentions) {
+      // Text before the mention
+      if(m.start > cursor) {
+        paraContent.push({type:'text', text: text.slice(cursor, m.start)});
+      }
+      // The mention node
+      paraContent.push({
+        type:'mention',
+        attrs: { id: m.accountId, text: m.text }
+      });
+      cursor = m.end;
+    }
+    // Trailing text in paragraph
+    if(cursor < paraEnd) {
+      paraContent.push({type:'text', text: text.slice(cursor, paraEnd)});
+    }
+    if(paraContent.length === 0) {
+      docContent.push({type:'paragraph'});
+    } else {
+      docContent.push({type:'paragraph', content: paraContent});
+    }
+    charPos = paraEnd + 1; // +1 for the \n
+  }
+
+  return { type:'doc', version:1, content: docContent.length ? docContent : [{type:'paragraph'}] };
+}
+
+
+
 function parseIssue(i){const f=i.fields;return{key:i.key,summary:f.summary||"",type:f.issuetype?.name||"Task",status:f.status?.name||"Backlog",assignee:f.assignee?.displayName||"Unassigned",assigneeEmail:f.assignee?.emailAddress||"",priority:f.priority?.name||"Medium",updated:(f.updated||"").slice(0,10),parent_key:f.parent?.key||null,parent_summary:f.parent?.fields?.summary||"",parent_type:f.parent?.fields?.issuetype?.name||"",description:extractText(f.description),project:f.project?.key||i.key.split("-")[0],projectName:f.project?.name||"",subtasks:(f.subtasks||[]).map(s=>({key:s.key,summary:s.fields?.summary||"",status:s.fields?.status?.name||"",type:s.fields?.issuetype?.name||"Sub-task"})),epicLink:f.customfield_10014||null,commentCount:(f.comment?.total||0)};}
 
 async function fetchAllTeamIssues(){
@@ -686,7 +976,16 @@ async function fetchAllTeamIssues(){
 
 async function fetchProjects(){const d=await jiraGet("/rest/api/3/project/search?maxResults=100&orderBy=name&action=browse");return(d.values||[]).map(p=>({key:p.key,name:p.name}));}
 async function fetchComments(key){const d=await jiraGet("/rest/api/3/issue/"+key+"/comment?maxResults=50&orderBy=created");return(d.comments||[]).map(c=>({id:c.id,author:c.author?.displayName||"Unknown",body:extractText(c.body),created:(c.created||"").slice(0,16).replace("T"," ")}));}
-async function postComment(key,text){try{const r=await jiraPost("/rest/api/3/issue/"+key+"/comment",{body:{type:"doc",version:1,content:[{type:"paragraph",content:[{type:"text",text}]}]}});return r.ok;}catch{return false;}}
+async function postComment(key, textOrBody) {
+  try {
+    // textOrBody can be a string (legacy) or an ADF body object
+    const body = typeof textOrBody === 'string'
+      ? {type:"doc", version:1, content:[{type:"paragraph", content:[{type:"text", text: textOrBody}]}]}
+      : textOrBody;
+    const r = await jiraPost("/rest/api/3/issue/"+key+"/comment", {body});
+    return r.ok;
+  } catch { return false; }
+}
 async function transitionIssue(key,targetStatus){appLogMsg("info","jira","Transitioning "+key+" to "+targetStatus);try{const d=await jiraGet("/rest/api/3/issue/"+key+"/transitions");const t=(d.transitions||[]).find(t=>t.name.toLowerCase()===targetStatus.toLowerCase())||(d.transitions||[]).find(t=>t.to?.name?.toLowerCase()===targetStatus.toLowerCase());if(!t)return false;const r=await jiraPost("/rest/api/3/issue/"+key+"/transitions",{transition:{id:t.id}});return r.ok||r.status===204;}catch{return false;}}
 async function updatePriority(key,priority){try{const r=await jiraPut("/rest/api/3/issue/"+key,{fields:{priority:{name:priority}}});return r.ok||r.status===204;}catch{return false;}}
 
@@ -1220,6 +1519,8 @@ function openPane(key){
   document.getElementById("pane-overlay").classList.add("open");
   // Mark this issue's comments as read when opened
   if(typeof markCommentsRead === 'function') markCommentsRead(key);
+  // Attach @mention typeahead to comment field
+  setTimeout(() => attachMentionTypeahead('cmt-text'), 50);
 }
 function closePaneOverlay(){document.getElementById("pane-overlay").classList.remove("open");openIssue=null;}
 
@@ -1348,12 +1649,28 @@ async function loadPaneComments(key){
 }
 
 async function submitPaneComment(key){
-  const txt=(document.getElementById("cmt-text").value||"").trim();if(!txt)return;
-  const btn=document.getElementById("post-btn");btn.disabled=true;btn.innerHTML=spinHtml(13,"#fff")+" Posting…";
-  const ok=await postComment(key,txt);
-  const msg=document.getElementById("post-msg");
-  if(ok){msg.textContent="Posted ✓";msg.style.color="#5E8E38";document.getElementById("cmt-text").value="";delete commentsCache[key];markCommentsRead(key);await loadPaneComments(key);doFetch(true);}
-  else{msg.textContent="Failed";msg.style.color="#D6202B";btn.disabled=false;btn.innerHTML="Post to Jira";}
+  const ta = document.getElementById("cmt-text");
+  const txt = (ta.value||"").trim();
+  if(!txt) return;
+  const btn = document.getElementById("post-btn");
+  btn.disabled = true; btn.innerHTML = spinHtml(13,"#fff")+" Posting…";
+  // If mentions are tracked, build ADF; otherwise pass as plain text
+  const tracked = trackedMentions["cmt-text"] || [];
+  const payload = tracked.length > 0 ? buildADFFromTextarea("cmt-text") : txt;
+  const ok = await postComment(key, payload);
+  const msg = document.getElementById("post-msg");
+  if(ok) {
+    msg.textContent = "Posted ✓"; msg.style.color = "#5E8E38";
+    ta.value = "";
+    trackedMentions["cmt-text"] = [];
+    delete commentsCache[key];
+    markCommentsRead(key);
+    await loadPaneComments(key);
+    doFetch(true);
+  } else {
+    msg.textContent = "Failed"; msg.style.color = "#D6202B";
+    btn.disabled = false; btn.innerHTML = "Post to Jira";
+  }
   setTimeout(()=>{if(msg)msg.textContent="";},3000);
 }
 
@@ -1436,6 +1753,8 @@ function openCreate(defaultAssignee, e) {
 
 function closeCreate() {
   document.getElementById('create-overlay').classList.remove('open');
+  trackedMentions['cr-desc'] = [];
+  trackedMentions['cr-comment'] = [];
 }
 
 function renderCreateModal() {
@@ -1478,6 +1797,11 @@ function renderCreateModal() {
       <textarea id="cr-comment" placeholder="Add a comment…" oninput="createState.comment=this.value" style="width:100%;min-height:50px;padding:10px 12px;border:1px solid #E4E6E8;border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box">${s.comment||''}</textarea></div>
     `}`;
   if(s.showHierarchy && s.projectKey) setTimeout(()=>renderHierarchyRows(),10);
+  // Attach @mention typeahead to description and comment fields
+  setTimeout(() => {
+    attachMentionTypeahead('cr-desc');
+    attachMentionTypeahead('cr-comment');
+  }, 50);
 }
 
 async function loadCreateHierarchy() {
@@ -1669,7 +1993,12 @@ async function submitCreate(){
       priority:{name:s.priority},
     };
     if(s.selEpic) fields.parent = {key:s.selEpic};
-    if(s.description) fields.description = {type:'doc',version:1,content:[{type:'paragraph',content:[{type:'text',text:s.description}]}]};
+    if(s.description) {
+      const descTracked = trackedMentions['cr-desc'] || [];
+      fields.description = descTracked.length > 0
+        ? buildADFFromTextarea('cr-desc')
+        : {type:'doc',version:1,content:[{type:'paragraph',content:[{type:'text',text:s.description}]}]};
+    }
     if(s.dueDate) fields.duedate = s.dueDate;
     if(s.assignee) {
       // Look up accountId from team
@@ -1691,12 +2020,14 @@ async function submitCreate(){
       } catch {}
     }
 
-    // Add comment if provided
+    // Add comment if provided (with @mention support)
     if(s.comment && s.comment.trim()) {
       try {
-        await jiraPost('/rest/api/3/issue/'+newKey+'/comment', {
-          body:{type:'doc',version:1,content:[{type:'paragraph',content:[{type:'text',text:s.comment.trim()}]}]}
-        });
+        const cmtTracked = trackedMentions['cr-comment'] || [];
+        const cmtBody = cmtTracked.length > 0
+          ? buildADFFromTextarea('cr-comment')
+          : {type:'doc',version:1,content:[{type:'paragraph',content:[{type:'text',text:s.comment.trim()}]}]};
+        await jiraPost('/rest/api/3/issue/'+newKey+'/comment', {body: cmtBody});
       } catch {}
     }
 
