@@ -257,7 +257,7 @@ button,select,textarea,input{font-family:inherit}
   <select class="proj-select" id="proj-filter" onchange="onProjFilter()"><option value="">All projects</option></select>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v8c</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v10</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -1843,7 +1843,7 @@ function renderPriBoard() {
           ${pbadge(epic.priority)}
           ${ava(epic.assignee, 20)}
           <span style="font-size:10px;color:#9EA0A4;margin-left:auto">${epicTasks.length} tasks</span>
-          <button onclick="event.stopPropagation();quickAddTask('${epic.key}','${epic.summary.replace(/'/g,"\'")}','${document.getElementById(\'pri-proj\')?.value||\'\'}')"
+          <button onclick="event.stopPropagation();quickAddTaskFromBtn(this)" data-epic-key="${epic.key}" data-proj=""
             style="background:#125462;border:none;color:#fff;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:14px;line-height:1;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-left:4px" title="Add task to this epic">+</button>
         </div>
       </div>
@@ -2035,6 +2035,13 @@ function quickAddTask(epicKey, epicSummary, projectKey) {
       });
     }
   }, 100);
+}
+
+
+function quickAddTaskFromBtn(btn) {
+  const epicKey = btn.getAttribute('data-epic-key') || '';
+  const projectKey = document.getElementById('pri-proj')?.value || currentProjFilter || '';
+  quickAddTask(epicKey, '', projectKey);
 }
 
 
