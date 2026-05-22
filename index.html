@@ -316,7 +316,7 @@ button,select,textarea,input{font-family:inherit}
   
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v60</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v61</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -326,6 +326,7 @@ button,select,textarea,input{font-family:inherit}
 
 <!-- STATS -->
 <div id="statsbar">
+  <div class="stat-card" style="background:#FFF8E0;cursor:pointer" onclick="setView('activity')" title="Click to view Activity"><div style="font-size:20px;font-weight:700;color:#C9CACC" id="cnt-newcomments">—</div><div style="font-size:10px;font-weight:700;color:#E08000">New Comments</div></div>
   <div class="stat-card" style="background:#E0F0F8"><div style="font-size:20px;font-weight:700;color:#2E99CE" id="cnt-ip">—</div><div style="font-size:10px;font-weight:700;color:#2E99CE">In Progress</div></div>
   <div class="stat-card" style="background:#F1F7EC"><div style="font-size:20px;font-weight:700;color:#5E8E38" id="cnt-sel">—</div><div style="font-size:10px;font-weight:700;color:#5E8E38">Selected</div></div>
   <div class="stat-card" style="background:#EEF1F3"><div style="font-size:20px;font-weight:700;color:#9EA0A4" id="cnt-back">—</div><div style="font-size:10px;font-weight:700;color:#9EA0A4">Backlog</div></div>
@@ -431,10 +432,13 @@ button,select,textarea,input{font-family:inherit}
       <span style="font-size:12px;font-weight:700;color:#125462">Activity Stream</span>
       <select id="activity-filter" onchange="renderActivity()" style="padding:4px 8px;border:1px solid #E4E6E8;border-radius:6px;font-size:12px;background:#fff">
         <option value="all">All activity</option>
+        <option value="unread">Unread only</option>
         <option value="mentions">Mentions only</option>
-        <option value="mytasks">My tasks only</option>
+        <option value="mytasks">On my tasks</option>
+        <option value="mine">My comments</option>
       </select>
       <button onclick="loadActivity()" class="icon-btn" style="font-size:11px;margin-left:auto">↻ Refresh</button>
+      <button onclick="clearAllCommentMarkers()" class="icon-btn" style="font-size:11px" title="Mark everything as read">✓ Clear all</button>
     </div>
     <div id="activity-content" style="flex:1;overflow-y:auto;padding:0"></div>
   </div>
@@ -521,6 +525,8 @@ let priStatusFilters=new Set();
 let doneViewPerson="";
 let activityData=[]; // cached activity entries
 let activityLoaded=false;
+let commentReadState={}; // key->lastReadTime (ISO)
+let newCommentCount=0;
 let doneDays=7;
 let myEpicsTasks = [];
 let priIssues = [];
@@ -529,11 +535,12 @@ let priDragKey = null;
 let priDragEpic = null;
 
 /* ══ PERSISTENCE ══ */
-function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,groupProjectAssignment,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed,doneDays}));}catch{}}
+function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,groupProjectAssignment,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed,doneDays,commentReadState}));}catch{}}
 function loadAll(){try{const d=JSON.parse(localStorage.getItem(STOR)||"{}");if(d.cfg)cfg=d.cfg;if(d.locStat)locStat=d.locStat;if(d.locPri)locPri=d.locPri;if(d.currentIam)currentIam=d.currentIam;if(d.currentProjFilter)currentProjFilter=d.currentProjFilter;
 if(d.currentProjectGroup)currentProjectGroup=d.currentProjectGroup;if(d.currentGroup)currentGroup=d.currentGroup;if(d.teamMembers)teamMembers=d.teamMembers;if(d.adminUsers)adminUsers=d.adminUsers;if(d.groups)groups=d.groups;
 if(d.groupProjectAssignment)groupProjectAssignment=d.groupProjectAssignment;if(d.excludedProjects)excludedProjects=d.excludedProjects;if(d.currentView)currentView=d.currentView;if(d.currentLevel)currentLevel=d.currentLevel;if(d.rowCollapsed)rowCollapsed={...rowCollapsed,...d.rowCollapsed};if(d.swimCollapsed)swimCollapsed={...swimCollapsed,...d.swimCollapsed};
-if(d.doneDays)doneDays=d.doneDays;}catch{}}
+if(d.doneDays)doneDays=d.doneDays;
+if(d.commentReadState)commentReadState=d.commentReadState;}catch{}}
 
 /* ══ KV (active flags) ══ */
 async function kvSet(k,v){
@@ -622,8 +629,18 @@ async function fetchAllTeamIssues(){
   let jql='assignee in ('+assignees+') AND statusCategory != Done ORDER BY updated DESC';
   if(currentProjFilter) jql='project='+currentProjFilter+' AND '+jql;
   else if(projScope) jql=projScope+' AND '+jql;
-  let all=[],start=0;
-  while(true){const d=await jiraGet("/rest/api/3/search/jql?jql="+encodeURIComponent(jql)+"&fields="+fields+"&maxResults=100&startAt="+start);const issues=d.issues||[];all=all.concat(issues.map(parseIssue));start+=issues.length;if(start>=(d.total||0)||!issues.length)break;}
+  let all=[],token=null,iter=0;
+  while(iter<50){
+    let url="/rest/api/3/search/jql?jql="+encodeURIComponent(jql)+"&fields="+fields+"&maxResults=100";
+    if(token) url+="&nextPageToken="+encodeURIComponent(token);
+    const d=await jiraGet(url);
+    const issues=d.issues||[];
+    all=all.concat(issues.map(parseIssue));
+    if(d.isLast===true||!issues.length||!d.nextPageToken)break;
+    token=d.nextPageToken;
+    iter++;
+  }
+  appLogMsg("info","fetch","Active issues fetched: "+all.length+" (pages: "+(iter+1)+")");
   let doneJql='assignee in ('+assignees+') AND statusCategory=Done AND updated>=-'+doneDays+'d ORDER BY updated DESC';
   if(currentProjFilter) doneJql='project='+currentProjFilter+' AND '+doneJql;
   else if(projScope) doneJql=projScope+' AND '+doneJql;
@@ -762,7 +779,10 @@ async function doFetch(silent=false){
   const rb=document.getElementById("refresh-btn");rb.disabled=true;rb.innerHTML=spinHtml(13)+" Refresh";
   if(!silent)showPage("loading");
   document.getElementById("loading-msg").textContent="Loading team tasks…";
-  try{allIssues=await fetchAllTeamIssues();await loadActiveFlags();updateStats();renderMain();const now=new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});const st=document.getElementById("sync-time");st.textContent="Synced "+now;st.style.display="inline";document.getElementById("jira-link").style.display="inline";}
+  try{allIssues=await fetchAllTeamIssues();await loadActiveFlags();updateStats();renderMain();const now=new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});const st=document.getElementById("sync-time");st.textContent="Synced "+now;st.style.display="inline";document.getElementById("jira-link").style.display="inline";
+    // Preload activity to populate the New Comments counter
+    if(currentIam) loadActivity().catch(()=>{});
+  }
   catch(e){showPage("error");document.getElementById("error-msg").textContent=e.message;}
   rb.disabled=false;rb.innerHTML="↻ Refresh";
 }
@@ -833,8 +853,16 @@ function populateCtrlProjFilter() {
   const scope = currentProjectGroup && projectGroups[currentProjectGroup]
     ? allProjects.filter(p=>projectGroups[currentProjectGroup].includes(p.key))
     : allProjects.filter(p=>!excludedProjects.includes(p.key));
+  const myProjKeys = [...new Set(allIssues.filter(i=>i.assignee===currentIam).map(i=>i.project))];
+  const myProjs = scope.filter(p=>myProjKeys.includes(p.key));
+  const otherProjs = scope.filter(p=>!myProjKeys.includes(p.key));
   sel.innerHTML = '<option value="">All</option>' +
-    scope.map(p=>`<option value="${p.key}" ${p.key===ctrlProjFilter?'selected':''}>${p.key} — ${p.name}</option>`).join('');
+    (myProjs.length ? '<optgroup label="Your projects">' +
+      myProjs.map(p=>`<option value="${p.key}" ${p.key===ctrlProjFilter?'selected':''}>${p.key} — ${p.name}</option>`).join('') +
+      '</optgroup>' : '') +
+    '<optgroup label="All projects">' +
+      otherProjs.map(p=>`<option value="${p.key}" ${p.key===ctrlProjFilter?'selected':''}>${p.key} — ${p.name}</option>`).join('') +
+    '</optgroup>';
 }
 
 function onMyTasksPersonChange() {
@@ -902,6 +930,17 @@ function renderMyTasks(){
   populateMyTasksPersonSel();
   const issues=getFiltered(person);
   const table=document.getElementById("matrix-table");
+  // Show hint if person has zero tasks (may be in projects outside the active group)
+  const hintEl = document.getElementById('mytasks-hint');
+  if(hintEl) hintEl.remove();
+  if(person && issues.length === 0 && allIssues.length > 0) {
+    const hint = document.createElement('div');
+    hint.id = 'mytasks-hint';
+    hint.style.cssText = 'padding:10px 16px;background:#FFF8E0;border-bottom:1px solid #F0E0A0;font-size:12px;color:#8B6914';
+    hint.innerHTML = `💡 No tasks visible for <b>${person}</b>. If you expect to see tasks, check that all relevant projects are included in <a href="#" onclick="event.preventDefault();openSettings()" style="color:#8B6914;text-decoration:underline;font-weight:700">Settings → Projects</a>.`;
+    const matWrap = document.querySelector('#page-mytasks .matrix-wrap');
+    if(matWrap) matWrap.parentElement.insertBefore(hint, matWrap);
+  }
   const ns=i=>normStatus(i.status);
   const useMatrix = document.getElementById("matrix-toggle")?.checked !== false;
   let html=`<thead><tr><th style="min-width:110px;text-align:left;position:sticky;left:0;z-index:3">Status</th>${useMatrix?PRI_COLS.map(p=>`<th class="pri-${p}">${p}</th>`).join(""):'<th>Tasks</th>'}</tr></thead><tbody>`;
@@ -1143,6 +1182,8 @@ function openPane(key){
   openIssue=i;paneTab="main";
   renderPaneHdr(i);setPaneTab("main");
   document.getElementById("pane-overlay").classList.add("open");
+  // Mark this issue's comments as read when opened
+  if(typeof markCommentsRead === 'function') markCommentsRead(key);
 }
 function closePaneOverlay(){document.getElementById("pane-overlay").classList.remove("open");openIssue=null;}
 
@@ -1275,7 +1316,7 @@ async function submitPaneComment(key){
   const btn=document.getElementById("post-btn");btn.disabled=true;btn.innerHTML=spinHtml(13,"#fff")+" Posting…";
   const ok=await postComment(key,txt);
   const msg=document.getElementById("post-msg");
-  if(ok){msg.textContent="Posted ✓";msg.style.color="#5E8E38";document.getElementById("cmt-text").value="";delete commentsCache[key];await loadPaneComments(key);doFetch(true);}
+  if(ok){msg.textContent="Posted ✓";msg.style.color="#5E8E38";document.getElementById("cmt-text").value="";delete commentsCache[key];markCommentsRead(key);await loadPaneComments(key);doFetch(true);}
   else{msg.textContent="Failed";msg.style.color="#D6202B";btn.disabled=false;btn.innerHTML="Post to Jira";}
   setTimeout(()=>{if(msg)msg.textContent="";},3000);
 }
@@ -1755,8 +1796,16 @@ function populateProjFilter() {
   const scope = currentProjectGroup && projectGroups[currentProjectGroup]
     ? allProjects.filter(p=>projectGroups[currentProjectGroup].includes(p.key))
     : allProjects.filter(p=>!excludedProjects.includes(p.key));
+  const myProjKeys = [...new Set(allIssues.filter(i=>i.assignee===currentIam).map(i=>i.project))];
+  const myProjs = scope.filter(p=>myProjKeys.includes(p.key));
+  const otherProjs = scope.filter(p=>!myProjKeys.includes(p.key));
   sel.innerHTML = '<option value="">All projects</option>' +
-    scope.map(p=>`<option value="${p.key}" ${p.key===currentProjFilter?'selected':''}>${p.key} — ${p.name}</option>`).join('');
+    (myProjs.length ? '<optgroup label="Your projects">' +
+      myProjs.map(p=>`<option value="${p.key}" ${p.key===currentProjFilter?'selected':''}>${p.key} — ${p.name}</option>`).join('') +
+      '</optgroup>' : '') +
+    '<optgroup label="All projects">' +
+      otherProjs.map(p=>`<option value="${p.key}" ${p.key===currentProjFilter?'selected':''}>${p.key} — ${p.name}</option>`).join('') +
+    '</optgroup>';
 }
 
 function onProjGroupChange() {
@@ -2358,10 +2407,14 @@ function renderMyEpicsBoard() {
   el.innerHTML = '';
   myEpics.forEach(epic => {
     let tasks = myEpicsTasks.filter(i=>i.parent_key===epic.key);
+    if(ctrlProjFilter) tasks=tasks.filter(t=>t.project===ctrlProjFilter);
     if(priFilter) tasks=tasks.filter(t=>t.priority===priFilter);
     if(statFilter) tasks=tasks.filter(t=>normStatus(t.status)===normStatus(statFilter));
     if(unassignedOnly) tasks=tasks.filter(t=>t.assignee==='Unassigned');
     if(search) tasks=tasks.filter(t=>t.summary.toLowerCase().includes(search)||t.key.toLowerCase().includes(search));
+    // Hide epic column entirely if filters active and no tasks remain
+    const filterActive = ctrlProjFilter||priFilter||statFilter||unassignedOnly||search;
+    if(filterActive && tasks.length===0) return; // skip this epic column
 
     const sc = SC[epic.status]||SC.Backlog;
 
@@ -2706,11 +2759,11 @@ async function loadActivity() {
   appLogMsg('info','activity','Loading activity stream');
 
   try {
-    // Fetch recently updated issues assigned to current user or where user commented
     const person = currentIam;
     if(!person) { el.innerHTML = '<div style="padding:24px;color:#9EA0A4">Select yourself in "I am" to see activity</div>'; return; }
 
-    // Get issues updated in last 7 days that the user is involved with
+    // Fetch issues where: you're assignee, OR you commented, OR you're mentioned
+    // Limited to doneDays window for freshness
     const projScope = getActiveProjectsJQL();
     let jql = '(assignee = "'+person+'" OR comment ~ "'+person+'") AND updated >= -'+doneDays+'d ORDER BY updated DESC';
     if(projScope) jql = projScope + ' AND ' + jql;
@@ -2732,30 +2785,31 @@ async function loadActivity() {
         parent_key: f.parent?.key||''
       };
 
-      if(comments.length === 0) {
-        // Issue updated but no comments - show as status update
-        activityData.push({
-          type: 'update',
-          issue: issueInfo,
-          author: f.assignee?.displayName||'Unknown',
-          text: 'Issue updated',
-          time: f.updated||'',
-          isMention: false
-        });
-      }
-
+      // Filter to relevant comments only:
+      // - Comments by current user
+      // - Comments on issues where current user is assignee
+      // - Comments that mention current user
+      const isMyIssue = issueInfo.assignee === person;
       for(const c of comments) {
         const body = extractText(c.body);
         const author = c.author?.displayName||'Unknown';
+        const isMine = author === person;
         const isMention = body.toLowerCase().includes(person.toLowerCase()) || 
                          body.includes('@'+person);
+        // Include only if: you wrote it, OR it's on your task, OR you're mentioned
+        if(!isMine && !isMyIssue && !isMention) continue;
+        // Apply doneDays window filter to comment time
+        const commentDate = (c.created||c.updated||'').slice(0,10);
+        const cutoff = new Date(Date.now() - doneDays*86400000).toISOString().slice(0,10);
+        if(commentDate && commentDate < cutoff) continue;
         activityData.push({
           type: 'comment',
           issue: issueInfo,
           author,
           text: body.slice(0, 300),
           time: c.created||c.updated||'',
-          isMention
+          isMention,
+          isMine
         });
       }
     }
@@ -2763,12 +2817,50 @@ async function loadActivity() {
     // Sort by time, newest first
     activityData.sort((a,b) => (b.time||'').localeCompare(a.time||''));
     activityLoaded = true;
+    updateNewCommentCount();
     renderActivity();
   } catch(e) {
     el.innerHTML = `<div style="padding:24px;color:#D6202B">Failed to load activity: ${e.message}</div>`;
     appLogMsg('error','activity','Failed: '+e.message);
   }
 }
+
+function updateNewCommentCount() {
+  // Count comments from OTHERS (not by current user) newer than the read marker
+  newCommentCount = 0;
+  for(const item of activityData) {
+    if(item.isMine) continue;
+    const key = item.issue.key;
+    const lastRead = commentReadState[key] || '';
+    if(!lastRead || (item.time||'') > lastRead) {
+      newCommentCount++;
+    }
+  }
+  const el = document.getElementById('cnt-newcomments');
+  if(el) {
+    el.textContent = newCommentCount;
+    el.style.color = newCommentCount > 0 ? '#E08000' : '#C9CACC';
+  }
+}
+
+function markCommentsRead(issueKey) {
+  if(!issueKey) return;
+  commentReadState[issueKey] = new Date().toISOString();
+  saveAll();
+  updateNewCommentCount();
+}
+
+function clearAllCommentMarkers() {
+  const now = new Date().toISOString();
+  for(const item of activityData) {
+    commentReadState[item.issue.key] = now;
+  }
+  saveAll();
+  updateNewCommentCount();
+  renderActivity();
+  appLogMsg('info','activity','Cleared all comment markers');
+}
+
 
 function renderActivity() {
   const el = document.getElementById('activity-content');
@@ -2779,6 +2871,14 @@ function renderActivity() {
   let items = [...activityData];
   if(filter === 'mentions') items = items.filter(i=>i.isMention);
   else if(filter === 'mytasks') items = items.filter(i=>i.issue.assignee === currentIam);
+  else if(filter === 'mine') items = items.filter(i=>i.isMine);
+  else if(filter === 'unread') {
+    items = items.filter(i=>{
+      if(i.isMine) return false;
+      const lastRead = commentReadState[i.issue.key] || '';
+      return !lastRead || (i.time||'') > lastRead;
+    });
+  }
 
   if(!items.length) {
     el.innerHTML = `<div style="text-align:center;padding:48px;color:#C9CACC">
@@ -2814,6 +2914,8 @@ function renderActivity() {
           const timeStr = (item.time||'').slice(11,16);
           const isComment = item.type==='comment';
           const sc = SC[item.issue.status]||SC.Backlog;
+          const lastRead = commentReadState[item.issue.key] || '';
+          const isNew = !item.isMine && (!lastRead || (item.time||'') > lastRead);
           return `<div onclick="openPane('${item.issue.key}')" 
             style="display:flex;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;border-bottom:1px solid #F4F4F5;
             ${item.isMention?'background:#FFF8E0;border-left:3px solid #E08000;':''}"
@@ -2824,7 +2926,9 @@ function renderActivity() {
             </div>
             <div style="flex:1;min-width:0">
               <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;flex-wrap:wrap">
-                <span style="font-size:12px;font-weight:700;color:#292E37">${item.author}</span>
+                <span style="font-size:12px;font-weight:700;color:#292E37">${item.isMine?'You':item.author}</span>
+                ${item.isMine?'<span style="font-size:9px;font-weight:700;background:#5E8E38;color:#fff;padding:1px 6px;border-radius:8px">you</span>':''}
+                ${isNew?'<span style="font-size:9px;font-weight:700;background:#2E99CE;color:#fff;padding:1px 6px;border-radius:8px">NEW</span>':''}
                 ${item.isMention?'<span style="font-size:9px;font-weight:700;background:#E08000;color:#fff;padding:1px 6px;border-radius:8px">@mentioned you</span>':''}
                 <span style="font-size:10px;color:#9EA0A4">${isComment?'commented on':'updated'}</span>
                 <a href="${BASE()}${item.issue.key}" target="_blank" onclick="event.stopPropagation()" 
