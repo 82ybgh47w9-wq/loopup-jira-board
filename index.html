@@ -298,7 +298,7 @@ button,select,textarea,input{font-family:inherit}
   </div>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v36</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v38</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -2144,7 +2144,7 @@ function renderSettings(){
         ? '<div style="font-size:13px;color:#9EA0A4;font-style:italic;padding:8px 0">No project groups yet — create one above.</div>'
         : `<div>
             <div style="display:flex;gap:0;flex-wrap:wrap;border-bottom:2px solid #E4E6E8;margin-bottom:14px">
-              ${pgNames.map(g=>`<button onclick="window._activePGTab=${JSON.stringify(g)};renderSettings()"
+              ${pgNames.map(g=>`<button data-tab="${g}" onclick="window._activePGTab=this.getAttribute('data-tab');renderSettings()"
                 style="padding:8px 16px;font-size:12px;font-weight:700;cursor:pointer;border:none;background:transparent;
                 border-bottom:3px solid ${g===activePG?'#2E99CE':'transparent'};margin-bottom:-2px;
                 color:${g===activePG?'#2E99CE':'#9EA0A4'}">
@@ -2206,7 +2206,7 @@ function renderSettings(){
         ? '<div style="font-size:13px;color:#9EA0A4;font-style:italic;padding:8px 0">No teams yet — create one above.</div>'
         : `<div>
             <div style="display:flex;gap:0;flex-wrap:wrap;border-bottom:2px solid #E4E6E8;margin-bottom:14px">
-              ${gnames.map(g=>`<button onclick="window._activeGrpTab=${JSON.stringify(g)};renderSettings()"
+              ${gnames.map(g=>`<button data-tab="${g}" onclick="window._activeGrpTab=this.getAttribute('data-tab');renderSettings()"
                 style="padding:8px 16px;font-size:12px;font-weight:700;cursor:pointer;border:none;background:transparent;
                 border-bottom:3px solid ${g===activeGrp?'#2E99CE':'transparent'};margin-bottom:-2px;
                 color:${g===activeGrp?'#2E99CE':'#9EA0A4'}">
@@ -2217,12 +2217,12 @@ function renderSettings(){
             <div>
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
                 <span style="font-size:14px;font-weight:700">${activeGrp}</span>
-                <button onclick="deleteGroup(${JSON.stringify(activeGrp)});window._activeGrpTab=null;renderSettings()"
+                <button data-grp="${activeGrp.replace(/"/g,'&quot;')}" onclick="const g=this.getAttribute('data-grp');deleteGroup(g);window._activeGrpTab=null;renderSettings()"
                   style="border:1px solid #D6202B;color:#D6202B;background:none;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:12px">Delete team</button>
               </div>
               <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Search to add members</div>
               <input class="form-input" id="grp-search-input" placeholder="Search Jira users by name or email…"
-                oninput="searchGroupUsers(${JSON.stringify(activeGrp)},this.value)" style="margin-bottom:8px">
+                data-grpname="${activeGrp}" oninput="searchGroupUsers(this.getAttribute('data-grpname'),this.value)" style="margin-bottom:8px">
               <div id="grp-results" style="display:flex;flex-direction:column;gap:4px;max-height:160px;overflow-y:auto;margin-bottom:14px"></div>
               ${(groups[activeGrp]||[]).length===0
                 ? '<div style="font-size:13px;color:#9EA0A4;font-style:italic;padding:8px 0">No members yet — search above to add people.</div>'
@@ -2307,12 +2307,12 @@ function togglePGProject(groupName,projectKey,add){
 function renderTeamList(){
   const el=document.getElementById("team-list");
   if(!el)return;
-  el.innerHTML=teamMembers.map((m,i)=>`<div class="team-member-row">${ava(m,26)}<span style="flex:1;font-size:13px;font-weight:600">${m}</span><button onclick="removeTeamMember(${i})" style="background:none;border:none;cursor:pointer;color:#D6202B;font-size:18px">×</button></div>`).join("");
+  el.innerHTML=teamMembers.map((m,i)=>`<div class="team-member-row">${ava(m,26)}<span style="flex:1;font-size:13px;font-weight:600">${m}</span><button data-idx="${i}" onclick="removeTeamMember(parseInt(this.getAttribute('data-idx')))" style="background:none;border:none;cursor:pointer;color:#D6202B;font-size:18px">×</button></div>`).join("");
 }
 function renderAdminList(){
   const el=document.getElementById("admin-list");
   if(!el)return;
-  el.innerHTML=adminUsers.map((e,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:7px 12px;background:#F7F8F9;border-radius:8px"><span style="flex:1;font-size:13px">${e}</span>${e===ADMIN_EMAIL?'<span style="font-size:11px;color:#9EA0A4">owner</span>':`<button onclick="revokeAdmin(${i})" style="background:none;border:none;cursor:pointer;color:#D6202B;font-size:12px">Revoke</button>`}</div>`).join("");
+  el.innerHTML=adminUsers.map((e,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:7px 12px;background:#F7F8F9;border-radius:8px"><span style="flex:1;font-size:13px">${e}</span>${e===ADMIN_EMAIL?'<span style="font-size:11px;color:#9EA0A4">owner</span>':`<button data-idx="${i}" onclick="revokeAdmin(parseInt(this.getAttribute('data-idx')))" style="background:none;border:none;cursor:pointer;color:#D6202B;font-size:12px">Revoke</button>`}</div>`).join("");
 }
 async function searchJiraUsers(q){
   const el=document.getElementById("user-results");
@@ -2322,7 +2322,7 @@ async function searchJiraUsers(q){
   try{
     const d=await jiraGet("/rest/api/3/user/search?query="+encodeURIComponent(q)+"&maxResults=8");
     const users=Array.isArray(d)?d:(d.values||[]);
-    el.innerHTML=users.length?users.map(u=>`<div class="user-result" onclick="addTeamMember('${(u.displayName||"").replace(/'/g,"\'")}')">
+    el.innerHTML=users.length?users.map(u=>`<div class="user-result" data-name="${(u.displayName||"").replace(/'/g,"\'")}" onclick="addTeamMember(this.getAttribute(\'data-name\'))">
       ${ava(u.displayName||"",24)}<div><div style="font-size:12px;font-weight:600">${u.displayName||""}</div><div style="font-size:10px;color:#9EA0A4">${u.emailAddress||""}</div></div></div>`).join("")
       :'<div style="font-size:12px;color:#9EA0A4;padding:6px">No users found</div>';
   }catch{el.innerHTML='<div style="font-size:12px;color:#D6202B;padding:6px">Search failed</div>';}
@@ -2411,7 +2411,7 @@ function renderGroupSearchResults(groupName, users){
     const email=u.emailAddress||u.email||'';
     if(!name)return'';
     const inGroup=(groups[groupName]||[]).includes(name);
-    return`<div onclick="grpSearchAdd(${JSON.stringify(groupName)},${JSON.stringify(name)})"
+    return`<div data-grp="${String(groupName).replace(/"/g,'&quot;')}" data-name="${String(name).replace(/"/g,'&quot;')}" onclick="grpSearchAdd(this.getAttribute('data-grp'),this.getAttribute('data-name'))"
       style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:7px;cursor:pointer;
       background:${inGroup?'#E0F0F8':'#fff'};border:1px solid ${inGroup?'#2E99CE':'#E4E6E8'};margin-bottom:4px">
       ${ava(name,26)}
