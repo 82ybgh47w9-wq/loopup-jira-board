@@ -252,9 +252,8 @@ button,select,textarea,input{font-family:inherit}
       <button onclick="closeSettings()" style="background:none;border:none;cursor:pointer;font-size:18px;color:#9EA0A4">✕</button>
     </div>
     <div class="settings-tabs">
-      <button class="active" onclick="setSettingsTab('team')">Team</button>
-      <button onclick="setSettingsTab('groups')">Groups</button>
-      <button onclick="setSettingsTab('projects')">Projects</button>
+      <button class="active" onclick="setSettingsTab('projects')">Projects</button>
+      <button onclick="setSettingsTab('groups')">Team</button>
       <button onclick="setSettingsTab('admin')">Admin</button>
       <button onclick="setSettingsTab('credentials')">Credentials</button>
     </div>
@@ -299,7 +298,7 @@ button,select,textarea,input{font-family:inherit}
   </div>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v29</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v30</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -325,7 +324,7 @@ button,select,textarea,input{font-family:inherit}
     <button onclick="setView('manager')" id="btn-manager" style="display:none">Manager</button>
   </div>
   <div id="group-sel-wrap" style="display:none;flex-direction:column;gap:1px">
-    <span style="font-size:9px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em">People group</span>
+    <span style="font-size:9px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em">Team</span>
     <select class="ctrl-select" id="group-sel" onchange="onGroupChange()">
       <option value="">All people</option>
     </select>
@@ -456,8 +455,9 @@ let allProjects=[];
 let dragKey=null;
 
 /* ══ PERSISTENCE ══ */
-function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,teamMembers,adminUsers,groups,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed}));}catch{}}
-function loadAll(){try{const d=JSON.parse(localStorage.getItem(STOR)||"{}");if(d.cfg)cfg=d.cfg;if(d.locStat)locStat=d.locStat;if(d.locPri)locPri=d.locPri;if(d.currentIam)currentIam=d.currentIam;if(d.currentProjFilter)currentProjFilter=d.currentProjFilter;if(d.currentGroup)currentGroup=d.currentGroup;if(d.teamMembers)teamMembers=d.teamMembers;if(d.adminUsers)adminUsers=d.adminUsers;if(d.groups)groups=d.groups;if(d.excludedProjects)excludedProjects=d.excludedProjects;if(d.currentView)currentView=d.currentView;if(d.currentLevel)currentLevel=d.currentLevel;if(d.rowCollapsed)rowCollapsed={...rowCollapsed,...d.rowCollapsed};if(d.swimCollapsed)swimCollapsed={...swimCollapsed,...d.swimCollapsed};}catch{}}
+function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed}));}catch{}}
+function loadAll(){try{const d=JSON.parse(localStorage.getItem(STOR)||"{}");if(d.cfg)cfg=d.cfg;if(d.locStat)locStat=d.locStat;if(d.locPri)locPri=d.locPri;if(d.currentIam)currentIam=d.currentIam;if(d.currentProjFilter)currentProjFilter=d.currentProjFilter;
+if(d.currentProjectGroup)currentProjectGroup=d.currentProjectGroup;if(d.currentGroup)currentGroup=d.currentGroup;if(d.teamMembers)teamMembers=d.teamMembers;if(d.adminUsers)adminUsers=d.adminUsers;if(d.groups)groups=d.groups;if(d.excludedProjects)excludedProjects=d.excludedProjects;if(d.currentView)currentView=d.currentView;if(d.currentLevel)currentLevel=d.currentLevel;if(d.rowCollapsed)rowCollapsed={...rowCollapsed,...d.rowCollapsed};if(d.swimCollapsed)swimCollapsed={...swimCollapsed,...d.swimCollapsed};}catch{}}
 
 /* ══ KV (active flags) ══ */
 async function kvSet(k,v){try{await fetch(KV+"?action=set&key="+encodeURIComponent(k)+"&value="+encodeURIComponent(v));}catch{}}
@@ -661,7 +661,9 @@ function updateStats(){const m=allIssues.map(gm);const ns=i=>normStatus(i.status
 function setView(v){
   currentView=v;
   // Activate correct tab button
-  document.querySelectorAll("#view-seg button").forEach(b=>{
+  // Ensure settings opens on projects tab by default
+if(!settingsTab) settingsTab='projects';
+document.querySelectorAll("#view-seg button").forEach(b=>{
     const onclick = b.getAttribute("onclick")||"";
     b.classList.toggle("active", onclick.includes("'"+v+"'"));
   });
@@ -2090,7 +2092,7 @@ function getActiveProjectsJQL() {
 
 
 function openSettings(tab){
-  settingsTab=tab||"team";
+  settingsTab=tab||"projects";
   document.getElementById("settings-overlay").classList.add("open");
   // Load project groups before rendering
   loadProjectGroups().then(()=>renderSettings());
@@ -2105,7 +2107,7 @@ function closeSettings(){
 }
 function setSettingsTab(t){
   settingsTab=t;
-  document.querySelectorAll(".settings-tabs button").forEach((b,i)=>b.classList.toggle("active",["team","groups","projects","admin","credentials"][i]===t));
+  document.querySelectorAll(".settings-tabs button").forEach((b,i)=>b.classList.toggle("active",["projects","groups","admin","credentials"][i]===t));
   renderSettings();
 }
 
@@ -2113,29 +2115,20 @@ function renderSettings(){
   const body=document.getElementById("settings-body");
   if(!body) return;
 
-  if(settingsTab==="team"){
-    body.innerHTML=`
-      <div style="font-size:12px;color:#9EA0A4">Search Jira users to add to the team:</div>
-      <div style="display:flex;gap:8px"><input class="form-input" id="user-search" placeholder="Type a name…" oninput="searchJiraUsers(this.value)" style="flex:1"></div>
-      <div id="user-results" style="max-height:140px;overflow-y:auto;display:flex;flex-direction:column;gap:3px"></div>
-      <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-top:8px">Current team</div>
-      <div id="team-list" style="display:flex;flex-direction:column;gap:5px"></div>`;
-    renderTeamList();
-
-  }else if(settingsTab==="groups"){
+  if(settingsTab==="groups"){
     const gnames=Object.keys(groups);
     const activeGrp=window._activeGrpTab||(gnames[0]||null);
     window._activeGrpTab=activeGrp;
-    if(!window.groupProjects) window.groupProjects={};
 
     body.innerHTML=`
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-        <input class="form-input" id="new-group-name" placeholder="New group name…" style="flex:1" onkeydown="if(event.key==='Enter')createGroup()">
-        <button class="primary-btn" onclick="createGroup()">+ Create</button>
+        <input class="form-input" id="new-group-name" placeholder="New team name (e.g. Marketing, Com Ops)…" style="flex:1" onkeydown="if(event.key==='Enter')createGroup()">
+        <button class="primary-btn" onclick="createGroup()">+ Create team</button>
       </div>
       ${gnames.length===0
-        ? '<div style="font-size:13px;color:#9EA0A4;font-style:italic">No groups yet — create one above.</div>'
+        ? '<div style="font-size:13px;color:#9EA0A4;font-style:italic;padding:8px 0">No teams yet — create one above.</div>'
         : `<div>
+            <!-- Team tabs -->
             <div style="display:flex;gap:0;flex-wrap:wrap;border-bottom:2px solid #E4E6E8;margin-bottom:14px">
               ${gnames.map(g=>`
                 <button onclick="window._activeGrpTab=${JSON.stringify(g)};renderSettings()"
@@ -2145,40 +2138,34 @@ function renderSettings(){
                   ${g} <span style="font-size:10px;background:${g===activeGrp?'#E0F0F8':'#EEF1F3'};color:${g===activeGrp?'#125462':'#9EA0A4'};border-radius:10px;padding:1px 6px;margin-left:3px">${(groups[g]||[]).length}</span>
                 </button>`).join('')}
             </div>
+
             ${activeGrp ? `
             <div>
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
                 <span style="font-size:14px;font-weight:700">${activeGrp}</span>
                 <button onclick="deleteGroup(${JSON.stringify(activeGrp)});window._activeGrpTab=null;renderSettings()"
-                  style="border:1px solid #D6202B;color:#D6202B;background:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px">Delete</button>
+                  style="border:1px solid #D6202B;color:#D6202B;background:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px">Delete team</button>
               </div>
-              <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Members (${(groups[activeGrp]||[]).length})</div>
+
+              <!-- Search to add members -->
+              <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Add members by searching</div>
+              <input class="form-input" id="grp-search-input" placeholder="Search Jira users by name or email…"
+                oninput="searchGroupUsers(${JSON.stringify(activeGrp)},this.value)" style="margin-bottom:8px">
+              <div id="grp-results" style="display:flex;flex-direction:column;gap:4px;max-height:160px;overflow-y:auto;margin-bottom:14px"></div>
+
+              <!-- Current members -->
               ${(groups[activeGrp]||[]).length===0
-                ? '<div style="font-size:13px;color:#9EA0A4;font-style:italic;margin-bottom:10px;padding:8px">No members yet</div>'
-                : `<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px">
+                ? '<div style="font-size:13px;color:#9EA0A4;font-style:italic;padding:8px 0">No members yet — search for people above to add them.</div>'
+                : `<div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Members (${(groups[activeGrp]||[]).length})</div>
+                  <div style="display:flex;flex-direction:column;gap:4px">
                     ${[...(groups[activeGrp]||[])].sort().map((m,idx)=>`
                       <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;background:#E0F0F8;border:1px solid #2E99CE">
                         ${ava(m,24)}
                         <span style="flex:1;font-size:13px;font-weight:700;color:#125462">${m}</span>
                         <button onclick="grpRemove(${JSON.stringify(activeGrp)},${idx})"
-                          style="background:none;border:none;cursor:pointer;color:#D6202B;font-size:18px;line-height:1;padding:2px 6px">×</button>
+                          style="background:none;border:none;cursor:pointer;color:#D6202B;font-size:18px;line-height:1;padding:2px 6px" title="Remove">×</button>
                       </div>`).join('')}
                   </div>`}
-              <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Add members</div>
-              <input class="form-input" id="grp-search-input" placeholder="Search Jira users by name…"
-                oninput="searchGroupUsers(${JSON.stringify(activeGrp)},this.value)" style="margin-bottom:6px">
-              <div id="grp-results" style="display:flex;flex-direction:column;gap:4px;max-height:140px;overflow-y:auto;margin-bottom:12px"></div>
-              ${teamMembers.filter(m=>!(groups[activeGrp]||[]).includes(m)).length>0
-                ? `<div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Quick add from team</div>
-                  <div style="display:flex;flex-direction:column;gap:4px;max-height:180px;overflow-y:auto;margin-bottom:14px">
-                    ${teamMembers.filter(m=>!(groups[activeGrp]||[]).includes(m)).sort().map((m,idx)=>`
-                      <div onclick="grpAdd(${JSON.stringify(activeGrp)},${idx})"
-                        style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;cursor:pointer;background:#F7F8F9;border:1px solid #E4E6E8">
-                        ${ava(m,24)}
-                        <span style="flex:1;font-size:13px;color:#292E37">${m}</span>
-                        <span style="font-size:16px;color:#5E8E38;font-weight:700">+</span>
-                      </div>`).join('')}
-                  </div>` : ''}
             </div>` : ''}
           </div>`}`;
 
@@ -2237,11 +2224,137 @@ function renderSettings(){
 
 
 
+/* ══ SETTINGS HELPERS ══════════════════════════════════════════════ */
+const gm=i=>({...i,status:locStat[i.key]||i.status,priority:locPri[i.key]||i.priority});
+
+function renderTeamList(){
+  const el=document.getElementById("team-list");
+  if(!el)return;
+  el.innerHTML=teamMembers.map((m,i)=>`<div class="team-member-row">${ava(m,26)}<span style="flex:1;font-size:13px;font-weight:600">${m}</span><button onclick="removeTeamMember(${i})" style="background:none;border:none;cursor:pointer;color:#D6202B;font-size:18px">×</button></div>`).join("");
+}
+
+function renderAdminList(){
+  const el=document.getElementById("admin-list");
+  if(!el)return;
+  el.innerHTML=adminUsers.map((e,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:7px 12px;background:#F7F8F9;border-radius:8px"><span style="flex:1;font-size:13px">${e}</span>${e===ADMIN_EMAIL?'<span style="font-size:11px;color:#9EA0A4">owner</span>':`<button onclick="revokeAdmin(${i})" style="background:none;border:none;cursor:pointer;color:#D6202B;font-size:12px">Revoke</button>`}</div>`).join("");
+}
+
+async function searchJiraUsers(q){
+  const el=document.getElementById("user-results");
+  if(!el)return;
+  if(q.length<2){el.innerHTML="";return;}
+  el.innerHTML=`<div style="font-size:12px;color:#9EA0A4;padding:6px">${spinHtml(14)} Searching…</div>`;
+  try{
+    const d=await jiraGet("/rest/api/3/user/search?query="+encodeURIComponent(q)+"&maxResults=8");
+    const users=Array.isArray(d)?d:(d.values||[]);
+    el.innerHTML=users.length?users.map(u=>`<div class="user-result" onclick="addTeamMember('${(u.displayName||"").replace(/'/g,"\'")}') ">${ava(u.displayName||"",24)}<div><div style="font-size:12px;font-weight:600">${u.displayName||""}</div><div style="font-size:10px;color:#9EA0A4">${u.emailAddress||""}</div></div></div>`).join(""):'<div style="font-size:12px;color:#9EA0A4;padding:6px">No users found</div>';
+  }catch{el.innerHTML='<div style="font-size:12px;color:#D6202B;padding:6px">Search failed</div>';}
+}
+
+function addTeamMember(name){if(!teamMembers.includes(name)){teamMembers.push(name);saveAll();renderTeamList();populateIamSelector();}}
+function removeTeamMember(i){teamMembers.splice(i,1);saveAll();renderTeamList();populateIamSelector();}
+function grantAdmin(){const e=(document.getElementById("admin-email-input").value||"").trim();if(!e||adminUsers.includes(e))return;adminUsers.push(e);saveAll();renderAdminList();}
+function revokeAdmin(i){if(adminUsers[i]===ADMIN_EMAIL)return;adminUsers.splice(i,1);saveAll();renderAdminList();}
+
+function updateCredentials(){
+  cfg.url=(document.getElementById("cfg-url2").value||"").trim().replace(/\/$/,"");
+  cfg.email=(document.getElementById("cfg-email2").value||"").trim();
+  cfg.token=(document.getElementById("cfg-token2").value||"").trim();
+  saveAll();closeSettings();init();
+}
+
+function toggleProjectExclusion(key,exclude){
+  if(exclude){if(!excludedProjects.includes(key))excludedProjects.push(key);}
+  else{excludedProjects=excludedProjects.filter(k=>k!==key);}
+  saveAll();
+}
+
+/* ══ PEOPLE GROUPS ══════════════════════════════════════════════════ */
+function createGroup(){
+  const name=(document.getElementById("new-group-name").value||"").trim();
+  if(!name||groups[name])return;
+  groups[name]=[];
+  saveAll();
+  renderSettings();
+}
+
+function deleteGroup(name){
+  delete groups[name];
+  if(currentGroup===name)currentGroup="";
+  saveAll();
+  populateGroupSelector();
+  renderSettings();
+}
+
+function editGroup(name){
+  const el=document.getElementById("group-edit-area");
+  if(!el)return;
+  el.innerHTML=`<div style="margin-top:12px;padding:12px;background:#F7F8F9;border-radius:8px">
+    <div style="font-size:12px;font-weight:700;margin-bottom:8px">Members of "${name}"</div>
+    ${teamMembers.map(m=>`<div style="display:flex;align-items:center;gap:8px;padding:4px 0">
+      <input type="checkbox" ${(groups[name]||[]).includes(m)?"checked":""} onchange="toggleGroupMember('${name.replace(/'/g,"\'")}','${m.replace(/'/g,"\'")}',this.checked)" style="cursor:pointer">
+      ${ava(m,20)}<span style="font-size:12px">${m}</span>
+    </div>`).join("")}
+  </div>`;
+}
+
+function toggleGroupMember(group,member,add){
+  if(!groups[group])groups[group]=[];
+  if(add){if(!groups[group].includes(member))groups[group].push(member);}
+  else{groups[group]=groups[group].filter(m=>m!==member);}
+  saveAll();
+}
+
+function grpAdd(g,idx){
+  const m=teamMembers.filter(x=>!(groups[g]||[]).includes(x)).sort()[idx];
+  if(m){toggleGroupMember(g,m,true);renderSettings();}
+}
+
+function grpRemove(g,idx){
+  const m=[...(groups[g]||[])].sort()[idx];
+  if(m){toggleGroupMember(g,m,false);renderSettings();}
+}
+
+function grpSearchAdd(g,name){
+  if(!teamMembers.includes(name))teamMembers.push(name);
+  toggleGroupMember(g,name,true);
+  renderSettings();
+}
+
+async function searchGroupUsers(groupName,query){
+  const el=document.getElementById("grp-results");
+  if(!el)return;
+  if(query.length<2){el.innerHTML="";return;}
+  el.innerHTML=`<div style="font-size:12px;color:#9EA0A4;padding:4px">${spinHtml(14)} Searching…</div>`;
+  try{
+    const d=await jiraGet("/rest/api/3/user/search?query="+encodeURIComponent(query)+"&maxResults=8");
+    const users=Array.isArray(d)?d:(d.values||[]);
+    if(!users.length){el.innerHTML='<div style="font-size:12px;color:#9EA0A4;padding:4px">No users found</div>';return;}
+    el.innerHTML=users.map((u,idx)=>{
+      const name=u.displayName||"";
+      const inGroup=(groups[groupName]||[]).includes(name);
+      return`<div onclick="grpSearchAdd(${JSON.stringify(groupName)},${JSON.stringify(name)})"
+        style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;cursor:pointer;
+        background:${inGroup?"#E0F0F8":"#fff"};border:1px solid ${inGroup?"#2E99CE":"#E4E6E8"}">
+        ${ava(name,24)}
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:600">${name}</div>
+          <div style="font-size:10px;color:#9EA0A4">${u.emailAddress||""}</div>
+        </div>
+        <span style="font-size:14px;color:${inGroup?"#2E99CE":"#5E8E38"};font-weight:700">${inGroup?"✓":"+"}</span>
+      </div>`;
+    }).join("");
+  }catch{el.innerHTML='<div style="font-size:12px;color:#D6202B;padding:4px">Search failed</div>';}
+}
+
+
 /* ══ BOOT ══ */
 loadAll();
 document.getElementById("iam-sel").value=currentIam||"";
 // Ensure correct tab is visually active on load
 if(!currentView || currentView==="myepics" || currentView==="manager") currentView="mytasks";
+// Ensure settings opens on projects tab by default
+if(!settingsTab) settingsTab='projects';
 document.querySelectorAll("#view-seg button").forEach(b=>{
   const onclick=b.getAttribute("onclick")||"";
   b.classList.toggle("active",onclick.includes("'"+currentView+"'"));
