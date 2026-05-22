@@ -257,7 +257,7 @@ button,select,textarea,input{font-family:inherit}
   <select class="proj-select" id="proj-filter" onchange="onProjFilter()"><option value="">All projects</option></select>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v10</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v11</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -917,27 +917,59 @@ function openCreate(defaultAssignee,e){
 }
 function closeCreate(){document.getElementById("create-overlay").classList.remove("open");}
 
-function renderCreateBody(){
-  const projOpts = allProjects.filter(p=>!excludedProjects.includes(p.key))
-    .map(p=>`<option value="${p.key}" ${p.key===createState.projectKey?"selected":""}>${p.key} — ${p.name}</option>`).join('');
-  const assigneeOpts = teamMembers.map(m=>`<option value="${m}" ${m===createState.assignee?"selected":""}>${m}</option>`).join('');
-  const typeOpts = ISSUE_TYPES.map(t=>`<option value="${t}" ${t===createState.issueType?"selected":""}>${t}</option>`).join('');
-  const priOpts = Object.keys(PC).map(p=>`<option value="${p}" ${p===createState.priority?"selected":""}>${p}</option>`).join('');
-  const statOpts = ['Selected','In Progress','Backlog'].map(s=>`<option value="${s}" ${s===createState.status?"selected":""}>${s}</option>`).join('');
+/* ══ CREATE TASK ══════════════════════════════════════════════════ */
+createState = {
+  projectKey:'', issueType:'Task', assignee:'', priority:'Medium',
+  status:'Selected', summary:'', description:'',
+  selLegend:'', selInit:'', selEpic:'',
+  legends:[], initiatives:[], epics:[],
+  aiSuggestions:[], aiLoading:false
+};
 
-  document.getElementById('create-body').innerHTML=`
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+function openCreate(defaultAssignee, e) {
+  if(e) e.stopPropagation();
+  createState = {
+    projectKey: currentProjFilter||'',
+    issueType:'Task', assignee: defaultAssignee||currentIam||'',
+    priority:'Medium', status:'Selected', summary:'', description:'',
+    selLegend:'', selInit:'', selEpic:'',
+    legends:[], initiatives:[], epics:[],
+    aiSuggestions:[], aiLoading:false
+  };
+  document.getElementById('create-overlay').classList.add('open');
+  renderCreateModal();
+  if(createState.projectKey) loadCreateHierarchy();
+}
+
+function closeCreate() {
+  document.getElementById('create-overlay').classList.remove('open');
+}
+
+function renderCreateModal() {
+  const projOpts = allProjects.filter(p=>!excludedProjects.includes(p.key))
+    .map(p=>`<option value="${p.key}" ${p.key===createState.projectKey?'selected':''}>${p.key} — ${p.name}</option>`).join('');
+  const assigneeOpts = teamMembers.map(m=>`<option value="${m}" ${m===createState.assignee?'selected':''}>${m}</option>`).join('');
+  const priOpts = Object.keys(PC).map(p=>`<option value="${p}" ${p===createState.priority?'selected':''}>${p}</option>`).join('');
+  const statOpts = ['Selected','In Progress','Backlog'].map(s=>`<option value="${s}" ${s===createState.status?'selected':''}>${s}</option>`).join('');
+  const typeOpts = ['Task','Initiative','Legend','Epic','Sub-task'].map(t=>`<option value="${t}" ${t===createState.issueType?'selected':''}>${t}</option>`).join('');
+
+  document.getElementById('create-body').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div>
         <label class="form-label">Project *</label>
-        <select class="form-select" id="ct-proj" onchange="createState.projectKey=this.value;loadHierarchyForCreate()">${projOpts}</select>
+        <select class="form-select" id="ct-proj" onchange="createState.projectKey=this.value;createState.selLegend='';createState.selInit='';createState.selEpic='';createState.legends=[];createState.initiatives=[];createState.epics=[];renderCreateModal();loadCreateHierarchy()">
+          <option value="">— select —</option>${projOpts}
+        </select>
       </div>
       <div>
-        <label class="form-label">Issue type *</label>
+        <label class="form-label">Issue type</label>
         <select class="form-select" id="ct-type" onchange="createState.issueType=this.value">${typeOpts}</select>
       </div>
       <div>
         <label class="form-label">Assignee</label>
-        <select class="form-select" id="ct-assignee" onchange="createState.assignee=this.value"><option value="">Unassigned</option>${assigneeOpts}</select>
+        <select class="form-select" id="ct-assignee" onchange="createState.assignee=this.value">
+          <option value="">Unassigned</option>${assigneeOpts}
+        </select>
       </div>
       <div>
         <label class="form-label">Priority</label>
@@ -952,808 +984,314 @@ function renderCreateBody(){
     <div>
       <label class="form-label">Summary (task name) *</label>
       <input class="form-input" id="ct-summary" type="text" placeholder="What needs to be done?"
-        oninput="createState.summary=this.value;debouncedEpicSearch()">
+        value="${createState.summary}"
+        oninput="createState.summary=this.value;scheduleAiSearch()">
     </div>
 
-    <!-- HIERARCHY SECTION -->
+    <!-- HIERARCHY PICKER -->
     <div style="border:1px solid #E4E6E8;border-radius:8px;overflow:hidden">
-      <div style="padding:10px 12px;background:#F7F8F9;border-bottom:1px solid #E4E6E8;font-size:11px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.05em">
-        Link to hierarchy (Project → Legend → Initiative → Epic)
+      <div style="padding:9px 12px;background:#F7F8F9;border-bottom:1px solid #E4E6E8;font-size:11px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.05em;display:flex;align-items:center;justify-content:space-between">
+        <span>Link to hierarchy</span>
+        <span style="font-size:10px;color:#9EA0A4;font-weight:400;text-transform:none">Project → Legend → Initiative → Epic</span>
       </div>
-      <div style="padding:12px" id="ct-hierarchy">
-        ${createState.projectKey ? '' : '<div style="font-size:13px;color:#9EA0A4;font-style:italic">Select a project above first</div>'}
+      <div id="ct-hierarchy-body" style="padding:12px;display:flex;flex-direction:column;gap:10px">
+        ${!createState.projectKey
+          ? '<div style="font-size:13px;color:#9EA0A4;font-style:italic">Select a project above first</div>'
+          : createState.legends.length===0
+            ? '<div style="font-size:13px;color:#9EA0A4">'+spinHtml(14)+' Loading hierarchy…</div>'
+            : renderHierarchyRows()
+        }
       </div>
     </div>
 
     <!-- AI SUGGESTIONS -->
-    <div id="epic-suggestion-wrap" style="display:${createState.projectKey?'block':'none'}">
-      <label class="form-label">AI suggested epics</label>
-      <div id="epic-suggestions" style="display:flex;flex-direction:column;gap:4px;max-height:160px;overflow-y:auto">
-        <div style="font-size:12px;color:#9EA0A4;font-style:italic">Type a task name above to get suggestions…</div>
-      </div>
+    <div id="ai-suggestions-wrap">
+      ${createState.aiLoading
+        ? '<div style="font-size:12px;color:#9EA0A4;display:flex;align-items:center;gap:6px">'+spinHtml(14)+' AI searching for relevant epics…</div>'
+        : createState.aiSuggestions.length>0
+          ? '<div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">AI suggested epics</div>' +
+            createState.aiSuggestions.map((s,i)=>`<div onclick="selectEpicSuggestion(${i})"
+              style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;cursor:pointer;border:1px solid ${createState.selEpic===s.key?'#2E99CE':'#EEF1F3'};background:${createState.selEpic===s.key?'#E0F0F8':'#fff'}">
+              ${tbadge(s.type||'Epic')}
+              <span style="font-size:10px;font-family:monospace;color:#257AA5">${s.key}</span>
+              <span style="font-size:12px;flex:1">${s.summary}</span>
+              <span style="font-size:10px;color:#9EA0A4">${s.project||''}</span>
+            </div>`).join('')
+          : ''
+      }
     </div>
 
     <div>
       <label class="form-label">Description <span style="font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
-      <textarea class="form-textarea" id="ct-desc" placeholder="Add more detail…" onchange="createState.description=this.value"></textarea>
+      <textarea class="form-textarea" id="ct-desc" placeholder="Add more detail…" oninput="createState.description=this.value">${createState.description}</textarea>
     </div>
-    <div id="create-msg" style="font-size:12px;min-height:18px"></div>`;
-
-  if(createState.projectKey) loadHierarchyForCreate();
+    <div id="create-msg" style="font-size:12px;min-height:16px"></div>`;
 }
 
-async function loadHierarchyForCreate(){
+function renderHierarchyRows() {
+  const filteredInits = createState.selLegend
+    ? createState.initiatives.filter(i=>i.parent_key===createState.selLegend)
+    : createState.initiatives;
+  const filteredEpics = createState.selInit
+    ? createState.epics.filter(e=>e.parent_key===createState.selInit)
+    : createState.epics;
+
+  return `
+    <!-- LEGEND ROW -->
+    <div>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+        <span style="font-size:11px;font-weight:700;color:#9A4500;background:#FFF0E6;padding:2px 7px;border-radius:4px">Legend</span>
+        <select class="form-select" id="ct-legend" style="flex:1" onchange="createState.selLegend=this.value;createState.selInit='';createState.selEpic='';refreshHierarchyRows()">
+          <option value="">— select existing —</option>
+          ${createState.legends.map(l=>`<option value="${l.key}" ${l.key===createState.selLegend?'selected':''}>${l.key} — ${l.summary}</option>`).join('')}
+        </select>
+        <button class="icon-btn" onclick="toggleInlineCreate('legend')" style="white-space:nowrap;flex-shrink:0">+ New</button>
+      </div>
+      <div id="inline-legend" style="display:none;background:#FFF8F3;border:1px solid #FFD4A8;border-radius:6px;padding:8px;margin-top:4px">
+        <input class="form-input" id="new-legend-val" placeholder="Legend name…" style="margin-bottom:6px">
+        <button class="primary-btn" onclick="createHierarchyItem('legend')" style="font-size:11px">Create Legend in Jira</button>
+        <span id="legend-creating" style="font-size:11px;color:#9EA0A4;margin-left:8px"></span>
+      </div>
+    </div>
+
+    <!-- INITIATIVE ROW -->
+    <div style="opacity:${createState.selLegend?'1':'0.4'}">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+        <span style="font-size:11px;font-weight:700;color:#6B3FA0;background:#F3EEFF;padding:2px 7px;border-radius:4px">Initiative</span>
+        <select class="form-select" id="ct-init" style="flex:1" ${!createState.selLegend?'disabled':''} onchange="createState.selInit=this.value;createState.selEpic='';refreshHierarchyRows()">
+          <option value="">${createState.selLegend?'— select existing —':'— select Legend first —'}</option>
+          ${filteredInits.map(i=>`<option value="${i.key}" ${i.key===createState.selInit?'selected':''}>${i.key} — ${i.summary}</option>`).join('')}
+        </select>
+        <button class="icon-btn" onclick="toggleInlineCreate('initiative')" ${!createState.selLegend?'disabled':''} style="white-space:nowrap;flex-shrink:0">+ New</button>
+      </div>
+      <div id="inline-initiative" style="display:none;background:#F8F3FF;border:1px solid #D4BAFF;border-radius:6px;padding:8px;margin-top:4px">
+        <input class="form-input" id="new-initiative-val" placeholder="Initiative name…" style="margin-bottom:6px">
+        <button class="primary-btn" onclick="createHierarchyItem('initiative')" style="font-size:11px">Create Initiative in Jira</button>
+        <span id="initiative-creating" style="font-size:11px;color:#9EA0A4;margin-left:8px"></span>
+      </div>
+    </div>
+
+    <!-- EPIC ROW -->
+    <div style="opacity:${createState.selInit?'1':'0.4'}">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+        <span style="font-size:11px;font-weight:700;color:#125462;background:#E0F0F8;padding:2px 7px;border-radius:4px">Epic</span>
+        <select class="form-select" id="ct-epic" style="flex:1" ${!createState.selInit?'disabled':''} onchange="createState.selEpic=this.value;refreshHierarchyRows()">
+          <option value="">${createState.selInit?'— select existing —':'— select Initiative first —'}</option>
+          ${filteredEpics.map(e=>`<option value="${e.key}" ${e.key===createState.selEpic?'selected':''}>${e.key} — ${e.summary}</option>`).join('')}
+        </select>
+        <button class="icon-btn" onclick="toggleInlineCreate('epic')" ${!createState.selInit?'disabled':''} style="white-space:nowrap;flex-shrink:0">+ New</button>
+      </div>
+      <div id="inline-epic" style="display:none;background:#EDF6FF;border:1px solid #A8D4FF;border-radius:6px;padding:8px;margin-top:4px">
+        <input class="form-input" id="new-epic-val" placeholder="Epic name…" style="margin-bottom:6px">
+        <button class="primary-btn" onclick="createHierarchyItem('epic')" style="font-size:11px">Create Epic in Jira</button>
+        <span id="epic-creating" style="font-size:11px;color:#9EA0A4;margin-left:8px"></span>
+      </div>
+    </div>
+
+    ${createState.selEpic
+      ? '<div style="background:#F0FBF0;border:1px solid #76B246;border-radius:6px;padding:8px 10px;font-size:12px;color:#3B6D11;font-weight:600">✓ Task will be created under epic: '+createState.selEpic+'</div>'
+      : '<div style="font-size:11px;color:#C9CACC;font-style:italic">Select or create a Legend → Initiative → Epic above</div>'
+    }`;
+}
+
+function refreshHierarchyRows() {
+  const el = document.getElementById('ct-hierarchy-body');
+  if(el) el.innerHTML = renderHierarchyRows();
+}
+
+function toggleInlineCreate(type) {
+  const el = document.getElementById('inline-'+type);
+  if(el) el.style.display = el.style.display==='none'?'block':'none';
+}
+
+async function loadCreateHierarchy() {
   const proj = createState.projectKey;
   if(!proj) return;
-  const el = document.getElementById('ct-hierarchy');
-  if(!el) return;
-  el.innerHTML = `<div style="color:#9EA0A4;font-size:12px">${spinHtml(14)} Loading hierarchy…</div>`;
-
   try {
-    // Fetch Legends (top level under project)
-    const legendJql = `project=${proj} AND issuetype=Legend ORDER BY created ASC`;
-    const ld = await jiraGet('/rest/api/3/search/jql?jql='+encodeURIComponent(legendJql)+'&fields=summary,issuetype,parent&maxResults=50');
-    const legends = (ld.issues||[]).map(parseIssue);
-
-    // Fetch Initiatives
-    const initJql = `project=${proj} AND issuetype=Initiative ORDER BY created ASC`;
-    const id = await jiraGet('/rest/api/3/search/jql?jql='+encodeURIComponent(initJql)+'&fields=summary,issuetype,parent&maxResults=100');
-    const initiatives = (id.issues||[]).map(parseIssue);
-
-    // Fetch Epics
-    const epicJql = `project=${proj} AND issuetype=Epic ORDER BY created ASC`;
-    const ed = await jiraGet('/rest/api/3/search/jql?jql='+encodeURIComponent(epicJql)+'&fields=summary,issuetype,parent&maxResults=100');
-    const epics = (ed.issues||[]).map(parseIssue);
-
-    createState._legends = legends;
-    createState._initiatives = initiatives;
-    createState._epics = epics;
-
-    renderHierarchyPicker(legends, initiatives, epics);
+    const [ld, id, ed] = await Promise.all([
+      jiraGet('/rest/api/3/search/jql?jql='+encodeURIComponent('project='+proj+' AND issuetype=Legend ORDER BY created ASC')+'&fields=summary,issuetype,parent&maxResults=50'),
+      jiraGet('/rest/api/3/search/jql?jql='+encodeURIComponent('project='+proj+' AND issuetype=Initiative ORDER BY created ASC')+'&fields=summary,issuetype,parent&maxResults=100'),
+      jiraGet('/rest/api/3/search/jql?jql='+encodeURIComponent('project='+proj+' AND issuetype=Epic ORDER BY created ASC')+'&fields=summary,issuetype,parent&maxResults=100'),
+    ]);
+    createState.legends = (ld.issues||[]).map(parseIssue);
+    createState.initiatives = (id.issues||[]).map(parseIssue);
+    createState.epics = (ed.issues||[]).map(parseIssue);
+    refreshHierarchyRows();
   } catch(e) {
-    el.innerHTML = `<div style="color:#D6202B;font-size:12px">Failed to load: ${e.message}</div>`;
+    const el = document.getElementById('ct-hierarchy-body');
+    if(el) el.innerHTML = '<div style="color:#D6202B;font-size:12px">Failed to load: '+e.message+'</div>';
   }
 }
 
-function renderHierarchyPicker(legends, initiatives, epics){
-  const el = document.getElementById('ct-hierarchy');
-  if(!el) return;
-
-  const selLegend = createState._selLegend || '';
-  const selInit = createState._selInit || '';
-  const selEpic = createState._selEpic || '';
-
-  const filteredInits = selLegend ? initiatives.filter(i=>i.parent_key===selLegend) : initiatives;
-  const filteredEpics = selInit ? epics.filter(e=>e.parent_key===selInit) : (selLegend ? epics.filter(e=>{
-    const init = initiatives.find(i=>i.key===e.parent_key);
-    return init && init.parent_key===selLegend;
-  }) : epics);
-
-  el.innerHTML = `
-    <div style="display:flex;flex-direction:column;gap:10px">
-
-      <!-- Legend -->
-      <div>
-        <label class="form-label" style="margin-bottom:4px">Legend</label>
-        <div style="display:flex;gap:6px">
-          <select class="form-select" id="ct-legend" onchange="createState._selLegend=this.value;createState._selInit='';createState._selEpic='';renderHierarchyPicker(createState._legends,createState._initiatives,createState._epics)" style="flex:1">
-            <option value="">— select or create new —</option>
-            ${legends.map(l=>`<option value="${l.key}" ${l.key===selLegend?'selected':''}>${l.key} — ${l.summary}</option>`).join('')}
-          </select>
-          <button class="icon-btn" onclick="showCreateInline('legend')" title="Create new Legend">+ New</button>
-        </div>
-        <div id="create-legend-inline" style="display:none;margin-top:6px">
-          <input class="form-input" id="new-legend-name" placeholder="New Legend name…" style="margin-bottom:4px">
-          <button class="primary-btn" onclick="createInlineItem('legend')" style="font-size:11px;padding:5px 10px">Create Legend</button>
-        </div>
-      </div>
-
-      <!-- Initiative -->
-      <div>
-        <label class="form-label" style="margin-bottom:4px">Initiative</label>
-        <div style="display:flex;gap:6px">
-          <select class="form-select" id="ct-init" onchange="createState._selInit=this.value;createState._selEpic='';renderHierarchyPicker(createState._legends,createState._initiatives,createState._epics)" style="flex:1" ${!selLegend?'disabled':''}>
-            <option value="">— ${selLegend?'select or create new':'select Legend first'} —</option>
-            ${filteredInits.map(i=>`<option value="${i.key}" ${i.key===selInit?'selected':''}>${i.key} — ${i.summary}</option>`).join('')}
-          </select>
-          <button class="icon-btn" onclick="showCreateInline('initiative')" ${!selLegend?'disabled':''} title="Create new Initiative">+ New</button>
-        </div>
-        <div id="create-initiative-inline" style="display:none;margin-top:6px">
-          <input class="form-input" id="new-initiative-name" placeholder="New Initiative name…" style="margin-bottom:4px">
-          <button class="primary-btn" onclick="createInlineItem('initiative')" style="font-size:11px;padding:5px 10px">Create Initiative</button>
-        </div>
-      </div>
-
-      <!-- Epic -->
-      <div>
-        <label class="form-label" style="margin-bottom:4px">Epic *</label>
-        <div style="display:flex;gap:6px">
-          <select class="form-select" id="ct-epic-sel" onchange="createState._selEpic=this.value;createState.epicKey=this.value" style="flex:1" ${!selInit?'disabled':''}>
-            <option value="">— ${selInit?'select or create new':'select Initiative first'} —</option>
-            ${filteredEpics.map(e=>`<option value="${e.key}" ${e.key===selEpic?'selected':''}>${e.key} — ${e.summary}</option>`).join('')}
-          </select>
-          <button class="icon-btn" onclick="showCreateInline('epic')" ${!selInit?'disabled':''} title="Create new Epic">+ New</button>
-        </div>
-        <div id="create-epic-inline" style="display:none;margin-top:6px">
-          <input class="form-input" id="new-epic-name" placeholder="New Epic name…" style="margin-bottom:4px">
-          <button class="primary-btn" onclick="createInlineItem('epic')" style="font-size:11px;padding:5px 10px">Create Epic</button>
-        </div>
-      </div>
-
-      ${selEpic ? `<div style="background:#F0FBF0;border-radius:6px;padding:8px 10px;font-size:12px;color:#3B6D11;font-weight:600">✓ Will be created under: ${selEpic}</div>` : ''}
-    </div>`;
-}
-
-function showCreateInline(type){
-  const el = document.getElementById('create-'+type+'-inline');
-  if(el) el.style.display = el.style.display==='none' ? 'block' : 'none';
-}
-
-async function createInlineItem(type){
+async function createHierarchyItem(type) {
   const proj = createState.projectKey;
-  let name, parentKey, issueTypeName;
+  const nameEl = document.getElementById('new-'+type+'-val');
+  const statusEl = document.getElementById(type+'-creating');
+  const name = (nameEl?.value||'').trim();
+  if(!name){ alert('Please enter a name'); return; }
 
-  if(type==='legend'){
-    name = (document.getElementById('new-legend-name').value||'').trim();
-    if(!name){alert('Please enter a name');return;}
-    issueTypeName = 'Legend';
-    parentKey = null;
-  } else if(type==='initiative'){
-    name = (document.getElementById('new-initiative-name').value||'').trim();
-    if(!name){alert('Please enter a name');return;}
-    issueTypeName = 'Initiative';
-    parentKey = createState._selLegend;
-    if(!parentKey){alert('Please select a Legend first');return;}
-  } else if(type==='epic'){
-    name = (document.getElementById('new-epic-name').value||'').trim();
-    if(!name){alert('Please enter a name');return;}
-    issueTypeName = 'Epic';
-    parentKey = createState._selInit;
-    if(!parentKey){alert('Please select an Initiative first');return;}
+  const typeMap = {legend:'Legend', initiative:'Initiative', epic:'Epic'};
+  const parentMap = {
+    legend: null,
+    initiative: createState.selLegend,
+    epic: createState.selInit
+  };
+
+  if(type!=='legend' && !parentMap[type]) {
+    alert('Please select a ' + (type==='initiative'?'Legend':'Initiative') + ' first');
+    return;
   }
 
-  const btn = event.target;
-  btn.disabled=true; btn.textContent='Creating…';
+  if(statusEl) statusEl.textContent = 'Creating…';
+  const btn = event.target; btn.disabled=true;
 
-  const payload = {fields:{project:{key:proj},summary:name,issuetype:{name:issueTypeName}}};
-  if(parentKey) payload.fields.parent = {key:parentKey};
+  const payload = {fields:{project:{key:proj},summary:name,issuetype:{name:typeMap[type]}}};
+  if(parentMap[type]) payload.fields.parent = {key:parentMap[type]};
 
   const result = await createIssue(payload);
-  if(result.success){
-    btn.textContent='✓ Created '+result.key;
-    // Reload hierarchy
-    await loadHierarchyForCreate();
-    // Auto-select the newly created item
-    if(type==='legend') createState._selLegend = result.key;
-    if(type==='initiative') createState._selInit = result.key;
-    if(type==='epic'){ createState._selEpic = result.key; createState.epicKey = result.key; }
-    renderHierarchyPicker(createState._legends, createState._initiatives, createState._epics);
+  if(result.success) {
+    if(statusEl) statusEl.textContent = '✓ Created '+result.key;
+    // Add to local list and auto-select
+    const newItem = {key:result.key, summary:name, type:typeMap[type],
+      parent_key:parentMap[type]||null, status:'To Do', priority:'Medium',
+      assignee:'Unassigned', project:proj};
+    if(type==='legend'){ createState.legends.push(newItem); createState.selLegend=result.key; }
+    if(type==='initiative'){ createState.initiatives.push(newItem); createState.selInit=result.key; }
+    if(type==='epic'){ createState.epics.push(newItem); createState.selEpic=result.key; }
+    setTimeout(()=>{ refreshHierarchyRows(); document.getElementById('inline-'+type).style.display='none'; }, 800);
   } else {
-    btn.disabled=false; btn.textContent='Create '+type;
-    alert('Failed to create. Check project permissions.');
+    if(statusEl) statusEl.textContent = 'Failed — check permissions';
+    btn.disabled=false;
   }
 }
 
-
-let epicSearchTimer=null;
-function debouncedEpicSearch(){clearTimeout(epicSearchTimer);epicSearchTimer=setTimeout(triggerEpicSearch,800);}
-async function triggerEpicSearch(){
-  const summary=document.getElementById("ct-summary")?.value||"";
-  const proj=document.getElementById("ct-proj")?.value||"";
-  if(summary.length<3)return;
-  createState.loadingEpics=true;createState.epicSuggestions=[];
-  const sugEl=document.getElementById("epic-suggestions");
-  if(sugEl)sugEl.innerHTML=`<div style="font-size:12px;color:#9EA0A4;padding:6px">${spinHtml()} Searching Jira for relevant epics…</div>`;
-  const suggestions=await searchEpicsWithAI(summary,proj);
-  createState.epicSuggestions=suggestions;createState.loadingEpics=false;
-  if(sugEl)sugEl.innerHTML=suggestions.length
-    ?suggestions.map(e=>`<div class="epic-suggestion" onclick="selectEpic('${e.key}','${(e.summary||"").replace(/'/g,"\\'")}')">
-        ${tbadge(e.type||"Epic")}
-        <span style="font-size:10px;font-family:monospace;color:#257AA5">${e.key}</span>
-        <span style="font-size:12px;color:#292E37;flex:1">${e.summary}</span>
-        <span style="font-size:10px;color:#9EA0A4">${e.project||""}</span>
-      </div>`).join("")
-    :`<div style="font-size:12px;color:#9EA0A4;padding:6px">No suggestions found. Enter an epic key manually above.</div>`;
-}
-function selectEpic(key,summary){createState.epicKey=key;const inp=document.getElementById("ct-epic-search");if(inp)inp.value=key+" — "+summary;const sugEl=document.getElementById("epic-suggestions");if(sugEl)sugEl.innerHTML=`<div style="font-size:12px;color:#3B6D11;padding:6px">✓ Selected: ${key} — ${summary}</div>`;}
-
-async function submitCreate(){
-  const summary=(document.getElementById("ct-summary")?.value||"").trim();
-  const proj=document.getElementById("ct-proj")?.value||"";
-  const epicKey=(document.getElementById("ct-epic-search")?.value||"").split("—")[0].trim();
-  const msg=document.getElementById("create-msg");
-  if(!summary){msg.textContent="Please enter a summary.";msg.style.color="#D6202B";return;}
-  if(!proj){msg.textContent="Please select a project.";msg.style.color="#D6202B";return;}
-  const btn=document.getElementById("create-submit-btn");btn.disabled=true;btn.innerHTML=spinHtml(13,"#fff")+" Creating…";
-  const assignee=document.getElementById("ct-assignee")?.value||"";
-  const priority=document.getElementById("ct-priority")?.value||"Medium";
-  const issueType=document.getElementById("ct-type")?.value||"Task";
-  const desc=document.getElementById("ct-desc")?.value||"";
-  const payload={fields:{project:{key:proj},summary,issuetype:{name:issueType},priority:{name:priority},description:desc?{type:"doc",version:1,content:[{type:"paragraph",content:[{type:"text",text:desc}]}]}:undefined}};
-  if(assignee){
-    // look up account ID
-    try{const users=await jiraGet("/rest/api/3/user/search?query="+encodeURIComponent(assignee)+"&maxResults=1");if(users[0])payload.fields.assignee={accountId:users[0].accountId};}catch{}
+function selectEpicSuggestion(idx) {
+  const s = createState.aiSuggestions[idx];
+  if(!s) return;
+  createState.selEpic = s.key;
+  // Try to walk up hierarchy
+  const epic = createState.epics.find(e=>e.key===s.key);
+  if(epic && epic.parent_key) {
+    const init = createState.initiatives.find(i=>i.key===epic.parent_key);
+    if(init) {
+      createState.selInit = init.key;
+      if(init.parent_key) createState.selLegend = init.parent_key;
+    }
   }
-  if(epicKey&&epicKey.includes("-")){payload.fields.parent={key:epicKey};}
-  const result=await createIssue(payload);
-  if(result.success){
-    // transition to desired status
-    const status=document.getElementById("ct-status")?.value||"Selected";
-    if(status!=="To Do"&&status!=="Backlog")await transitionIssue(result.key,status);
-    msg.textContent="✓ Created "+result.key;msg.style.color="#3B6D11";
-    setTimeout(()=>{closeCreate();doFetch(true);},1200);
-  }else{msg.textContent="Failed to create. Check project permissions.";msg.style.color="#D6202B";btn.disabled=false;btn.innerHTML="Create in Jira";}
+  renderCreateModal();
 }
 
-/* ══ SETTINGS ══ */
-function openSettings(tab){settingsTab=tab||"team";document.getElementById("settings-overlay").classList.add("open");renderSettings();}
-function closeSettings(){document.getElementById("settings-overlay").classList.remove("open");saveAll();populateIamSelector();populateGroupSelector();renderMain();}
-function setSettingsTab(t){settingsTab=t;document.querySelectorAll(".settings-tabs button").forEach((b,i)=>b.classList.toggle("active",["team","groups","projects","admin","credentials"][i]===t));renderSettings();}
+let aiSearchTimer = null;
+function scheduleAiSearch() {
+  clearTimeout(aiSearchTimer);
+  aiSearchTimer = setTimeout(runAiSearch, 900);
+}
 
-function renderSettings(){
-  const body=document.getElementById("settings-body");
-  if(settingsTab==="team"){
-    body.innerHTML=`
-      <div style="font-size:12px;color:#5D7987;padding:8px 10px;background:#E0F0F8;border-radius:6px;margin-bottom:8px">
-        <strong>Finding people:</strong> Search by first name, last name, or email. Try "Allison", "Harry", or part of their name.
-      </div>
-      <div style="display:flex;gap:8px">
-        <input class="form-input" id="user-search" placeholder="Search by name or email…" oninput="searchJiraUsers(this.value)" style="flex:1">
-        <button class="primary-btn" onclick="searchJiraUsers(document.getElementById('user-search').value)">Search</button>
-      </div>
-      <div id="user-results" style="max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:3px;margin-top:6px"></div>
-      <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-top:12px">Current team (${teamMembers.length} people)</div>
-      <div id="team-list" style="display:flex;flex-direction:column;gap:5px"></div>`;
-    renderTeamList();
-  }else if(settingsTab==="groups"){
-    const gnames=Object.keys(groups);
-    const activeGrp=window._activeGrpTab||(gnames[0]||null);
-    window._activeGrpTab=activeGrp;
-    if(!window.groupProjects) window.groupProjects={};
-
-    body.innerHTML=`
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-        <input class="form-input" id="new-group-name" placeholder="New group name…" style="flex:1" onkeydown="if(event.key==='Enter')createGroup()">
-        <button class="primary-btn" onclick="createGroup()">+ Create</button>
-      </div>
-
-      ${gnames.length===0
-        ? '<div style="font-size:13px;color:#9EA0A4;font-style:italic">No groups yet — create one above.</div>'
-        : `<div>
-            <div style="display:flex;gap:0;flex-wrap:wrap;border-bottom:2px solid #E4E6E8;margin-bottom:14px">
-              ${gnames.map(g=>`
-                <button onclick="window._activeGrpTab=${JSON.stringify(g)};renderSettings()"
-                  style="padding:8px 16px;font-size:12px;font-weight:700;cursor:pointer;border:none;background:transparent;
-                  border-bottom:3px solid ${g===activeGrp?'#2E99CE':'transparent'};margin-bottom:-2px;
-                  color:${g===activeGrp?'#2E99CE':'#9EA0A4'}">
-                  ${g} <span style="font-size:10px;background:${g===activeGrp?'#E0F0F8':'#EEF1F3'};color:${g===activeGrp?'#125462':'#9EA0A4'};border-radius:10px;padding:1px 6px;margin-left:3px">${(groups[g]||[]).length}</span>
-                </button>`).join('')}
-            </div>
-
-            ${activeGrp ? `
-            <div>
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-                <span style="font-size:14px;font-weight:700">${activeGrp}</span>
-                <button onclick="deleteGroup(${JSON.stringify(activeGrp)});window._activeGrpTab=null;renderSettings()"
-                  style="border:1px solid #D6202B;color:#D6202B;background:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px">Delete</button>
-              </div>
-
-              <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Members (${(groups[activeGrp]||[]).length})</div>
-              ${(groups[activeGrp]||[]).length===0
-                ? '<div style="font-size:13px;color:#9EA0A4;font-style:italic;margin-bottom:10px;padding:8px">No members yet</div>'
-                : `<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px">
-                    ${[...(groups[activeGrp]||[])].sort().map((m,idx)=>`
-                      <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;background:#E0F0F8;border:1px solid #2E99CE">
-                        ${ava(m,24)}
-                        <span style="flex:1;font-size:13px;font-weight:700;color:#125462">${m}</span>
-                        <button onclick="grpRemove(${JSON.stringify(activeGrp)},${idx})"
-                          style="background:none;border:none;cursor:pointer;color:#D6202B;font-size:18px;line-height:1;padding:2px 6px">×</button>
-                      </div>`).join('')}
-                  </div>`}
-
-              <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Add members</div>
-              <input class="form-input" id="grp-search-input" placeholder="Search Jira users by name…"
-                oninput="searchGroupUsers(${JSON.stringify(activeGrp)},this.value)" style="margin-bottom:6px">
-              <div id="grp-results" style="display:flex;flex-direction:column;gap:4px;max-height:140px;overflow-y:auto;margin-bottom:12px"></div>
-
-              ${teamMembers.filter(m=>!(groups[activeGrp]||[]).includes(m)).length>0
-                ? `<div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Quick add from team</div>
-                  <div style="display:flex;flex-direction:column;gap:4px;max-height:180px;overflow-y:auto;margin-bottom:14px">
-                    ${teamMembers.filter(m=>!(groups[activeGrp]||[]).includes(m)).sort().map((m,idx)=>`
-                      <div onclick="grpAdd(${JSON.stringify(activeGrp)},${idx})"
-                        style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;cursor:pointer;background:#F7F8F9;border:1px solid #E4E6E8">
-                        ${ava(m,24)}
-                        <span style="flex:1;font-size:13px;color:#292E37">${m}</span>
-                        <span style="font-size:16px;color:#5E8E38;font-weight:700">+</span>
-                      </div>`).join('')}
-                  </div>` : ''}
-
-              <div style="border-top:1px solid #E4E6E8;padding-top:12px">
-                <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Project scope</div>
-                <div style="font-size:12px;color:#9EA0A4;margin-bottom:8px">Uncheck to narrow this group to specific projects.</div>
-                <div style="max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
-                  ${allProjects.filter(p=>!excludedProjects.includes(p.key)).map(p=>{
-                    if(!window.groupProjects[activeGrp]) window.groupProjects[activeGrp]=[];
-                    const excl=window.groupProjects[activeGrp].includes(p.key);
-                    return`<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;background:#F7F8F9">
-                      <input type="checkbox" ${excl?'':'checked'} onchange="toggleGroupProject(${JSON.stringify(activeGrp)},'${p.key}',!this.checked)" style="cursor:pointer">
-                      <span style="font-size:11px;font-weight:700;color:#257AA5;font-family:monospace">${p.key}</span>
-                      <span style="font-size:12px;color:#292E37">${p.name}</span>
-                    </div>`;
-                  }).join('')}
-                </div>
-              </div>
-            </div>` : ''}
-          </div>`}`;
-  }else if(settingsTab==="projects"){
-    body.innerHTML=`
-      <div style="font-size:12px;color:#9EA0A4">Excluded projects won't appear in project filter or epic search.</div>
-      <div style="max-height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
-        ${allProjects.map(p=>`<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;background:#F7F8F9">
-          <input type="checkbox" ${excludedProjects.includes(p.key)?"":"checked"} onchange="toggleProjectExclusion('${p.key}',!this.checked)" style="cursor:pointer">
-          <span style="font-size:12px;font-weight:600;color:#257AA5;font-family:monospace">${p.key}</span>
-          <span style="font-size:12px;color:#292E37">${p.name}</span>
-        </div>`).join("")}
-      </div>`;
-  }else if(settingsTab==="admin"){
-    const isOwner=cfg.email===ADMIN_EMAIL||adminUsers.includes(cfg.email);
-    if(!isOwner){body.innerHTML=`<div style="font-size:13px;color:#9EA0A4;font-style:italic">Only admin users can manage access.</div>`;return;}
-    body.innerHTML=`
-      <div style="font-size:12px;color:#9EA0A4">Users with Manager Board access:</div>
-      <div id="admin-list" style="display:flex;flex-direction:column;gap:5px"></div>
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <input class="form-input" id="admin-email-input" placeholder="Email to grant manager access…" style="flex:1">
-        <button class="primary-btn" onclick="grantAdmin()">Grant</button>
-      </div>`;
-    renderAdminList();
-  }else{
-    body.innerHTML=`
-      <label class="form-label">Jira site URL</label><input class="setup-input" id="cfg-url2" type="text" value="${cfg.url}">
-      <label class="form-label">Email</label><input class="setup-input" id="cfg-email2" type="email" value="${cfg.email}">
-      <label class="form-label">API Token</label><input class="setup-input" id="cfg-token2" type="password" value="${cfg.token}">
-      <button class="primary-btn" style="margin-top:12px;width:100%;padding:9px" onclick="updateCredentials()">Save credentials</button>`;
+async function runAiSearch() {
+  const summary = createState.summary;
+  const proj = createState.projectKey;
+  if(summary.length < 3) return;
+  createState.aiLoading = true;
+  const wrap = document.getElementById('ai-suggestions-wrap');
+  if(wrap) wrap.innerHTML = '<div style="font-size:12px;color:#9EA0A4;display:flex;align-items:center;gap:6px">'+spinHtml(14)+' AI searching for relevant epics…</div>';
+  try {
+    const suggestions = await searchEpicsWithAI(summary, proj);
+    createState.aiSuggestions = suggestions;
+  } catch { createState.aiSuggestions = []; }
+  createState.aiLoading = false;
+  // Re-render just the suggestions area
+  const wrap2 = document.getElementById('ai-suggestions-wrap');
+  if(wrap2 && createState.aiSuggestions.length>0) {
+    wrap2.innerHTML = '<div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">AI suggested epics — click to select</div>' +
+      createState.aiSuggestions.map((s,i)=>`<div onclick="selectEpicSuggestion(${i})"
+        style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;cursor:pointer;border:1px solid ${createState.selEpic===s.key?'#2E99CE':'#EEF1F3'};background:${createState.selEpic===s.key?'#E0F0F8':'#fff'};margin-bottom:4px">
+        ${tbadge(s.type||'Epic')}
+        <span style="font-size:10px;font-family:monospace;color:#257AA5">${s.key}</span>
+        <span style="font-size:12px;flex:1">${s.summary}</span>
+        <span style="font-size:10px;color:#9EA0A4">${s.project||''}</span>
+      </div>`).join('');
+  } else if(wrap2) {
+    wrap2.innerHTML = '';
   }
 }
 
-function renderTeamList(){const el=document.getElementById("team-list");if(!el)return;el.innerHTML=teamMembers.map((m,i)=>`<div class="team-member-row">${ava(m,26)}<span style="flex:1;font-size:13px;font-weight:600">${m}</span><button onclick="removeTeamMember(${i})" style="background:none;border:none;cursor:pointer;color:#D6202B;font-size:18px">×</button></div>`).join("");}
-function renderAdminList(){const el=document.getElementById("admin-list");if(!el)return;el.innerHTML=adminUsers.map((e,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:7px 12px;background:#F7F8F9;border-radius:8px"><span style="flex:1;font-size:13px">${e}</span>${e===ADMIN_EMAIL?'<span style="font-size:11px;color:#9EA0A4">owner</span>':`<button onclick="revokeAdmin(${i})" style="background:none;border:none;cursor:pointer;color:#D6202B;font-size:12px">Revoke</button>`}</div>`).join("");}
+async function submitCreate() {
+  const summary = (document.getElementById('ct-summary')?.value||'').trim();
+  const proj = document.getElementById('ct-proj')?.value||'';
+  const msg = document.getElementById('create-msg');
 
-async function searchJiraUsers(q){const el=document.getElementById("user-results");if(!el)return;if(q.length<2){el.innerHTML="";return;}el.innerHTML=`<div style="font-size:12px;color:#9EA0A4;padding:6px">${spinHtml(14)} Searching…</div>`;try{const d=await jiraGet("/rest/api/3/user/search?query="+encodeURIComponent(q)+"&maxResults=8");const users=Array.isArray(d)?d:(d.values||[]);el.innerHTML=users.length?users.map(u=>`<div class="user-result" onclick="addTeamMember('${(u.displayName||"").replace(/'/g,"\\'")}')">${ava(u.displayName||"",24)}<div><div style="font-size:12px;font-weight:600">${u.displayName||""}</div><div style="font-size:10px;color:#9EA0A4">${u.emailAddress||""}</div></div></div>`).join(""):'<div style="font-size:12px;color:#9EA0A4;padding:6px">No users found</div>';}catch{el.innerHTML='<div style="font-size:12px;color:#D6202B;padding:6px">Search failed</div>';}}
+  if(!summary){ if(msg){msg.textContent='Please enter a summary.';msg.style.color='#D6202B';} return; }
+  if(!proj){ if(msg){msg.textContent='Please select a project.';msg.style.color='#D6202B';} return; }
+  if(!createState.selEpic){ if(msg){msg.textContent='Please select or create an Epic to link this task to.';msg.style.color='#D6202B';} return; }
 
-function addTeamMember(name){if(!teamMembers.includes(name)){teamMembers.push(name);saveAll();renderTeamList();populateIamSelector();}}
-function removeTeamMember(i){teamMembers.splice(i,1);saveAll();renderTeamList();populateIamSelector();}
-function grantAdmin(){const e=(document.getElementById("admin-email-input").value||"").trim();if(!e||adminUsers.includes(e))return;adminUsers.push(e);saveAll();renderAdminList();}
-function revokeAdmin(i){if(adminUsers[i]===ADMIN_EMAIL)return;adminUsers.splice(i,1);saveAll();renderAdminList();}
-function updateCredentials(){cfg.url=(document.getElementById("cfg-url2").value||"").trim().replace(/\/$/,"");cfg.email=(document.getElementById("cfg-email2").value||"").trim();cfg.token=(document.getElementById("cfg-token2").value||"").trim();saveAll();closeSettings();init();}
-function toggleProjectExclusion(key,exclude){if(exclude){if(!excludedProjects.includes(key))excludedProjects.push(key);}else{excludedProjects=excludedProjects.filter(k=>k!==key);}saveAll();}
+  const btn = document.getElementById('create-submit-btn');
+  btn.disabled=true; btn.innerHTML=spinHtml(13,'#fff')+' Creating…';
 
-function createGroup(){
-  const inp=document.getElementById("new-group-name");
-  const name=(inp?inp.value:"").trim();
-  if(!name){alert("Please enter a group name first.");return;}
-  if(groups[name]){alert("'"+name+"' already exists.");return;}
-  groups[name]=[];
-  saveAll();populateGroupSelector();renderSettings();
-}
-function deleteGroup(name){
-  if(!confirm("Delete group '"+name+"'?"))return;
-  delete groups[name];
-  if(currentGroup===name){currentGroup="";}
-  saveAll();populateGroupSelector();renderSettings();
-}
-function toggleGroupMember(group,member,add){
-  if(!groups[group])groups[group]=[];
-  if(add){if(!groups[group].includes(member))groups[group].push(member);}
-  else{groups[group]=groups[group].filter(m=>m!==member);}
-  saveAll();populateGroupSelector();
-}
+  const assignee = document.getElementById('ct-assignee')?.value||'';
+  const priority = document.getElementById('ct-priority')?.value||'Medium';
+  const issueType = document.getElementById('ct-type')?.value||'Task';
+  const desc = document.getElementById('ct-desc')?.value||'';
+  const status = document.getElementById('ct-status')?.value||'Selected';
 
+  const payload = {fields:{
+    project:{key:proj},
+    summary,
+    issuetype:{name:issueType},
+    priority:{name:priority},
+    parent:{key:createState.selEpic},
+  }};
 
-async function searchGroupUsers(groupName, query){
-  const el=document.getElementById('grp-results');
-  if(!el)return;
-  if(query.length<2){el.innerHTML='';return;}
-  el.innerHTML=`<div style="font-size:12px;color:#9EA0A4;padding:4px">${spinHtml(14)} Searching…</div>`;
-  try{
-    const d=await jiraGet('/rest/api/3/user/search?query='+encodeURIComponent(query)+'&maxResults=8');
-    const users=Array.isArray(d)?d:(d.values||[]);
-    if(!users.length){el.innerHTML='<div style="font-size:12px;color:#9EA0A4;padding:4px">No users found</div>';return;}
-    el.innerHTML=users.map((u,idx)=>{
-      const name=u.displayName||'';
-      const inGroup=(groups[groupName]||[]).includes(name);
-      return`<div onclick="grpSearchAdd(${JSON.stringify(groupName)},${JSON.stringify(name)})"
-        style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;cursor:pointer;
-        background:${inGroup?'#E0F0F8':'#fff'};border:1px solid ${inGroup?'#2E99CE':'#E4E6E8'}">
-        ${ava(name,24)}
-        <div style="flex:1;min-width:0">
-          <div style="font-size:12px;font-weight:600">${name}</div>
-          <div style="font-size:10px;color:#9EA0A4">${u.emailAddress||''}</div>
-        </div>
-        <span style="font-size:14px;color:${inGroup?'#2E99CE':'#5E8E38'};font-weight:700">${inGroup?'✓':'+'}</span>
-      </div>`;
-    }).join('');
-  }catch{el.innerHTML='<div style="font-size:12px;color:#D6202B;padding:4px">Search failed — check connection</div>';}
-}
+  if(desc) payload.fields.description={type:'doc',version:1,content:[{type:'paragraph',content:[{type:'text',text:desc}]}]};
 
-
-async function loadPaneComments(key){
-  if(!commentsCache[key]){try{commentsCache[key]=await fetchComments(key);}catch{commentsCache[key]=[];}}
-  const cmts=commentsCache[key];
-  document.getElementById("cmt-count").textContent=`(${cmts.length})`;
-  document.getElementById("cmt-list").innerHTML=cmts.length
-    ?cmts.map(c=>`<div class="comment-item"><div style="display:flex;align-items:center;gap:7px;margin-bottom:5px">${ava(c.author,20)}<span style="font-size:12px;font-weight:700">${c.author}</span><span style="font-size:11px;color:#C9CACC;margin-left:auto">${c.created}</span></div><div style="font-size:13px;line-height:1.55;white-space:pre-wrap">${c.body}</div></div>`).join("")
-    :`<div style="font-size:13px;color:#9EA0A4;font-style:italic">No comments yet.</div>`;
-}
-
-async function submitPaneComment(key){
-  const txt=(document.getElementById("cmt-text").value||"").trim();if(!txt)return;
-  const btn=document.getElementById("post-btn");btn.disabled=true;btn.innerHTML=spinHtml(13,"#fff")+" Posting…";
-  const ok=await postComment(key,txt);
-  const msg=document.getElementById("post-msg");
-  if(ok){msg.textContent="Posted ✓";msg.style.color="#5E8E38";document.getElementById("cmt-text").value="";delete commentsCache[key];await loadPaneComments(key);doFetch(true);}
-  else{msg.textContent="Failed";msg.style.color="#D6202B";btn.disabled=false;btn.innerHTML="Post to Jira";}
-  setTimeout(()=>{if(msg)msg.textContent="";},3000);
-}
-
-async function renderPaneSubtasks(){
-  const i=openIssue;
-  const el=document.getElementById("pane-body");
-  el.innerHTML=`<div class="pane-section"><div class="pane-section-title">Subtasks</div><div id="subtask-list">${spinHtml()} Loading…</div></div>`;
-  if(!subtasksCache[i.key]){
-    try{
-      const d=await jiraGet("/rest/api/3/issue/"+i.key+"?fields=subtasks");
-      subtasksCache[i.key]=(d.fields?.subtasks||[]).map(s=>({key:s.key,summary:s.fields?.summary||"",status:s.fields?.status?.name||"",type:s.fields?.issuetype?.name||"Sub-task",assignee:s.fields?.assignee?.displayName||"Unassigned"}));
-    }catch{subtasksCache[i.key]=[];}
+  if(assignee) {
+    try {
+      const users = await jiraGet('/rest/api/3/user/search?query='+encodeURIComponent(assignee)+'&maxResults=1');
+      if(users[0]) payload.fields.assignee={accountId:users[0].accountId};
+    } catch{}
   }
-  const subs=subtasksCache[i.key];
-  // Update tab label with count + highlight if has subtasks
-  const tabBtn=document.getElementById("subtasks-tab-btn");
-  if(tabBtn){
-    tabBtn.textContent=subs.length>0?`Subtasks (${subs.length}) ●`:"Subtasks";
-    tabBtn.style.color=subs.length>0?"#8F6AC8":"";
-  }
-  document.getElementById("subtask-list").innerHTML=subs.length
-    ?`<div style="font-size:12px;color:#8F6AC8;font-weight:700;margin-bottom:8px;padding:6px 10px;background:#F3EEFF;border-radius:6px">${subs.length} subtask${subs.length>1?"s":""} linked to this issue</div>`+
-      subs.map(s=>`<div class="subtask-row" onclick="openPane('${s.key}')" style="cursor:pointer">
-        ${klink(s.key)}
-        ${spill(s.status)}
-        <span style="flex:1;font-size:12px;color:#292E37">${s.summary}</span>
-        ${ava(s.assignee,20)}
-      </div>`).join("")
-    :`<div style="font-size:13px;color:#9EA0A4;font-style:italic;padding:8px 0">No subtasks on this issue.</div>`;
-}
 
-async function doPaneStatus(val){locStat[openIssue.key]=val;openIssue={...openIssue,status:val};saveAll();renderPaneHdr(openIssue);renderPaneMain();updateStats();renderMain();await transitionIssue(openIssue.key,val);setTimeout(()=>doFetch(true),1500);}
-async function doPanePriority(val){locPri[openIssue.key]=val;openIssue={...openIssue,priority:val};saveAll();renderPaneHdr(openIssue);renderPaneMain();renderMain();await updatePriority(openIssue.key,val);setTimeout(()=>doFetch(true),1500);}
-
-/* ══ CREATE TASK ══ */
-createState={projectKey:"",issueType:"Task",assignee:"",priority:"Medium",status:"Selected",epicKey:"",summary:"",description:"",epicSuggestions:[],loadingEpics:false};
-
-function openCreate(defaultAssignee,e){
-  if(e)e.stopPropagation();
-  createState={projectKey:currentProjFilter||"",issueType:"Task",assignee:defaultAssignee||currentIam||"",priority:"Medium",status:"Selected",epicKey:"",summary:"",description:"",epicSuggestions:[],loadingEpics:false};
-  document.getElementById("create-overlay").classList.add("open");
-  renderCreateBody();
-}
-function closeCreate(){document.getElementById("create-overlay").classList.remove("open");}
-
-function renderCreateBody(){
-  const teamOpts=teamMembers.map(m=>`<option value="${m}" ${m===createState.assignee?"selected":""}>${m}</option>`).join("");
-  const projOpts=allProjects.filter(p=>!excludedProjects.includes(p.key)).map(p=>`<option value="${p.key}" ${p.key===createState.projectKey?"selected":""}>${p.key} — ${p.name}</option>`).join("");
-  const typeOpts=ISSUE_TYPES.map(t=>`<option value="${t}" ${t===createState.issueType?"selected":""}>${t}</option>`).join("");
-  const priOpts=Object.keys(PC).map(p=>`<option value="${p}" ${p===createState.priority?"selected":""}>${p}</option>`).join("");
-  const statOpts=["Selected","In Progress","Backlog"].map(s=>`<option value="${s}" ${s===createState.status?"selected":""}>${s}</option>`).join("");
-
-  document.getElementById("create-body").innerHTML=`
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      <div>
-        <label class="form-label">Project *</label>
-        <select class="form-select" id="ct-proj" onchange="createState.projectKey=this.value;triggerEpicSearch()">${projOpts}</select>
-      </div>
-      <div>
-        <label class="form-label">Issue type *</label>
-        <select class="form-select" id="ct-type" onchange="createState.issueType=this.value">${typeOpts}</select>
-      </div>
-      <div>
-        <label class="form-label">Assignee</label>
-        <select class="form-select" id="ct-assignee" onchange="createState.assignee=this.value"><option value="">Unassigned</option>${teamOpts}</select>
-      </div>
-      <div>
-        <label class="form-label">Priority</label>
-        <select class="form-select" id="ct-priority" onchange="createState.priority=this.value">${priOpts}</select>
-      </div>
-      <div style="grid-column:1/-1">
-        <label class="form-label">Status</label>
-        <select class="form-select" id="ct-status" onchange="createState.status=this.value">${statOpts}</select>
-      </div>
-    </div>
-    <div>
-      <label class="form-label">Summary (task name) *</label>
-      <input class="form-input" id="ct-summary" type="text" placeholder="What needs to be done?" value="${createState.summary}"
-        oninput="createState.summary=this.value;debouncedEpicSearch()" onblur="triggerEpicSearch()">
-    </div>
-    <!-- EPIC / PARENT LINK -->
-    <div>
-      <label class="form-label">Link to Epic / Initiative / Legend *</label>
-      <div style="display:flex;gap:8px;margin-bottom:6px">
-        <input class="form-input" id="ct-epic-search" type="text" placeholder="Type to search or select from suggestions below…" 
-          value="${createState.epicKey}" oninput="createState.epicKey=this.value" style="flex:1">
-        <button class="icon-btn" onclick="triggerEpicSearch()" style="white-space:nowrap">${spinHtml(13)} Search</button>
-      </div>
-      <div id="epic-suggestions" style="display:flex;flex-direction:column;gap:4px;max-height:160px;overflow-y:auto">
-        ${createState.loadingEpics?`<div style="font-size:12px;color:#9EA0A4;padding:6px">${spinHtml()} Finding relevant epics…</div>`:""}
-        ${createState.epicSuggestions.map(e=>`<div class="epic-suggestion" onclick="selectEpic('${e.key}','${e.summary.replace(/'/g,"\\'")}')">
-          ${tbadge(e.type||"Epic")}
-          <span style="font-size:10px;font-family:monospace;color:#257AA5">${e.key}</span>
-          <span style="font-size:12px;color:#292E37;flex:1">${e.summary}</span>
-          <span style="font-size:10px;color:#9EA0A4">${e.project||""}</span>
-        </div>`).join("")}
-      </div>
-    </div>
-    <div>
-      <label class="form-label">Description <span style="font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
-      <textarea class="form-textarea" id="ct-desc" placeholder="Add more detail…" onchange="createState.description=this.value">${createState.description}</textarea>
-    </div>
-    <div id="create-msg" style="font-size:12px;min-height:18px"></div>`;
-}
-
-epicSearchTimer=null;
-function debouncedEpicSearch(){clearTimeout(epicSearchTimer);epicSearchTimer=setTimeout(triggerEpicSearch,800);}
-async function triggerEpicSearch(){
-  const summary=document.getElementById("ct-summary")?.value||"";
-  const proj=document.getElementById("ct-proj")?.value||"";
-  if(summary.length<3)return;
-  createState.loadingEpics=true;createState.epicSuggestions=[];
-  const sugEl=document.getElementById("epic-suggestions");
-  if(sugEl)sugEl.innerHTML=`<div style="font-size:12px;color:#9EA0A4;padding:6px">${spinHtml()} Searching Jira for relevant epics…</div>`;
-  const suggestions=await searchEpicsWithAI(summary,proj);
-  createState.epicSuggestions=suggestions;createState.loadingEpics=false;
-  if(sugEl)sugEl.innerHTML=suggestions.length
-    ?suggestions.map(e=>`<div class="epic-suggestion" onclick="selectEpic('${e.key}','${(e.summary||"").replace(/'/g,"\\'")}')">
-        ${tbadge(e.type||"Epic")}
-        <span style="font-size:10px;font-family:monospace;color:#257AA5">${e.key}</span>
-        <span style="font-size:12px;color:#292E37;flex:1">${e.summary}</span>
-        <span style="font-size:10px;color:#9EA0A4">${e.project||""}</span>
-      </div>`).join("")
-    :`<div style="font-size:12px;color:#9EA0A4;padding:6px">No suggestions found. Enter an epic key manually above.</div>`;
-}
-function selectEpic(key,summary){createState.epicKey=key;const inp=document.getElementById("ct-epic-search");if(inp)inp.value=key+" — "+summary;const sugEl=document.getElementById("epic-suggestions");if(sugEl)sugEl.innerHTML=`<div style="font-size:12px;color:#3B6D11;padding:6px">✓ Selected: ${key} — ${summary}</div>`;}
-
-async function submitCreate(){
-  const summary=(document.getElementById("ct-summary")?.value||"").trim();
-  const proj=document.getElementById("ct-proj")?.value||"";
-  const epicKey=(document.getElementById("ct-epic-search")?.value||"").split("—")[0].trim();
-  const msg=document.getElementById("create-msg");
-  if(!summary){msg.textContent="Please enter a summary.";msg.style.color="#D6202B";return;}
-  if(!proj){msg.textContent="Please select a project.";msg.style.color="#D6202B";return;}
-  const btn=document.getElementById("create-submit-btn");btn.disabled=true;btn.innerHTML=spinHtml(13,"#fff")+" Creating…";
-  const assignee=document.getElementById("ct-assignee")?.value||"";
-  const priority=document.getElementById("ct-priority")?.value||"Medium";
-  const issueType=document.getElementById("ct-type")?.value||"Task";
-  const desc=document.getElementById("ct-desc")?.value||"";
-  const payload={fields:{project:{key:proj},summary,issuetype:{name:issueType},priority:{name:priority},description:desc?{type:"doc",version:1,content:[{type:"paragraph",content:[{type:"text",text:desc}]}]}:undefined}};
-  if(assignee){
-    // look up account ID
-    try{const users=await jiraGet("/rest/api/3/user/search?query="+encodeURIComponent(assignee)+"&maxResults=1");if(users[0])payload.fields.assignee={accountId:users[0].accountId};}catch{}
-  }
-  if(epicKey&&epicKey.includes("-")){payload.fields.parent={key:epicKey};}
-  const result=await createIssue(payload);
-  if(result.success){
-    // transition to desired status
-    const status=document.getElementById("ct-status")?.value||"Selected";
-    if(status!=="To Do"&&status!=="Backlog")await transitionIssue(result.key,status);
-    msg.textContent="✓ Created "+result.key;msg.style.color="#3B6D11";
-    setTimeout(()=>{closeCreate();doFetch(true);},1200);
-  }else{msg.textContent="Failed to create. Check project permissions.";msg.style.color="#D6202B";btn.disabled=false;btn.innerHTML="Create in Jira";}
-}
-
-/* ══ SETTINGS ══ */
-function openSettings(tab){settingsTab=tab||"team";document.getElementById("settings-overlay").classList.add("open");renderSettings();}
-function closeSettings(){document.getElementById("settings-overlay").classList.remove("open");saveAll();populateIamSelector();populateGroupSelector();renderMain();}
-function setSettingsTab(t){settingsTab=t;document.querySelectorAll(".settings-tabs button").forEach((b,i)=>b.classList.toggle("active",["team","groups","projects","admin","credentials"][i]===t));renderSettings();}
-
-function renderSettings(){
-  const body=document.getElementById("settings-body");
-  if(settingsTab==="team"){
-    body.innerHTML=`
-      <div style="font-size:12px;color:#5D7987;padding:8px 10px;background:#E0F0F8;border-radius:6px;margin-bottom:8px">
-        <strong>Finding people:</strong> Search by first name, last name, or email. Try "Allison", "Harry", or part of their name.
-      </div>
-      <div style="display:flex;gap:8px">
-        <input class="form-input" id="user-search" placeholder="Search by name or email…" oninput="searchJiraUsers(this.value)" style="flex:1">
-        <button class="primary-btn" onclick="searchJiraUsers(document.getElementById('user-search').value)">Search</button>
-      </div>
-      <div id="user-results" style="max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:3px;margin-top:6px"></div>
-      <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-top:12px">Current team (${teamMembers.length} people)</div>
-      <div id="team-list" style="display:flex;flex-direction:column;gap:5px"></div>`;
-    renderTeamList();
-  }else if(settingsTab==="groups"){
-    const gnames=Object.keys(groups);
-    const activeGrp=window._activeGrpTab||(gnames[0]||null);
-    window._activeGrpTab=activeGrp;
-    if(!window.groupProjects) window.groupProjects={};
-
-    body.innerHTML=`
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-        <input class="form-input" id="new-group-name" placeholder="New group name…" style="flex:1" onkeydown="if(event.key==='Enter')createGroup()">
-        <button class="primary-btn" onclick="createGroup()">+ Create</button>
-      </div>
-
-      ${gnames.length===0
-        ? '<div style="font-size:13px;color:#9EA0A4;font-style:italic">No groups yet — create one above.</div>'
-        : `<div>
-            <div style="display:flex;gap:0;flex-wrap:wrap;border-bottom:2px solid #E4E6E8;margin-bottom:14px">
-              ${gnames.map(g=>`
-                <button onclick="window._activeGrpTab=${JSON.stringify(g)};renderSettings()"
-                  style="padding:8px 16px;font-size:12px;font-weight:700;cursor:pointer;border:none;background:transparent;
-                  border-bottom:3px solid ${g===activeGrp?'#2E99CE':'transparent'};margin-bottom:-2px;
-                  color:${g===activeGrp?'#2E99CE':'#9EA0A4'}">
-                  ${g} <span style="font-size:10px;background:${g===activeGrp?'#E0F0F8':'#EEF1F3'};color:${g===activeGrp?'#125462':'#9EA0A4'};border-radius:10px;padding:1px 6px;margin-left:3px">${(groups[g]||[]).length}</span>
-                </button>`).join('')}
-            </div>
-
-            ${activeGrp ? `
-            <div>
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-                <span style="font-size:14px;font-weight:700">${activeGrp}</span>
-                <button onclick="deleteGroup(${JSON.stringify(activeGrp)});window._activeGrpTab=null;renderSettings()"
-                  style="border:1px solid #D6202B;color:#D6202B;background:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px">Delete</button>
-              </div>
-
-              <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Members (${(groups[activeGrp]||[]).length})</div>
-              ${(groups[activeGrp]||[]).length===0
-                ? '<div style="font-size:13px;color:#9EA0A4;font-style:italic;margin-bottom:10px;padding:8px">No members yet</div>'
-                : `<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px">
-                    ${[...(groups[activeGrp]||[])].sort().map((m,idx)=>`
-                      <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;background:#E0F0F8;border:1px solid #2E99CE">
-                        ${ava(m,24)}
-                        <span style="flex:1;font-size:13px;font-weight:700;color:#125462">${m}</span>
-                        <button onclick="grpRemove(${JSON.stringify(activeGrp)},${idx})"
-                          style="background:none;border:none;cursor:pointer;color:#D6202B;font-size:18px;line-height:1;padding:2px 6px">×</button>
-                      </div>`).join('')}
-                  </div>`}
-
-              <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Add members</div>
-              <input class="form-input" id="grp-search-input" placeholder="Search Jira users by name…"
-                oninput="searchGroupUsers(${JSON.stringify(activeGrp)},this.value)" style="margin-bottom:6px">
-              <div id="grp-results" style="display:flex;flex-direction:column;gap:4px;max-height:140px;overflow-y:auto;margin-bottom:12px"></div>
-
-              ${teamMembers.filter(m=>!(groups[activeGrp]||[]).includes(m)).length>0
-                ? `<div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Quick add from team</div>
-                  <div style="display:flex;flex-direction:column;gap:4px;max-height:180px;overflow-y:auto;margin-bottom:14px">
-                    ${teamMembers.filter(m=>!(groups[activeGrp]||[]).includes(m)).sort().map((m,idx)=>`
-                      <div onclick="grpAdd(${JSON.stringify(activeGrp)},${idx})"
-                        style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;cursor:pointer;background:#F7F8F9;border:1px solid #E4E6E8">
-                        ${ava(m,24)}
-                        <span style="flex:1;font-size:13px;color:#292E37">${m}</span>
-                        <span style="font-size:16px;color:#5E8E38;font-weight:700">+</span>
-                      </div>`).join('')}
-                  </div>` : ''}
-
-              <div style="border-top:1px solid #E4E6E8;padding-top:12px">
-                <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Project scope</div>
-                <div style="font-size:12px;color:#9EA0A4;margin-bottom:8px">Uncheck to narrow this group to specific projects.</div>
-                <div style="max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
-                  ${allProjects.filter(p=>!excludedProjects.includes(p.key)).map(p=>{
-                    if(!window.groupProjects[activeGrp]) window.groupProjects[activeGrp]=[];
-                    const excl=window.groupProjects[activeGrp].includes(p.key);
-                    return`<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;background:#F7F8F9">
-                      <input type="checkbox" ${excl?'':'checked'} onchange="toggleGroupProject(${JSON.stringify(activeGrp)},'${p.key}',!this.checked)" style="cursor:pointer">
-                      <span style="font-size:11px;font-weight:700;color:#257AA5;font-family:monospace">${p.key}</span>
-                      <span style="font-size:12px;color:#292E37">${p.name}</span>
-                    </div>`;
-                  }).join('')}
-                </div>
-              </div>
-            </div>` : ''}
-          </div>`}`;
-  }else if(settingsTab==="projects"){
-    body.innerHTML=`
-      <div style="font-size:12px;color:#9EA0A4">Excluded projects won't appear in project filter or epic search.</div>
-      <div style="max-height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
-        ${allProjects.map(p=>`<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;background:#F7F8F9">
-          <input type="checkbox" ${excludedProjects.includes(p.key)?"":"checked"} onchange="toggleProjectExclusion('${p.key}',!this.checked)" style="cursor:pointer">
-          <span style="font-size:12px;font-weight:600;color:#257AA5;font-family:monospace">${p.key}</span>
-          <span style="font-size:12px;color:#292E37">${p.name}</span>
-        </div>`).join("")}
-      </div>`;
-  }else if(settingsTab==="admin"){
-    const isOwner=cfg.email===ADMIN_EMAIL||adminUsers.includes(cfg.email);
-    if(!isOwner){body.innerHTML=`<div style="font-size:13px;color:#9EA0A4;font-style:italic">Only admin users can manage access.</div>`;return;}
-    body.innerHTML=`
-      <div style="font-size:12px;color:#9EA0A4">Users with Manager Board access:</div>
-      <div id="admin-list" style="display:flex;flex-direction:column;gap:5px"></div>
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <input class="form-input" id="admin-email-input" placeholder="Email to grant manager access…" style="flex:1">
-        <button class="primary-btn" onclick="grantAdmin()">Grant</button>
-      </div>`;
-    renderAdminList();
-  }else{
-    body.innerHTML=`
-      <label class="form-label">Jira site URL</label><input class="setup-input" id="cfg-url2" type="text" value="${cfg.url}">
-      <label class="form-label">Email</label><input class="setup-input" id="cfg-email2" type="email" value="${cfg.email}">
-      <label class="form-label">API Token</label><input class="setup-input" id="cfg-token2" type="password" value="${cfg.token}">
-      <button class="primary-btn" style="margin-top:12px;width:100%;padding:9px" onclick="updateCredentials()">Save credentials</button>`;
+  const result = await createIssue(payload);
+  if(result.success) {
+    if(status!=='Backlog') await transitionIssue(result.key, status);
+    if(msg){msg.textContent='✓ Created '+result.key;msg.style.color='#3B6D11';}
+    setTimeout(()=>{ closeCreate(); doFetch(true); }, 1200);
+  } else {
+    if(msg){msg.textContent='Failed to create. Check project permissions.';msg.style.color='#D6202B';}
+    btn.disabled=false; btn.innerHTML='Create in Jira';
   }
 }
 
-function renderTeamList(){const el=document.getElementById("team-list");if(!el)return;el.innerHTML=teamMembers.map((m,i)=>`<div class="team-member-row">${ava(m,26)}<span style="flex:1;font-size:13px;font-weight:600">${m}</span><button onclick="removeTeamMember(${i})" style="background:none;border:none;cursor:pointer;color:#D6202B;font-size:18px">×</button></div>`).join("");}
-function renderAdminList(){const el=document.getElementById("admin-list");if(!el)return;el.innerHTML=adminUsers.map((e,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:7px 12px;background:#F7F8F9;border-radius:8px"><span style="flex:1;font-size:13px">${e}</span>${e===ADMIN_EMAIL?'<span style="font-size:11px;color:#9EA0A4">owner</span>':`<button onclick="revokeAdmin(${i})" style="background:none;border:none;cursor:pointer;color:#D6202B;font-size:12px">Revoke</button>`}</div>`).join("");}
-
-async function searchJiraUsers(q){const el=document.getElementById("user-results");if(!el)return;if(q.length<2){el.innerHTML="";return;}el.innerHTML=`<div style="font-size:12px;color:#9EA0A4;padding:6px">${spinHtml(14)} Searching…</div>`;try{const d=await jiraGet("/rest/api/3/user/search?query="+encodeURIComponent(q)+"&maxResults=8");const users=Array.isArray(d)?d:(d.values||[]);el.innerHTML=users.length?users.map(u=>`<div class="user-result" onclick="addTeamMember('${(u.displayName||"").replace(/'/g,"\\'")}')">${ava(u.displayName||"",24)}<div><div style="font-size:12px;font-weight:600">${u.displayName||""}</div><div style="font-size:10px;color:#9EA0A4">${u.emailAddress||""}</div></div></div>`).join(""):'<div style="font-size:12px;color:#9EA0A4;padding:6px">No users found</div>';}catch{el.innerHTML='<div style="font-size:12px;color:#D6202B;padding:6px">Search failed</div>';}}
-
-function addTeamMember(name){if(!teamMembers.includes(name)){teamMembers.push(name);saveAll();renderTeamList();populateIamSelector();}}
-function removeTeamMember(i){teamMembers.splice(i,1);saveAll();renderTeamList();populateIamSelector();}
-function grantAdmin(){const e=(document.getElementById("admin-email-input").value||"").trim();if(!e||adminUsers.includes(e))return;adminUsers.push(e);saveAll();renderAdminList();}
-function revokeAdmin(i){if(adminUsers[i]===ADMIN_EMAIL)return;adminUsers.splice(i,1);saveAll();renderAdminList();}
-function updateCredentials(){cfg.url=(document.getElementById("cfg-url2").value||"").trim().replace(/\/$/,"");cfg.email=(document.getElementById("cfg-email2").value||"").trim();cfg.token=(document.getElementById("cfg-token2").value||"").trim();saveAll();closeSettings();init();}
-function toggleProjectExclusion(key,exclude){if(exclude){if(!excludedProjects.includes(key))excludedProjects.push(key);}else{excludedProjects=excludedProjects.filter(k=>k!==key);}saveAll();}
-
-function createGroup(){
-  const inp=document.getElementById("new-group-name");
-  const name=(inp?inp.value:"").trim();
-  if(!name){alert("Please enter a group name first.");return;}
-  if(groups[name]){alert("'"+name+"' already exists.");return;}
-  groups[name]=[];
-  saveAll();populateGroupSelector();renderSettings();
-}
-function deleteGroup(name){
-  if(!confirm("Delete group '"+name+"'?"))return;
-  delete groups[name];
-  if(currentGroup===name){currentGroup="";}
-  saveAll();populateGroupSelector();renderSettings();
-}
-function toggleGroupMember(group,member,add){
-  if(!groups[group])groups[group]=[];
-  if(add){if(!groups[group].includes(member))groups[group].push(member);}
-  else{groups[group]=groups[group].filter(m=>m!==member);}
-  saveAll();populateGroupSelector();
+function quickAddTaskFromBtn(btn) {
+  const epicKey = btn.getAttribute('data-epic-key')||'';
+  const projectKey = document.getElementById('pri-proj')?.value||currentProjFilter||'';
+  quickAddTask(epicKey, projectKey);
 }
 
-
-async function searchGroupUsers(groupName, query){
-  const safeGroup = groupName.replace(/\s/g,'_');
-  const el = document.getElementById('grp-results-'+safeGroup);
-  if(!el) return;
-  if(query.length < 2){ el.innerHTML=''; return; }
-  el.innerHTML=`<div style="font-size:12px;color:#9EA0A4;padding:4px">${spinHtml(14)} Searching…</div>`;
-  try{
-    const d = await jiraGet('/rest/api/3/user/search?query='+encodeURIComponent(query)+'&maxResults=8');
-    const users = Array.isArray(d)?d:(d.values||[]);
-    if(!users.length){ el.innerHTML='<div style="font-size:12px;color:#9EA0A4;padding:4px">No users found</div>'; return; }
-    el.innerHTML = users.map(u=>{
-      const name = u.displayName||'';
-      const inGroup = (groups[groupName]||[]).includes(name);
-      const inTeam = teamMembers.includes(name);
-      return`<div onclick="
-          if(!teamMembers.includes('${name.replace(/'/g,"\'")}'))teamMembers.push('${name.replace(/'/g,"\'")}');
-          toggleGroupMember('${groupName.replace(/'/g,"\'")}','${name.replace(/'/g,"\'")}',${!inGroup});
-          renderSettings();"
-        style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;cursor:pointer;background:${inGroup?'#E0F0F8':'#fff'};border:1px solid ${inGroup?'#2E99CE':'#E4E6E8'}">
-        ${ava(name,24)}
-        <div style="flex:1;min-width:0">
-          <div style="font-size:12px;font-weight:600">${name}</div>
-          <div style="font-size:10px;color:#9EA0A4">${u.emailAddress||''}</div>
-        </div>
-        <span style="font-size:14px;color:${inGroup?'#2E99CE':'#C9CACC'}">${inGroup?'✓':'+'}</span>
-      </div>`;
-    }).join('');
-  }catch{ el.innerHTML='<div style="font-size:12px;color:#D6202B;padding:4px">Search failed</div>'; }
+function quickAddTask(epicKey, projectKey) {
+  createState = {
+    projectKey: projectKey||'',
+    issueType:'Task', assignee:currentIam||'',
+    priority:'Medium', status:'Selected',
+    summary:'', description:'',
+    selLegend:'', selInit:'', selEpic: epicKey||'',
+    legends:[], initiatives:[], epics:[],
+    aiSuggestions:[], aiLoading:false
+  };
+  document.getElementById('create-overlay').classList.add('open');
+  renderCreateModal();
+  if(projectKey) {
+    loadCreateHierarchy().then(()=>{
+      if(epicKey) {
+        const ep = createState.epics.find(e=>e.key===epicKey);
+        if(ep?.parent_key) {
+          const init = createState.initiatives.find(i=>i.key===ep.parent_key);
+          if(init) { createState.selInit=init.key; if(init.parent_key) createState.selLegend=init.parent_key; }
+        }
+        refreshHierarchyRows();
+      }
+    });
+  }
 }
-
-
-function toggleGroupProject(group, key, exclude){
-  if(!window.groupProjects) window.groupProjects={};
-  if(!window.groupProjects[group]) window.groupProjects[group]=[];
-  if(exclude){ if(!window.groupProjects[group].includes(key)) window.groupProjects[group].push(key); }
-  else { window.groupProjects[group]=window.groupProjects[group].filter(k=>k!==key); }
-}
-
-
-/* Member name safe helper - avoids apostrophe issues in onclick */
-function grpAdd(g,idx){ const m=teamMembers.filter(x=>!(groups[g]||[]).includes(x)).sort()[idx]; if(m){toggleGroupMember(g,m,true);renderSettings();} }
-function grpRemove(g,idx){ const m=[...(groups[g]||[])].sort()[idx]; if(m){toggleGroupMember(g,m,false);renderSettings();} }
-function grpSearchAdd(g,name){ if(!teamMembers.includes(name))teamMembers.push(name); toggleGroupMember(g,name,true); renderSettings(); }
 
 
 /* ══ PRIORITISATION BOARD ══════════════════════════════════════════ */
