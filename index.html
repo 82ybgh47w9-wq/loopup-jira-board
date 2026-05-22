@@ -354,7 +354,7 @@ button,select,textarea,input{font-family:inherit}
   
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v68</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v69</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -3290,9 +3290,16 @@ async function loadActivity() {
     const person = currentIam;
     if(!person) { el.innerHTML = '<div style="padding:24px;color:#9EA0A4">Select yourself in "I am" to see activity</div>'; return; }
 
-    // Fetch issues where: you're assignee, OR you commented (anywhere), updated in doneDays window
-    // NOT scoped by project group — comments matter even on tasks outside your usual projects
-    let jql = '(assignee = "'+person+'" OR comment ~ "'+person+'") AND updated >= -'+doneDays+'d ORDER BY updated DESC';
+    // Fetch issues where any of:
+    //   - You're the assignee (catches issues you own)
+    //   - commentAuthor = you (catches issues you commented on, when Jira's index is up-to-date)
+    //   - text ~ "Name" (catches @mentions where your name appears in comment body or mention text;
+    //     and acts as a fallback when commentAuthor index is lagging)
+    // We then client-side filter the comments themselves for accurate authorship/mention detection.
+    // NOT scoped by project group — comments matter even outside your usual projects.
+    const personEsc = person.replace(/"/g, '\\\\"');
+    let jql = '(assignee = "'+personEsc+'" OR commentAuthor = "'+personEsc+'" OR text ~ "\\"'+personEsc+'\\"") AND updated >= -'+doneDays+'d ORDER BY updated DESC';
+    appLogMsg('info','activity','Activity JQL: '+jql);
 
     // Paginate with nextPageToken (same as fetchAllTeamIssues)
     let issues = [];
@@ -3306,7 +3313,43 @@ async function loadActivity() {
       token = d.nextPageToken;
       iter++;
     }
-    appLogMsg('info','activity','Fetched '+issues.length+' issues for activity');
+    appLogMsg('info','activity','JQL fetched '+issues.length+' issues');
+
+    // WORKAROUND for Jira's comment index lag:
+    // Recently-made comments don't appear in JQL search for 1-2 minutes.
+    // To compensate, ALSO fetch comments directly for issues in allIssues where you're
+    // the assignee. This guarantees your own recently-posted comments show up immediately.
+    // Cap at 30 issues to avoid hammering the API.
+    try {
+      const knownKeys = new Set(issues.map(i => i.key));
+      const myAssignedKeys = (allIssues || [])
+        .filter(i => {
+          const a = (i.fields?.assignee?.displayName) || '';
+          return a === person && !knownKeys.has(i.key);
+        })
+        .slice(0, 30)
+        .map(i => i.key);
+      appLogMsg('info','activity','Supplementing with '+myAssignedKeys.length+' assignee issues to catch index-lag comments');
+      // Fetch each in parallel — only their comments
+      const supplementalFetches = myAssignedKeys.map(async k => {
+        try {
+          const d = await jiraGet('/rest/api/3/issue/'+k+'?fields=summary,status,assignee,priority,issuetype,updated,parent,project,comment');
+          return d;
+        } catch { return null; }
+      });
+      const supplemental = (await Promise.all(supplementalFetches)).filter(x => x);
+      // Merge supplemental and dedupe by issue key (keep first)
+      const seenKeys = new Set();
+      issues = issues.concat(supplemental).filter(i => {
+        if(!i || !i.key) return false;
+        if(seenKeys.has(i.key)) return false;
+        seenKeys.add(i.key);
+        return true;
+      });
+      appLogMsg('info','activity','Total issues after supplement: '+issues.length);
+    } catch(e) {
+      appLogMsg('warn','activity','Supplemental fetch failed: '+e.message);
+    }
 
     // Extract comments from each issue
     activityData = [];
