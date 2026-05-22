@@ -211,6 +211,37 @@ button,select,textarea,input{font-family:inherit}
     <div style="font-size:11px;color:#9EA0A4;margin-top:12px">Get your token at <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" style="color:#2E99CE">id.atlassian.com → Security → API tokens</a></div>
   </div>
 </div>
+<!-- PROJECT GROUP MODAL -->
+<div id="projgroup-overlay" style="position:fixed;inset:0;z-index:600;background:rgba(41,46,55,.7);display:none;align-items:center;justify-content:center;padding:20px">
+  <div style="background:#fff;border-radius:12px;width:560px;max-width:95vw;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.25)">
+    <div style="background:linear-gradient(135deg,#125462,#257AA5);padding:20px 24px;border-radius:12px 12px 0 0;flex-shrink:0">
+      <div style="font-size:18px;font-weight:700;color:#fff;margin-bottom:4px">Select a Project Group</div>
+      <div style="font-size:13px;color:rgba(255,255,255,.75)">Choose which projects you want to work with, or create a new group.</div>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:20px 24px;display:flex;flex-direction:column;gap:16px">
+      <!-- Existing groups -->
+      <div>
+        <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">Available project groups</div>
+        <div id="pgm-groups-list" style="display:flex;flex-direction:column;gap:8px">
+          <div style="font-size:13px;color:#9EA0A4;font-style:italic">Loading groups…</div>
+        </div>
+      </div>
+      <!-- Create new group -->
+      <div style="border-top:1px solid #E4E6E8;padding-top:16px">
+        <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">Create a new project group</div>
+        <input id="pgm-new-name" class="form-input" placeholder="Group name (e.g. Commercial, Marketing)…" style="margin-bottom:8px">
+        <div style="font-size:11px;color:#9EA0A4;margin-bottom:8px">Select projects to include:</div>
+        <div id="pgm-proj-list" style="max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;border:1px solid #E4E6E8;border-radius:6px;padding:8px">
+          <div style="font-size:12px;color:#9EA0A4">Loading projects…</div>
+        </div>
+        <button class="primary-btn" onclick="createProjectGroup()" style="margin-top:10px;padding:8px 20px">+ Create group</button>
+        <span id="pgm-create-msg" style="font-size:12px;margin-left:8px"></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+
 
 <!-- SETTINGS -->
 <div id="settings-overlay" onclick="if(event.target===this)closeSettings()">
@@ -252,12 +283,14 @@ button,select,textarea,input{font-family:inherit}
   <div class="divider"></div>
   <span style="font-size:11px;color:#9EA0A4;white-space:nowrap">I am</span>
   <select class="iam-select" id="iam-sel" onchange="onIamChange()"><option value="">— select —</option></select>
-  <select class="group-select" id="group-sel" onchange="onGroupChange()"><option value="">All people</option></select>
   <div class="divider"></div>
+  <select class="proj-select" id="proj-group-sel" onchange="onProjGroupChange()" style="max-width:160px;border-color:#2E99CE;background:#E0F0F8;color:#125462;font-weight:600">
+    <option value="">All projects</option>
+  </select>
   <select class="proj-select" id="proj-filter" onchange="onProjFilter()"><option value="">All projects</option></select>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v25</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v26</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -282,6 +315,9 @@ button,select,textarea,input{font-family:inherit}
     <button onclick="setView('prioritise')">Prioritise</button>
     <button onclick="setView('manager')" id="btn-manager" style="display:none">Manager</button>
   </div>
+  <select class="ctrl-select" id="group-sel" onchange="onGroupChange()" style="display:none">
+    <option value="">All people</option>
+  </select>
   <label id="matrix-toggle-wrap" style="display:none;align-items:center;gap:5px;font-size:12px;cursor:pointer;margin-left:4px">
     <input type="checkbox" id="matrix-toggle" checked onchange="renderMain()"> Priority cols
   </label>
@@ -386,6 +422,8 @@ const ISSUE_TYPES = ["Initiative","Legend","Epic","Task","Sub-task"];
 
 /* ══ STATE ══ */
 let cfg = {url:"https://loopup.atlassian.net",email:"",token:""};
+let projectGroups = {}; // {name: [projectKeys]} - shared via KV
+let currentProjectGroup = ""; // selected project group name
 let allIssues=[], locStat={}, locPri={};
 let currentView="mytasks", currentLevel="all";
 let currentIam="", currentProjFilter="", currentGroup="";
@@ -435,12 +473,15 @@ async function fetchAllTeamIssues(){
   const visibleTeam=getVisibleTeam();
   const assignees=visibleTeam.map(m=>'"'+m+'"').join(",");
   const fields="summary,status,assignee,priority,issuetype,updated,parent,description,project,subtasks,customfield_10014";
+  const projScope = getActiveProjectsJQL();
   let jql='assignee in ('+assignees+') AND statusCategory != Done ORDER BY updated DESC';
-  if(currentProjFilter)jql='project='+currentProjFilter+' AND '+jql;
+  if(currentProjFilter) jql='project='+currentProjFilter+' AND '+jql;
+  else if(projScope) jql=projScope+' AND '+jql;
   let all=[],start=0;
   while(true){const d=await jiraGet("/rest/api/3/search/jql?jql="+encodeURIComponent(jql)+"&fields="+fields+"&maxResults=100&startAt="+start);const issues=d.issues||[];all=all.concat(issues.map(parseIssue));start+=issues.length;if(start>=(d.total||0)||!issues.length)break;}
   let doneJql='assignee in ('+assignees+') AND statusCategory=Done AND updated>=-14d ORDER BY updated DESC';
-  if(currentProjFilter)doneJql='project='+currentProjFilter+' AND '+doneJql;
+  if(currentProjFilter) doneJql='project='+currentProjFilter+' AND '+doneJql;
+  else if(projScope) doneJql=projScope+' AND '+doneJql;
   try{const dd=await jiraGet("/rest/api/3/search/jql?jql="+encodeURIComponent(doneJql)+"&fields="+fields+"&maxResults=50&startAt=0");all=all.concat((dd.issues||[]).map(parseIssue));}catch{}
   return all;
 }
@@ -562,7 +603,11 @@ function showPage(name){["welcome","loading","error","mytasks","myepics","manage
 
 async function init(){
   populateIamSelector();populateGroupSelector();
-  try{allProjects=await fetchProjects();const sel=document.getElementById("proj-filter");sel.innerHTML='<option value="">All projects</option>'+allProjects.filter(p=>!excludedProjects.includes(p.key)).map(p=>`<option value="${p.key}" ${p.key===currentProjFilter?"selected":""}>${p.key} — ${p.name}</option>`).join("");}catch{}
+  try{
+    allProjects=await fetchProjects();
+    populateProjGroupSelector();
+    populateProjFilter();
+  }catch{}
   if(currentIam){document.getElementById("iam-sel").value=currentIam;updateManagerVisibility();await doFetch(false);}
   else showPage("welcome");
 }
@@ -1853,9 +1898,168 @@ async function pushRankToJira(rankBody) {
   } catch(e) {
     console.warn('Rank error:', e);
     indicator.textContent = '⚠ Could not save order to Jira';
-    indicator.style.background = '#D6202B';
+  
+/* ══ PROJECT GROUP MODAL ══════════════════════════════════════════ */
+let pgmSelectedProjects = new Set();
+
+async function showProjectGroupModal() {
+  document.getElementById('projgroup-overlay').style.display = 'flex';
+  pgmSelectedProjects = new Set();
+  await loadProjectGroups();
+  renderPGMGroups();
+  renderPGMProjects();
+}
+
+function hideProjGroupModal() {
+  document.getElementById('projgroup-overlay').style.display = 'none';
+}
+
+function renderPGMGroups() {
+  const el = document.getElementById('pgm-groups-list');
+  const names = Object.keys(projectGroups);
+  if(!names.length) {
+    el.innerHTML = '<div style="font-size:13px;color:#9EA0A4;font-style:italic">No groups yet — create one below.</div>';
+    return;
+  }
+  el.innerHTML = names.map(name => {
+    const keys = projectGroups[name] || [];
+    const isActive = currentProjectGroup === name;
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;border:2px solid ${isActive?'#2E99CE':'#E4E6E8'};background:${isActive?'#E0F0F8':'#F7F8F9'};cursor:pointer" onclick="selectProjectGroup('${name.replace(/'/g,"\'")}')">
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:700;color:${isActive?'#125462':'#292E37'}">${name} ${isActive?'<span style="font-size:10px;background:#125462;color:#fff;padding:1px 6px;border-radius:8px;margin-left:4px">Active</span>':''}</div>
+        <div style="font-size:11px;color:#9EA0A4;margin-top:2px">${keys.length} projects: ${keys.slice(0,5).join(', ')}${keys.length>5?'…':''}</div>
+      </div>
+      <button onclick="event.stopPropagation();selectProjectGroup('${name.replace(/'/g,"\'")}');hideProjGroupModal()" 
+        style="background:#125462;border:none;color:#fff;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700;white-space:nowrap">
+        Use this group →
+      </button>
+    </div>`;
+  }).join('');
+}
+
+function renderPGMProjects() {
+  const el = document.getElementById('pgm-proj-list');
+  if(!allProjects.length) { el.innerHTML='<div style="font-size:12px;color:#9EA0A4">Loading…</div>'; return; }
+  el.innerHTML = allProjects.map(p => {
+    const checked = pgmSelectedProjects.has(p.key);
+    return `<div style="display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:4px;${checked?'background:#E0F0F8':''}">
+      <input type="checkbox" ${checked?'checked':''} onchange="if(this.checked)pgmSelectedProjects.add('${p.key}');else pgmSelectedProjects.delete('${p.key}')" style="cursor:pointer">
+      <span style="font-size:11px;font-weight:700;color:#257AA5;font-family:monospace;min-width:50px">${p.key}</span>
+      <span style="font-size:12px;color:#292E37">${p.name}</span>
+    </div>`;
+  }).join('');
+}
+
+async function createProjectGroup() {
+  const name = (document.getElementById('pgm-new-name').value||'').trim();
+  const msg = document.getElementById('pgm-create-msg');
+  if(!name) { msg.textContent='Please enter a name'; msg.style.color='#D6202B'; return; }
+  if(pgmSelectedProjects.size === 0) { msg.textContent='Please select at least one project'; msg.style.color='#D6202B'; return; }
+  msg.textContent='Saving…'; msg.style.color='#9EA0A4';
+  await saveProjectGroup(name, [...pgmSelectedProjects]);
+  msg.textContent='✓ Created!'; msg.style.color='#5E8E38';
+  document.getElementById('pgm-new-name').value='';
+  pgmSelectedProjects.clear();
+  renderPGMGroups();
+  renderPGMProjects();
+  populateProjGroupSelector();
+  setTimeout(()=>{ msg.textContent=''; }, 2000);
+}
+
+function selectProjectGroup(name) {
+  currentProjectGroup = name;
+  saveAll();
+  populateProjGroupSelector();
+  // Update proj-filter options to only show group's projects
+  populateProjFilter();
+  renderPGMGroups();
+}
+
+function populateProjGroupSelector() {
+  const sel = document.getElementById('proj-group-sel');
+  if(!sel) return;
+  sel.innerHTML = '<option value="">All projects</option>' +
+    Object.keys(projectGroups).map(n =>
+      `<option value="${n}" ${n===currentProjectGroup?'selected':''}>${n} (${(projectGroups[n]||[]).length})</option>`
+    ).join('');
+}
+
+function populateProjFilter() {
+  const sel = document.getElementById('proj-filter');
+  if(!sel) return;
+  const scope = currentProjectGroup && projectGroups[currentProjectGroup]
+    ? allProjects.filter(p=>projectGroups[currentProjectGroup].includes(p.key))
+    : allProjects.filter(p=>!excludedProjects.includes(p.key));
+  sel.innerHTML = '<option value="">All projects</option>' +
+    scope.map(p=>`<option value="${p.key}" ${p.key===currentProjFilter?'selected':''}>${p.key} — ${p.name}</option>`).join('');
+}
+
+function onProjGroupChange() {
+  currentProjectGroup = document.getElementById('proj-group-sel').value;
+  currentProjFilter = ''; // reset individual project filter
+  saveAll();
+  populateProjFilter();
+  if(currentIam) doFetch(false);
+}
+
+  indicator.style.background = '#D6202B';
   }
   setTimeout(() => { if(indicator.parentNode) indicator.parentNode.removeChild(indicator); }, 2500);
+}
+
+
+/* ══ PROJECT GROUPS (KV) ══════════════════════════════════════════ */
+async function loadProjectGroups() {
+  try {
+    const r = await fetch(KV + "?action=listprefix&prefix=projgroup:");
+    if(r.ok) {
+      const data = await r.json();
+      projectGroups = {};
+      for(const [key, val] of Object.entries(data)) {
+        const name = key.replace('projgroup:', '');
+        try { projectGroups[name] = JSON.parse(val); } catch {}
+      }
+    }
+  } catch {
+    // fallback to localStorage
+    try {
+      const saved = JSON.parse(localStorage.getItem('loopup-projgroups') || '{}');
+      projectGroups = saved;
+    } catch {}
+  }
+}
+
+async function saveProjectGroup(name, projectKeys) {
+  projectGroups[name] = projectKeys;
+  try {
+    await kvSet('projgroup:' + name, JSON.stringify(projectKeys));
+  } catch {}
+  // Also save to localStorage as backup
+  try { localStorage.setItem('loopup-projgroups', JSON.stringify(projectGroups)); } catch {}
+}
+
+async function deleteProjectGroupKV(name) {
+  delete projectGroups[name];
+  try {
+    const target = encodeURIComponent(KV.replace('/kv','') + '/kv');
+    await fetch(KV + "?action=delete&key=" + encodeURIComponent('projgroup:' + name));
+  } catch {}
+  try { localStorage.setItem('loopup-projgroups', JSON.stringify(projectGroups)); } catch {}
+}
+
+function getActiveProjects() {
+  // Returns array of project keys currently in scope
+  if(currentProjectGroup && projectGroups[currentProjectGroup]) {
+    return projectGroups[currentProjectGroup];
+  }
+  return allProjects.filter(p=>!excludedProjects.includes(p.key)).map(p=>p.key);
+}
+
+function getActiveProjectsJQL() {
+  const keys = getActiveProjects();
+  if(!keys.length) return '';
+  if(currentProjFilter) return 'project=' + currentProjFilter;
+  return 'project in (' + keys.join(',') + ')';
 }
 
 
@@ -1869,8 +2073,19 @@ document.querySelectorAll("#view-seg button").forEach(b=>{
   b.classList.toggle("active",onclick.includes("'"+currentView+"'"));
 });
 document.querySelectorAll("#level-seg button").forEach((b,i)=>b.classList.toggle("active",["all","epics","tasks"][i]===currentLevel));
-if(cfg.email&&cfg.token&&cfg.url){document.getElementById("setup-overlay").style.display="none";updateManagerVisibility();init();}
-else showSetup();
+if(cfg.email&&cfg.token&&cfg.url){
+  document.getElementById("setup-overlay").style.display="none";
+  updateManagerVisibility();
+  init().then(async ()=>{
+    await loadProjectGroups();
+    populateProjGroupSelector();
+    populateProjFilter();
+    // Show project group modal if no group selected and groups exist or first time
+    if(!currentProjectGroup) {
+      showProjectGroupModal();
+    }
+  });
+} else showSetup();
 </script>
 </body>
 </html>
