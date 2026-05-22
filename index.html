@@ -316,7 +316,7 @@ button,select,textarea,input{font-family:inherit}
   
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v61</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v62</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -1463,48 +1463,87 @@ async function loadCreateHierarchy() {
   }
 }
 
-async function createHierarchyItem(type) {
-  const proj = createState.projectKey;
-  const nameEl = document.getElementById('new-'+type+'-val');
-  const statusEl = document.getElementById(type+'-creating');
+async function createHierarchyItem(level) {
+  // level is one of: 'Legend', 'Initiative', 'Epic' (capitalized)
+  const s = createState;
+  const proj = s.projectKey;
+  if(!proj) { alert('Please select a project first'); return; }
+
+  const nameEl = document.getElementById('inline-name-'+level);
   const name = (nameEl?.value||'').trim();
-  if(!name){ alert('Please enter a name'); return; }
+  if(!name) { alert('Please enter a name for the new '+level); return; }
 
-  const typeMap = {legend:'Legend', initiative:'Initiative', epic:'Epic'};
-  const parentMap = {
-    legend: null,
-    initiative: createState.selLegend,
-    epic: createState.selInit
-  };
-
-  if(type!=='legend' && !parentMap[type]) {
-    alert('Please select a ' + (type==='initiative'?'Legend':'Initiative') + ' first');
-    return;
+  // Determine parent based on hierarchy rules
+  let parentKey = null;
+  if(level === 'Initiative') {
+    parentKey = s.selLegend;
+    if(!parentKey) { alert('Please select or create a Legend first'); return; }
+  } else if(level === 'Epic') {
+    parentKey = s.selInit;
+    if(!parentKey) { alert('Please select or create an Initiative first'); return; }
   }
+  // Legend has no parent
 
-  if(statusEl) statusEl.textContent = 'Creating…';
-  const btn = event.target; btn.disabled=true;
+  const btn = event.target;
+  const origTxt = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Creating…';
 
-  const payload = {fields:{project:{key:proj},summary:name,issuetype:{name:typeMap[type]}}};
-  if(parentMap[type]) payload.fields.parent = {key:parentMap[type]};
+  const payload = {
+    fields: {
+      project: { key: proj },
+      summary: name,
+      issuetype: { name: level }
+    }
+  };
+  if(parentKey) payload.fields.parent = { key: parentKey };
 
-  const result = await createIssue(payload);
-  if(result.success) {
-    if(statusEl) statusEl.textContent = '✓ Created '+result.key;
-    // Add to local list and auto-select
-    const newItem = {key:result.key, summary:name, type:typeMap[type],
-      parent_key:parentMap[type]||null, status:'To Do', priority:'Medium',
-      assignee:'Unassigned', project:proj};
-    if(type==='legend'){ createState.legends.push(newItem); createState.selLegend=result.key; }
-    if(type==='initiative'){ createState.initiatives.push(newItem); createState.selInit=result.key; }
-    if(type==='epic'){ createState.epics.push(newItem); createState.selEpic=result.key; }
-    setTimeout(()=>{ refreshHierarchyRows(); document.getElementById('inline-'+type).style.display='none'; }, 800);
-  } else {
-    if(statusEl) statusEl.textContent = 'Failed — check permissions';
-    btn.disabled=false;
+  appLogMsg('info','hierarchy','Creating '+level+': '+name+(parentKey?' under '+parentKey:''));
+
+  try {
+    const result = await createIssue(payload);
+    if(result && result.success) {
+      const newItem = {
+        key: result.key, summary: name, type: level,
+        parent_key: parentKey, status: 'Backlog', priority: 'Medium',
+        assignee: 'Unassigned', project: proj
+      };
+      // Add to local cache and auto-select it
+      if(level === 'Legend') {
+        s.legends.push(newItem);
+        s.selLegend = result.key;
+      } else if(level === 'Initiative') {
+        s.initiatives.push(newItem);
+        s.selInit = result.key;
+      } else if(level === 'Epic') {
+        s.epics.push(newItem);
+        s.selEpic = result.key;
+      }
+      appLogMsg('info','hierarchy','Created '+result.key);
+      // Toast
+      const toast = document.createElement('div');
+      toast.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#5E8E38;color:#fff;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;z-index:9999';
+      toast.innerHTML = '✓ Created '+level+' <a href="'+BASE()+result.key+'" target="_blank" style="color:#fff;text-decoration:underline">'+result.key+'</a>';
+      document.body.appendChild(toast);
+      setTimeout(()=>toast.remove(), 3000);
+      // Hide the inline form and re-render hierarchy
+      const inlineEl = document.getElementById('inline-create-'+level);
+      if(inlineEl) inlineEl.style.display = 'none';
+      if(nameEl) nameEl.value = '';
+      renderHierarchyRows();
+    } else {
+      btn.disabled = false;
+      btn.textContent = origTxt;
+      alert('Failed to create '+level+'. Check that the project allows this issue type and that you have permissions.');
+      appLogMsg('error','hierarchy','Failed to create '+level);
+    }
+  } catch(e) {
+    btn.disabled = false;
+    btn.textContent = origTxt;
+    alert('Failed to create '+level+': '+e.message);
+    appLogMsg('error','hierarchy','Exception: '+e.message);
   }
 }
-
 function selectEpicSuggestion(key, summary, project) {
   createState.selEpic = key;
   // Try to walk up hierarchy from the selected epic
