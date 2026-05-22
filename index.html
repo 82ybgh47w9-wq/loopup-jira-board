@@ -298,7 +298,7 @@ button,select,textarea,input{font-family:inherit}
   </div>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v32</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v33</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -461,7 +461,15 @@ function loadAll(){try{const d=JSON.parse(localStorage.getItem(STOR)||"{}");if(d
 if(d.currentProjectGroup)currentProjectGroup=d.currentProjectGroup;if(d.currentGroup)currentGroup=d.currentGroup;if(d.teamMembers)teamMembers=d.teamMembers;if(d.adminUsers)adminUsers=d.adminUsers;if(d.groups)groups=d.groups;if(d.excludedProjects)excludedProjects=d.excludedProjects;if(d.currentView)currentView=d.currentView;if(d.currentLevel)currentLevel=d.currentLevel;if(d.rowCollapsed)rowCollapsed={...rowCollapsed,...d.rowCollapsed};if(d.swimCollapsed)swimCollapsed={...swimCollapsed,...d.swimCollapsed};}catch{}}
 
 /* ══ KV (active flags) ══ */
-async function kvSet(k,v){try{await fetch(KV+"?action=set&key="+encodeURIComponent(k)+"&value="+encodeURIComponent(v));}catch{}}
+async function kvSet(k,v){
+  try{
+    await fetch(KV,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'set',key:k,value:v})
+    });
+  }catch{}
+}
 async function kvGetAll(){try{const r=await fetch(KV+"?action=getall");return r.ok?await r.json():{};}catch{return{};}}
 async function loadActiveFlags(){activeFlags=await kvGetAll();}
 async function setActiveFlag(name,key){activeFlags[name]=key;await kvSet("active:"+name,key);renderMain();}
@@ -2248,13 +2256,14 @@ function renderSettings(){
 
 
 function createNewProjectGroup(){
-  const name=(document.getElementById("new-pg-name")||{}).value;
-  if(!name||!name.trim())return;
-  const n=name.trim();
-  if(projectGroups[n])return;
-  projectGroups[n]=[];
-  saveProjectGroup(n,[]);
-  window._activePGTab=n;
+  const el=document.getElementById("new-pg-name");
+  const name=el?el.value.trim():"";
+  if(!name)return;
+  if(projectGroups[name]){alert('A group called "'+name+'" already exists.');return;}
+  projectGroups[name]=[];
+  saveProjectGroup(name,[]);
+  window._activePGTab=name;
+  if(el) el.value="";
   renderSettings();
   populateProjGroupSelector();
 }
@@ -2274,7 +2283,11 @@ function togglePGProject(groupName,projectKey,add){
   } else {
     projectGroups[groupName]=projectGroups[groupName].filter(k=>k!==projectKey);
   }
-  saveProjectGroup(groupName,projectGroups[groupName]);
+  // Save immediately - don't re-render (avoids losing scroll position)
+  saveProjectGroup(groupName,[...projectGroups[groupName]]);
+  // Just update the checkbox label count
+  const tabs=document.querySelectorAll('.settings-tabs ~ * button');
+  // Re-render to update count badge
   renderSettings();
 }
 /* ══ SETTINGS HELPERS ══════════════════════════════════════════════ */
@@ -2317,9 +2330,16 @@ function toggleProjectExclusion(key,exclude){
   saveAll();
 }
 function createGroup(){
-  const name=(document.getElementById("new-group-name")||{value:""}).value.trim();
-  if(!name||groups[name])return;
-  groups[name]=[];saveAll();window._activeGrpTab=name;renderSettings();populateGroupSelector();
+  const el=document.getElementById("new-group-name");
+  const name=el?el.value.trim():"";
+  if(!name)return;
+  if(groups[name]){alert('A team called "'+name+'" already exists.');return;}
+  groups[name]=[];
+  if(el) el.value="";
+  saveAll();
+  window._activeGrpTab=name;
+  renderSettings();
+  populateGroupSelector();
 }
 function deleteGroup(name){
   delete groups[name];
@@ -2341,7 +2361,7 @@ async function searchGroupUsers(groupName,query){
   if(query.length<2){el.innerHTML="";return;}
   el.innerHTML=`<div style="font-size:12px;color:#9EA0A4;padding:4px">${spinHtml(14)} Searching…</div>`;
   try{
-    const d=await jiraGet("/rest/api/3/user/search?query="+encodeURIComponent(query)+"&maxResults=8");
+    const d=await jiraGet("/rest/api/3/user/search?query="+encodeURIComponent(query)+"&maxResults=10&includeActive=true");
     const users=Array.isArray(d)?d:(d.values||[]);
     if(!users.length){el.innerHTML='<div style="font-size:12px;color:#9EA0A4;padding:4px">No users found</div>';return;}
     el.innerHTML=users.map(u=>{
