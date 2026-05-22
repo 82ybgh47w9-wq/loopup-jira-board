@@ -257,7 +257,7 @@ button,select,textarea,input{font-family:inherit}
   <select class="proj-select" id="proj-filter" onchange="onProjFilter()"><option value="">All projects</option></select>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v14</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v15</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -1367,8 +1367,20 @@ async function renderMyEpics() {
     const search = (document.getElementById('search-input')?.value||'').toLowerCase();
 
     el.innerHTML = '';
+    // Fetch ALL tasks for user's epics (not just managed team tasks)
+    const epicKeys = myEpics.map(e=>e.key);
+    let allEpicTasks = [];
+    try {
+      const jql = 'issueFunction in subtasksOf("issue in ('+epicKeys.join(',')+')") OR parent in ('+epicKeys.join(',')+') ORDER BY rank ASC';
+      const td = await jiraGet('/rest/api/3/search/jql?jql='+encodeURIComponent(jql)+'&fields=summary,status,assignee,priority,issuetype,updated,parent&maxResults=200');
+      allEpicTasks = (td.issues||[]).map(parseIssue);
+    } catch {
+      // fallback to allIssues
+      allEpicTasks = allIssues.filter(i=>['Task','Sub-task'].includes(i.type)&&epicKeys.includes(i.parent_key));
+    }
+
     myEpics.forEach(epic => {
-      let tasks = allIssues.filter(i=>i.parent_key===epic.key&&['Task','Sub-task'].includes(i.type));
+      let tasks = allEpicTasks.filter(i=>i.parent_key===epic.key);
       if(priFilter) tasks=tasks.filter(t=>t.priority===priFilter);
       if(statFilter) tasks=tasks.filter(t=>normStatus(t.status)===normStatus(statFilter));
       if(unassignedOnly) tasks=tasks.filter(t=>t.assignee==='Unassigned');
@@ -1588,7 +1600,7 @@ function priDragStartEl(e, el) {
 function priCardDropEl(e, el) {
   const targetKey = el.getAttribute('data-key');
   const targetEpic = el.getAttribute('data-epic');
-  priCardDrop(e, targetKey, targetEpic);
+  priCardDrop(e, targetKey, targetEpic, el);
 }
 function priDragEnd(e) {
   priDragKey = null; priDragEpic = null;
@@ -1609,10 +1621,10 @@ function priCardDragLeave(e) {
   e.currentTarget.classList.remove('drag-over-top','drag-over-bottom');
 }
 
-async function priCardDrop(e, targetKey, targetEpic) {
+async function priCardDrop(e, targetKey, targetEpic, cardEl) {
   e.preventDefault(); e.stopPropagation();
   if (!priDragKey || priDragKey === targetKey) return;
-  const card = e.currentTarget;
+  const card = cardEl || e.currentTarget;
   const rect = card.getBoundingClientRect();
   const before = e.clientY < rect.top + rect.height / 2;
 
