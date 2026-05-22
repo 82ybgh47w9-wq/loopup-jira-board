@@ -352,7 +352,7 @@ button,select,textarea,input{font-family:inherit}
   
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v64</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v65</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -705,20 +705,27 @@ let mentionSearchTimer = null;
 
 function attachMentionTypeahead(textareaId) {
   const ta = document.getElementById(textareaId);
-  if(!ta || ta.dataset.mentionAttached === '1') return;
+  if(!ta) {
+    appLogMsg('warn','mention','Textarea not found: '+textareaId);
+    return;
+  }
+  if(ta.dataset.mentionAttached === '1') {
+    appLogMsg('info','mention','Already attached to '+textareaId);
+    return;
+  }
   ta.dataset.mentionAttached = '1';
   if(!trackedMentions[textareaId]) trackedMentions[textareaId] = [];
 
   ta.addEventListener('keyup', e => onMentionKeyup(e, ta));
   ta.addEventListener('keydown', e => onMentionKeydown(e, ta));
   ta.addEventListener('blur', () => setTimeout(closeMentionDropdown, 200));
-  // If text changes (paste, etc), re-validate tracked mentions
   ta.addEventListener('input', () => validateTrackedMentions(textareaId));
+  appLogMsg('info','mention','Typeahead attached to '+textareaId);
 }
 
 function onMentionKeyup(e, ta) {
   // Skip if user is navigating the dropdown
-  if(mentionDropdownEl && ['ArrowDown','ArrowUp','Enter','Tab','Escape'].includes(e.key)) return;
+  if(mentionDropdownEl && mentionDropdownEl.style.display !== 'none' && ['ArrowDown','ArrowUp','Enter','Tab','Escape'].includes(e.key)) return;
   const text = ta.value;
   const cursor = ta.selectionStart;
   // Find the most recent '@' before cursor that isn't preceded by a non-space character
@@ -742,6 +749,7 @@ function onMentionKeyup(e, ta) {
   if(query.length > 40) { closeMentionDropdown(); return; }
   mentionActiveTextarea = ta;
   mentionStartPos = atPos;
+  appLogMsg('info','mention','Typeahead query: "'+query+'" on '+ta.id);
   showMentionDropdown(ta, atPos, query);
 }
 
@@ -774,10 +782,18 @@ async function showMentionDropdown(ta, atPos, query) {
     document.body.appendChild(mentionDropdownEl);
   }
   const rect = ta.getBoundingClientRect();
-  // Position below the textarea, left-aligned with the cursor approx
-  mentionDropdownEl.style.left = rect.left + 'px';
-  mentionDropdownEl.style.top = (rect.bottom + 4) + 'px';
+  // Position below the textarea
+  mentionDropdownEl.style.position = 'fixed';
+  mentionDropdownEl.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 260)) + 'px';
+  // If textarea is near bottom, show ABOVE instead of below
+  const spaceBelow = window.innerHeight - rect.bottom;
+  if(spaceBelow < 240 && rect.top > 240) {
+    mentionDropdownEl.style.top = (rect.top - 240) + 'px';
+  } else {
+    mentionDropdownEl.style.top = (rect.bottom + 4) + 'px';
+  }
   mentionDropdownEl.style.display = 'block';
+  mentionDropdownEl.style.zIndex = '10000';
   mentionDropdownEl.innerHTML = '<div class="mention-loading">Searching…</div>';
 
   // Debounce the search
@@ -787,9 +803,11 @@ async function showMentionDropdown(ta, atPos, query) {
       const results = await searchUsersForMention(query);
       mentionResults = results;
       mentionActiveIndex = 0;
+      appLogMsg('info','mention','Got '+results.length+' user results for "'+query+'"');
       renderMentionDropdown();
     } catch(e) {
-      mentionDropdownEl.innerHTML = '<div class="mention-empty">Search failed</div>';
+      appLogMsg('error','mention','Search failed: '+(e.message||e));
+      if(mentionDropdownEl) mentionDropdownEl.innerHTML = '<div class="mention-empty">Search failed: '+(e.message||'unknown')+'</div>';
     }
   }, 200);
 }
@@ -797,15 +815,22 @@ async function showMentionDropdown(ta, atPos, query) {
 async function searchUsersForMention(query) {
   const key = query.toLowerCase().trim();
   if(userSearchCache.has(key)) return userSearchCache.get(key);
-  // If empty, get most-likely candidates (recent / team)
-  const url = '/rest/api/3/user/search?query=' + encodeURIComponent(query) + '&maxResults=8';
+  // For empty query, use the team members list to show suggestions
+  if(!key) {
+    const team = (typeof getVisibleTeam === 'function' ? getVisibleTeam() : []) || [];
+    // We don't have accountIds for them locally — fall back to API with empty query
+  }
+  const url = '/rest/api/3/user/search?query=' + encodeURIComponent(query) + '&maxResults=10';
+  appLogMsg('info','mention','Searching Jira users: '+url);
   const users = await jiraGet(url);
+  appLogMsg('info','mention','jiraGet returned: '+(Array.isArray(users)?users.length+' items':typeof users));
   // jiraGet returns array directly for this endpoint
-  const list = (Array.isArray(users) ? users : []).map(u => ({
+  const raw = Array.isArray(users) ? users : (users && users.values ? users.values : []);
+  const list = raw.map(u => ({
     accountId: u.accountId,
     displayName: u.displayName || '',
     email: u.emailAddress || '',
-    avatarUrl: u.avatarUrls && u.avatarUrls['24x24'] || ''
+    avatarUrl: (u.avatarUrls && u.avatarUrls['24x24']) || ''
   })).filter(u => u.accountId && u.displayName);
   userSearchCache.set(key, list);
   return list;
