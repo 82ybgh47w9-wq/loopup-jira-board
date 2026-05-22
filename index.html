@@ -299,7 +299,7 @@ button,select,textarea,input{font-family:inherit}
   </div>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v28</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v29</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -2108,6 +2108,133 @@ function setSettingsTab(t){
   document.querySelectorAll(".settings-tabs button").forEach((b,i)=>b.classList.toggle("active",["team","groups","projects","admin","credentials"][i]===t));
   renderSettings();
 }
+
+function renderSettings(){
+  const body=document.getElementById("settings-body");
+  if(!body) return;
+
+  if(settingsTab==="team"){
+    body.innerHTML=`
+      <div style="font-size:12px;color:#9EA0A4">Search Jira users to add to the team:</div>
+      <div style="display:flex;gap:8px"><input class="form-input" id="user-search" placeholder="Type a name…" oninput="searchJiraUsers(this.value)" style="flex:1"></div>
+      <div id="user-results" style="max-height:140px;overflow-y:auto;display:flex;flex-direction:column;gap:3px"></div>
+      <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-top:8px">Current team</div>
+      <div id="team-list" style="display:flex;flex-direction:column;gap:5px"></div>`;
+    renderTeamList();
+
+  }else if(settingsTab==="groups"){
+    const gnames=Object.keys(groups);
+    const activeGrp=window._activeGrpTab||(gnames[0]||null);
+    window._activeGrpTab=activeGrp;
+    if(!window.groupProjects) window.groupProjects={};
+
+    body.innerHTML=`
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+        <input class="form-input" id="new-group-name" placeholder="New group name…" style="flex:1" onkeydown="if(event.key==='Enter')createGroup()">
+        <button class="primary-btn" onclick="createGroup()">+ Create</button>
+      </div>
+      ${gnames.length===0
+        ? '<div style="font-size:13px;color:#9EA0A4;font-style:italic">No groups yet — create one above.</div>'
+        : `<div>
+            <div style="display:flex;gap:0;flex-wrap:wrap;border-bottom:2px solid #E4E6E8;margin-bottom:14px">
+              ${gnames.map(g=>`
+                <button onclick="window._activeGrpTab=${JSON.stringify(g)};renderSettings()"
+                  style="padding:8px 16px;font-size:12px;font-weight:700;cursor:pointer;border:none;background:transparent;
+                  border-bottom:3px solid ${g===activeGrp?'#2E99CE':'transparent'};margin-bottom:-2px;
+                  color:${g===activeGrp?'#2E99CE':'#9EA0A4'}">
+                  ${g} <span style="font-size:10px;background:${g===activeGrp?'#E0F0F8':'#EEF1F3'};color:${g===activeGrp?'#125462':'#9EA0A4'};border-radius:10px;padding:1px 6px;margin-left:3px">${(groups[g]||[]).length}</span>
+                </button>`).join('')}
+            </div>
+            ${activeGrp ? `
+            <div>
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+                <span style="font-size:14px;font-weight:700">${activeGrp}</span>
+                <button onclick="deleteGroup(${JSON.stringify(activeGrp)});window._activeGrpTab=null;renderSettings()"
+                  style="border:1px solid #D6202B;color:#D6202B;background:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px">Delete</button>
+              </div>
+              <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Members (${(groups[activeGrp]||[]).length})</div>
+              ${(groups[activeGrp]||[]).length===0
+                ? '<div style="font-size:13px;color:#9EA0A4;font-style:italic;margin-bottom:10px;padding:8px">No members yet</div>'
+                : `<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px">
+                    ${[...(groups[activeGrp]||[])].sort().map((m,idx)=>`
+                      <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;background:#E0F0F8;border:1px solid #2E99CE">
+                        ${ava(m,24)}
+                        <span style="flex:1;font-size:13px;font-weight:700;color:#125462">${m}</span>
+                        <button onclick="grpRemove(${JSON.stringify(activeGrp)},${idx})"
+                          style="background:none;border:none;cursor:pointer;color:#D6202B;font-size:18px;line-height:1;padding:2px 6px">×</button>
+                      </div>`).join('')}
+                  </div>`}
+              <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Add members</div>
+              <input class="form-input" id="grp-search-input" placeholder="Search Jira users by name…"
+                oninput="searchGroupUsers(${JSON.stringify(activeGrp)},this.value)" style="margin-bottom:6px">
+              <div id="grp-results" style="display:flex;flex-direction:column;gap:4px;max-height:140px;overflow-y:auto;margin-bottom:12px"></div>
+              ${teamMembers.filter(m=>!(groups[activeGrp]||[]).includes(m)).length>0
+                ? `<div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Quick add from team</div>
+                  <div style="display:flex;flex-direction:column;gap:4px;max-height:180px;overflow-y:auto;margin-bottom:14px">
+                    ${teamMembers.filter(m=>!(groups[activeGrp]||[]).includes(m)).sort().map((m,idx)=>`
+                      <div onclick="grpAdd(${JSON.stringify(activeGrp)},${idx})"
+                        style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;cursor:pointer;background:#F7F8F9;border:1px solid #E4E6E8">
+                        ${ava(m,24)}
+                        <span style="flex:1;font-size:13px;color:#292E37">${m}</span>
+                        <span style="font-size:16px;color:#5E8E38;font-weight:700">+</span>
+                      </div>`).join('')}
+                  </div>` : ''}
+            </div>` : ''}
+          </div>`}`;
+
+  }else if(settingsTab==="projects"){
+    const pgNames = Object.keys(projectGroups);
+    body.innerHTML=`
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-size:13px;font-weight:700">Project Groups</div>
+        <button class="primary-btn" onclick="showProjectGroupModal()" style="font-size:11px;padding:5px 12px">+ New group</button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px">
+        ${pgNames.length ? pgNames.map(name=>{
+          const keys=projectGroups[name]||[];
+          const isActive=currentProjectGroup===name;
+          return`<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;border:1px solid ${isActive?'#2E99CE':'#E4E6E8'};background:${isActive?'#E0F0F8':'#F7F8F9'}">
+            <div style="flex:1">
+              <div style="font-size:12px;font-weight:700">${name} ${isActive?'<span style="font-size:10px;background:#125462;color:#fff;padding:1px 6px;border-radius:8px">Active</span>':''}</div>
+              <div style="font-size:11px;color:#9EA0A4">${keys.length} projects</div>
+            </div>
+            <button onclick="selectProjectGroup('${name.replace(/'/g,"\'")}');renderSettings()" style="font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid #2E99CE;background:${isActive?'#125462':'#fff'};color:${isActive?'#fff':'#2E99CE'};cursor:pointer">${isActive?'Active':'Select'}</button>
+            <button onclick="deleteProjectGroupKV('${name.replace(/'/g,"\'")}').then(()=>{renderSettings();populateProjGroupSelector()})" style="font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid #D6202B;background:#fff;color:#D6202B;cursor:pointer">Delete</button>
+          </div>`;
+        }).join('') : '<div style="font-size:13px;color:#9EA0A4;font-style:italic">No project groups yet. Create one above.</div>'}
+      </div>
+      <div style="border-top:1px solid #E4E6E8;padding-top:12px">
+        <div style="font-size:12px;color:#9EA0A4;margin-bottom:8px">Excluded projects (hidden from all views):</div>
+        <div style="max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:3px">
+          ${allProjects.map(p=>`<div style="display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:5px;background:#F7F8F9">
+            <input type="checkbox" ${excludedProjects.includes(p.key)?'':'checked'} onchange="toggleProjectExclusion('${p.key}',!this.checked)" style="cursor:pointer">
+            <span style="font-size:11px;font-weight:700;color:#257AA5;font-family:monospace">${p.key}</span>
+            <span style="font-size:12px;color:#292E37">${p.name}</span>
+          </div>`).join('')}
+        </div>
+      </div>`;
+
+  }else if(settingsTab==="admin"){
+    const isOwner=cfg.email===ADMIN_EMAIL||adminUsers.includes(cfg.email);
+    if(!isOwner){body.innerHTML=`<div style="font-size:13px;color:#9EA0A4;font-style:italic">Only admin users can manage access.</div>`;return;}
+    body.innerHTML=`
+      <div style="font-size:12px;color:#9EA0A4">Users with Manager Board access:</div>
+      <div id="admin-list" style="display:flex;flex-direction:column;gap:5px"></div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <input class="form-input" id="admin-email-input" placeholder="Email to grant manager access…" style="flex:1">
+        <button class="primary-btn" onclick="grantAdmin()">Grant</button>
+      </div>`;
+    renderAdminList();
+
+  }else{
+    body.innerHTML=`
+      <label class="form-label">Jira site URL</label><input class="setup-input" id="cfg-url2" type="text" value="${cfg.url}">
+      <label class="form-label">Email</label><input class="setup-input" id="cfg-email2" type="email" value="${cfg.email}">
+      <label class="form-label">API Token</label><input class="setup-input" id="cfg-token2" type="password" value="${cfg.token}">
+      <button class="primary-btn" style="margin-top:12px;width:100%;padding:9px" onclick="updateCredentials()">Save credentials</button>`;
+  }
+}
+
 
 
 /* ══ BOOT ══ */
