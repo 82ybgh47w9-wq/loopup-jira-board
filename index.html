@@ -316,7 +316,7 @@ button,select,textarea,input{font-family:inherit}
   
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v62</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v63</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -617,7 +617,43 @@ async function jiraGet(path){const t=encodeURIComponent(cfg.url+path);const r=aw
 async function jiraPost(path,body){const t=encodeURIComponent(cfg.url+path);return fetch(PROXY+"?target="+t,{method:"POST",headers:{Authorization:auth(),Accept:"application/json","Content-Type":"application/json"},body:JSON.stringify(body)});}
 async function jiraPut(path,body){const t=encodeURIComponent(cfg.url+path);return fetch(PROXY+"?target="+t,{method:"PUT",headers:{Authorization:auth(),Accept:"application/json","Content-Type":"application/json"},body:JSON.stringify(body)});}
 
-function extractText(doc){if(!doc)return"";if(typeof doc==="string")return doc.slice(0,800);let t="";function walk(n){if(!n)return;if(n.type==="text")t+=n.text||"";if(n.type==="hardBreak")t+="\n";if(n.content)n.content.forEach(walk);if(["paragraph","heading","listItem","bulletList","orderedList"].includes(n.type))t+="\n";}walk(doc);return t.trim().slice(0,800);}
+function extractText(doc){
+  if(!doc)return"";
+  if(typeof doc==="string")return doc.slice(0,800);
+  let t="";
+  function walk(n){
+    if(!n)return;
+    if(n.type==="text")t+=n.text||"";
+    if(n.type==="mention") t+=(n.attrs&&n.attrs.text)||"@"+(n.attrs&&n.attrs.displayName||"user");
+    if(n.type==="emoji") t+=(n.attrs&&n.attrs.shortName)||"";
+    if(n.type==="inlineCard" && n.attrs && n.attrs.url) t+="[link:"+n.attrs.url.split("/").pop().slice(0,30)+"]";
+    if(n.type==="blockCard" && n.attrs && n.attrs.url) t+="[link]";
+    if(n.type==="mediaInline" || n.type==="media") t+="[media]";
+    if(n.type==="hardBreak")t+="\n";
+    if(n.content)n.content.forEach(walk);
+    if(["paragraph","heading","listItem","bulletList","orderedList"].includes(n.type))t+="\n";
+  }
+  walk(doc);
+  return t.trim().slice(0,800);
+}
+
+function findMentionsInBody(doc) {
+  const mentions = [];
+  if(!doc) return mentions;
+  function walkM(n) {
+    if(!n) return;
+    if(n.type==='mention' && n.attrs) {
+      mentions.push({
+        accountId: n.attrs.id || '',
+        text: n.attrs.text || '',
+        displayName: n.attrs.displayName || (n.attrs.text||'').replace(/^@/,'')
+      });
+    }
+    if(n.content) n.content.forEach(walkM);
+  }
+  walkM(doc);
+  return mentions;
+}
 
 function parseIssue(i){const f=i.fields;return{key:i.key,summary:f.summary||"",type:f.issuetype?.name||"Task",status:f.status?.name||"Backlog",assignee:f.assignee?.displayName||"Unassigned",assigneeEmail:f.assignee?.emailAddress||"",priority:f.priority?.name||"Medium",updated:(f.updated||"").slice(0,10),parent_key:f.parent?.key||null,parent_summary:f.parent?.fields?.summary||"",parent_type:f.parent?.fields?.issuetype?.name||"",description:extractText(f.description),project:f.project?.key||i.key.split("-")[0],projectName:f.project?.name||"",subtasks:(f.subtasks||[]).map(s=>({key:s.key,summary:s.fields?.summary||"",status:s.fields?.status?.name||"",type:s.fields?.issuetype?.name||"Sub-task"})),epicLink:f.customfield_10014||null,commentCount:(f.comment?.total||0)};}
 
@@ -2795,20 +2831,29 @@ async function loadActivity() {
   const el = document.getElementById('activity-content');
   if(!el) return;
   el.innerHTML = `<div style="padding:24px;display:flex;align-items:center;gap:8px;color:#9EA0A4">${spinHtml()} Loading activity…</div>`;
-  appLogMsg('info','activity','Loading activity stream');
+  appLogMsg('info','activity','Loading activity stream for '+currentIam);
 
   try {
     const person = currentIam;
     if(!person) { el.innerHTML = '<div style="padding:24px;color:#9EA0A4">Select yourself in "I am" to see activity</div>'; return; }
 
-    // Fetch issues where: you're assignee, OR you commented, OR you're mentioned
-    // Limited to doneDays window for freshness
-    const projScope = getActiveProjectsJQL();
+    // Fetch issues where: you're assignee, OR you commented (anywhere), updated in doneDays window
+    // NOT scoped by project group — comments matter even on tasks outside your usual projects
     let jql = '(assignee = "'+person+'" OR comment ~ "'+person+'") AND updated >= -'+doneDays+'d ORDER BY updated DESC';
-    if(projScope) jql = projScope + ' AND ' + jql;
 
-    const d = await jiraGet('/rest/api/3/search/jql?jql='+encodeURIComponent(jql)+'&fields=summary,status,assignee,priority,issuetype,updated,parent,comment&maxResults=30');
-    const issues = (d.issues||[]);
+    // Paginate with nextPageToken (same as fetchAllTeamIssues)
+    let issues = [];
+    let token = null, iter = 0;
+    while(iter < 10) {
+      let url = '/rest/api/3/search/jql?jql='+encodeURIComponent(jql)+'&fields=summary,status,assignee,priority,issuetype,updated,parent,project,comment&maxResults=100';
+      if(token) url += '&nextPageToken='+encodeURIComponent(token);
+      const d = await jiraGet(url);
+      issues = issues.concat(d.issues || []);
+      if(d.isLast === true || !d.issues?.length || !d.nextPageToken) break;
+      token = d.nextPageToken;
+      iter++;
+    }
+    appLogMsg('info','activity','Fetched '+issues.length+' issues for activity');
 
     // Extract comments from each issue
     activityData = [];
@@ -2827,14 +2872,24 @@ async function loadActivity() {
       // Filter to relevant comments only:
       // - Comments by current user
       // - Comments on issues where current user is assignee
-      // - Comments that mention current user
+      // - Comments that mention current user (proper ADF mention node detection)
       const isMyIssue = issueInfo.assignee === person;
       for(const c of comments) {
         const body = extractText(c.body);
         const author = c.author?.displayName||'Unknown';
+        const authorAccountId = c.author?.accountId || '';
         const isMine = author === person;
-        const isMention = body.toLowerCase().includes(person.toLowerCase()) || 
-                         body.includes('@'+person);
+        // Capture my accountId from my own comments to detect mentions of me elsewhere
+        if(isMine && authorAccountId && !window._myAccountId) {
+          window._myAccountId = authorAccountId;
+        }
+        // Detect mention via ADF mention nodes
+        const mentions = findMentionsInBody(c.body);
+        const isMention = mentions.some(m => 
+          (window._myAccountId && m.accountId === window._myAccountId) ||
+          m.displayName === person ||
+          (m.text||'').toLowerCase().includes(person.toLowerCase())
+        );
         // Include only if: you wrote it, OR it's on your task, OR you're mentioned
         if(!isMine && !isMyIssue && !isMention) continue;
         // Apply doneDays window filter to comment time
