@@ -313,13 +313,10 @@ button,select,textarea,input{font-family:inherit}
       <option value="">All projects</option>
     </select>
   </div>
-  <div id="proj-filter-wrap" style="display:none;flex-direction:column;gap:1px">
-    <span style="font-size:9px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em">Filter by project</span>
-    <select class="proj-select" id="proj-filter" onchange="onProjFilter()" style="margin:0"><option value="">All</option></select>
-  </div>
+  
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v57</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v58</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -443,11 +440,12 @@ button,select,textarea,input{font-family:inherit}
   <div id="page-prioritise" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden">
     <div id="pri-controls" style="display:flex;align-items:center;gap:8px;padding:8px 15px;background:#fff;border-bottom:1px solid #E4E6E8;flex-shrink:0;flex-wrap:wrap">
       <select class="proj-select" id="pri-proj" onchange="loadPriBoard()" style="max-width:200px"><option value="">— select project —</option></select>
-      <select class="ctrl-select" id="pri-status-filter" onchange="renderPriBoard()">
-        <option value="">All statuses</option>
-        <option value="hide-done">Hide Done</option>
-        <option value="only-active">In Progress + Selected only</option>
-      </select>
+      <div id="pri-status-filter-wrap" style="display:flex;gap:3px;flex-wrap:wrap">
+        <button class="pri-stat-btn active" data-status="" onclick="togglePriStatus(this)" style="padding:3px 10px;border-radius:12px;font-size:10px;font-weight:700;cursor:pointer;border:1px solid #125462;background:#125462;color:#fff">All</button>
+        <button class="pri-stat-btn" data-status="In Progress" onclick="togglePriStatus(this)" style="padding:3px 10px;border-radius:12px;font-size:10px;font-weight:700;cursor:pointer;border:1px solid #E4E6E8;background:#fff;color:#73777C">In Progress</button>
+        <button class="pri-stat-btn" data-status="Selected" onclick="togglePriStatus(this)" style="padding:3px 10px;border-radius:12px;font-size:10px;font-weight:700;cursor:pointer;border:1px solid #E4E6E8;background:#fff;color:#73777C">Selected</button>
+        <button class="pri-stat-btn" data-status="Backlog" onclick="togglePriStatus(this)" style="padding:3px 10px;border-radius:12px;font-size:10px;font-weight:700;cursor:pointer;border:1px solid #E4E6E8;background:#fff;color:#73777C">Backlog</button>
+      </div>
       <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer">
         <input type="checkbox" id="pri-unassigned-only" onchange="renderPriBoard()"> Unassigned only
       </label>
@@ -506,6 +504,7 @@ let dragKey=null;
 let myTasksViewPerson="";
 let myEpicsViewPerson="";
 let ctrlProjFilter="";
+let priStatusFilters=new Set();
 let doneViewPerson="";
 let doneDays=7;
 let myEpicsTasks = [];
@@ -779,6 +778,33 @@ function updateManagerVisibility(){document.getElementById("btn-manager").style.
 function updateStats(){const m=allIssues.map(gm);const ns=i=>normStatus(i.status);document.getElementById("cnt-ip").textContent=m.filter(i=>ns(i)==="In Progress").length;document.getElementById("cnt-sel").textContent=m.filter(i=>ns(i)==="Selected").length;document.getElementById("cnt-back").textContent=m.filter(i=>ns(i)==="Backlog").length;document.getElementById("cnt-done").textContent=m.filter(i=>ns(i)==="Done").length;}
 
 /* ══ VIEW SWITCHING ══ */
+function togglePriStatus(btn) {
+  const status = btn.getAttribute('data-status');
+  if(status === '') {
+    priStatusFilters.clear();
+    document.querySelectorAll('#pri-status-filter-wrap button').forEach(b=>{
+      b.style.background = b.getAttribute('data-status')===''?'#125462':'#fff';
+      b.style.color = b.getAttribute('data-status')===''?'#fff':'#73777C';
+      b.style.borderColor = b.getAttribute('data-status')===''?'#125462':'#E4E6E8';
+    });
+  } else {
+    // Deactivate "All"
+    const allBtn=document.querySelector('#pri-status-filter-wrap button[data-status=""]');
+    if(allBtn){allBtn.style.background='#fff';allBtn.style.color='#73777C';allBtn.style.borderColor='#E4E6E8';}
+    if(priStatusFilters.has(status)) {
+      priStatusFilters.delete(status);
+      btn.style.background='#fff';btn.style.color='#73777C';btn.style.borderColor='#E4E6E8';
+    } else {
+      priStatusFilters.add(status);
+      btn.style.background='#125462';btn.style.color='#fff';btn.style.borderColor='#125462';
+    }
+    if(priStatusFilters.size===0){
+      if(allBtn){allBtn.style.background='#125462';allBtn.style.color='#fff';allBtn.style.borderColor='#125462';}
+    }
+  }
+  renderPriBoard();
+}
+
 function onCtrlProjFilter() {
   ctrlProjFilter = document.getElementById('ctrl-proj-filter')?.value || '';
   renderMain();
@@ -1548,44 +1574,31 @@ async function submitCreate(){
 
 
 function quickAddTask(epicKey, epicSummary, projectKey) {
-  // Pre-populate create modal with this epic selected
   createState = {
-    projectKey: projectKey || '',
+    projectKey: projectKey || currentProjFilter || '',
     issueType: 'Task',
     assignee: currentIam || '',
-    priority: 'Medium',
-    status: 'Selected',
-    epicKey: epicKey,
-    summary: '',
-    description: '',
-    epicSuggestions: [],
-    loadingEpics: false,
-    _selEpic: epicKey,
-    _selLegend: '',
-    _selInit: ''
+    priority: 'Medium', status: 'Selected',
+    summary: '', description: '', comment: '', dueDate: '',
+    selLegend: '', selInit: '', selEpic: epicKey || '',
+    legends: [], initiatives: [], epics: [],
+    aiSuggestions: [], aiLoading: false, showHierarchy: false
   };
   document.getElementById('create-overlay').classList.add('open');
-  renderCreateBody();
-  // Show the pre-selected epic immediately
-  setTimeout(() => {
-    if (createState.projectKey) {
-      loadHierarchyForCreate().then(() => {
-        // Auto-find and select the initiative and legend from the epic
-        const ep = (createState._epics||[]).find(e=>e.key===epicKey);
-        if(ep) {
-          createState._selEpic = epicKey;
-          createState.epicKey = epicKey;
-          const init = (createState._initiatives||[]).find(i=>i.key===ep.parent_key);
-          if(init) {
-            createState._selInit = init.key;
-            const leg = (createState._legends||[]).find(l=>l.key===init.parent_key);
-            if(leg) createState._selLegend = leg.key;
-          }
-          renderHierarchyPicker(createState._legends||[], createState._initiatives||[], createState._epics||[]);
+  renderCreateModal();
+  if(createState.projectKey) {
+    loadCreateHierarchy(createState.projectKey).then(()=>{
+      if(epicKey) {
+        createState.selEpic = epicKey;
+        const ep = (createState.epics||[]).find(e=>e.key===epicKey);
+        if(ep && ep.parent_key) {
+          const ini = (createState.initiatives||[]).find(i=>i.key===ep.parent_key);
+          if(ini) { createState.selInit = ini.key; if(ini.parent_key) createState.selLegend = ini.parent_key; }
         }
-      });
-    }
-  }, 100);
+        renderCreateModal();
+      }
+    });
+  }
 }
 
 
@@ -2422,7 +2435,7 @@ async function loadPriBoard() {
 }
 
 function renderPriBoard() {
-  const statusFilter = document.getElementById('pri-status-filter').value;
+  const statusFilter = ''; // Using priStatusFilters multi-select
   const unassignedOnly = document.getElementById('pri-unassigned-only').checked;
 
   // Filter tasks
