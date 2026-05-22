@@ -298,7 +298,7 @@ button,select,textarea,input{font-family:inherit}
   </div>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v46</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v47</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -454,6 +454,11 @@ let settingsTab="projects";
 let createDefaults={};
 let allProjects=[];
 let dragKey=null;
+let myEpicsTasks = [];
+let priIssues = [];
+let priEpics = [];
+let priDragKey = null;
+let priDragEpic = null;
 
 /* ══ PERSISTENCE ══ */
 function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,groupProjectAssignment,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed}));}catch{}}
@@ -938,7 +943,7 @@ function setPaneTab(t){
   if(t==="main")renderPaneMain();else renderPaneSubtasks();
 }
 
-function renderPaneMain(){
+async function renderPaneMain(){
   const i=openIssue;
   const hierRow=(label,key,summary,type)=>key?`<div class="hierarchy-row">
     <span class="hierarchy-label">${label}</span>
@@ -1133,7 +1138,7 @@ function renderCreateModal() {
       ${s.aiLoading?`<div style="padding:8px;font-size:12px;color:#9EA0A4">${spinHtml(14)} Finding matching epics…</div>`:''}
       ${s.aiSuggestions.length?`<div style="font-size:10px;color:#5E8E38;font-weight:700;margin-bottom:4px">✦ Suggested</div>`:''}
       <div style="max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
-        ${[...s.aiSuggestions,...(s.epics||[]).filter(ep=>!s.aiSuggestions.find(a=>a.key===ep.key))].map(ep=>{const sel=s.selEpic===ep.key;const isSug=!!s.aiSuggestions.find(a=>a.key===ep.key);return`<div onclick="selectEpicSuggestion('${ep.key}','${(ep.summary||'').replace(/'/g,"\'")}','${ep.project||''}')" style="display:flex;align-items:center;gap:8px;padding:${isSug?'8':'7'}px 10px;border-radius:8px;cursor:pointer;border:${sel?'2px solid #2E99CE':isSug?'1px solid #E4E6E8':'1px solid #EEF1F3'};background:${sel?'#E0F0F8':isSug?'#fff':'#F7F8F9'}"><span style="font-size:10px;font-weight:700;color:#257AA5;font-family:monospace">${ep.key}</span><span style="font-size:12px;color:#292E37;flex:1">${ep.summary||''}</span>${sel?'<span style="color:#2E99CE;font-weight:700">✓</span>':''}</div>`;}).join('')}
+        ${[...s.aiSuggestions,...(s.epics||[]).filter(ep=>!s.aiSuggestions.find(a=>a.key===ep.key))].map(ep=>{const sel=s.selEpic===ep.key;const isSug=!!s.aiSuggestions.find(a=>a.key===ep.key);return`<div onclick="selectEpicSuggestion('${ep.key}','${(ep.summary||'').replace(/'/g,"\\'")}','${ep.project||''}')" style="display:flex;align-items:center;gap:8px;padding:${isSug?'8':'7'}px 10px;border-radius:8px;cursor:pointer;border:${sel?'2px solid #2E99CE':isSug?'1px solid #E4E6E8':'1px solid #EEF1F3'};background:${sel?'#E0F0F8':isSug?'#fff':'#F7F8F9'}"><span style="font-size:10px;font-weight:700;color:#257AA5;font-family:monospace">${ep.key}</span><span style="font-size:12px;color:#292E37;flex:1">${ep.summary||''}</span>${sel?'<span style="color:#2E99CE;font-weight:700">✓</span>':''}</div>`;}).join('')}
       </div>
       ${!s.showHierarchy?`<button onclick="createState.showHierarchy=true;renderCreateModal()" style="margin-top:8px;font-size:11px;color:#257AA5;background:none;border:1px dashed #C9CACC;border-radius:6px;padding:6px 12px;cursor:pointer;width:100%">+ Create a new epic (show hierarchy)</button>`:''}</div>
     ${s.showHierarchy?`<div style="background:#F7F8F9;border-radius:10px;padding:12px;margin-bottom:14px;border:1px solid #E4E6E8"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Link to hierarchy</div><div id="hierarchy-rows"></div></div>`:''}
@@ -1148,8 +1153,6 @@ function renderCreateModal() {
     `}`;
   if(s.showHierarchy && s.projectKey) setTimeout(()=>renderHierarchyRows(),10);
 }
-
-
 
 async function loadCreateHierarchy() {
   const proj = createState.projectKey;
@@ -1286,7 +1289,6 @@ async function renderHierarchyRows(){
       <button onclick="createHierarchyItem('${h.label}')" class="primary-btn" style="font-size:11px;padding:5px 10px">Create</button>
     </div></div></div>`;}).join('');
 }
-
 
 function refreshHierarchyRows(){
   const s=createState;
@@ -1929,6 +1931,422 @@ function renderGroupSearchResults(groupName, users){
   }).join('');
 }
 
+
+function priCardHtml(t, rank) {
+  const sc = SC[t.status] || SC.Backlog;
+  const pc = PC[t.priority] || PC.Medium;
+  const isUnassigned = t.assignee === 'Unassigned';
+  return `<div class="pri-card ${isUnassigned?'unassigned-card':''}"
+    draggable="true"
+    data-key="${t.key}"
+    data-epic="${t.parent_key||'__none__'}"
+    onclick="openPane('${t.key}')"
+    ondragstart="priDragStartEl(event,this)"
+    ondragend="priDragEnd(event)"
+    ondragover="priCardDragOver(event)"
+    ondragleave="priCardDragLeave(event)"
+    ondrop="priCardDropEl(event,this)">
+    <div style="display:flex;align-items:center;gap:4px;margin-bottom:3px">
+      <span class="pri-rank-num">#${rank}</span>
+      <a href="${BASE()}${t.key}" target="_blank" onclick="event.stopPropagation()" class="card-key">${t.key}</a>
+      ${t.parent_key ? `<span style="font-size:9px;color:#C9CACC;font-family:monospace">↑${t.parent_key}</span>` : ''}
+      <div style="margin-left:auto">${ava(t.assignee, 20)}</div>
+    </div>
+    <div style="font-size:12px;font-weight:600;color:#292E37;line-height:1.3;margin-bottom:5px">${t.summary}</div>
+    <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
+      <span class="badge" style="background:${sc.bg};color:${sc.c}">${t.status}</span>
+      <span class="badge" style="background:${pc.bg};color:${pc.c}"><span class="pri-dot" style="background:${pc.d}"></span>${t.priority}</span>
+      ${isUnassigned ? '<span class="badge" style="background:#FFF0CC;color:#9A4500">Unassigned</span>' : ''}
+    </div>
+  </div>`;
+}
+
+async function priDrop(e, epicKey) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+
+  const dt = e.dataTransfer.getData('text/plain');
+  if(dt) {
+    const parts = dt.split('|||');
+    priDragKey = parts[0];
+    priDragEpic = parts[1]||'__none__';
+  }
+  if(!priDragKey) return;
+
+  const activeArr3 = currentView === 'myepics' ? myEpicsTasks : priIssues;
+  const taskIdx = activeArr3.findIndex(t => t.key === priDragKey);
+  if(taskIdx === -1) return;
+
+  const [moved] = activeArr3.splice(taskIdx, 1);
+
+  if(epicKey !== '__none__' && epicKey !== priDragEpic) {
+    moved.parent_key = epicKey;
+    moved.parent_summary = priEpics.find(x=>x.key===epicKey)?.summary||'';
+    jiraPut('/rest/api/3/issue/'+priDragKey, {fields:{parent:{key:epicKey}}}).then(r=>{
+      const t=document.createElement('div');
+      t.style.cssText='position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#5E8E38;color:#fff;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;z-index:9999';
+      t.textContent='↗ Task moved to '+epicKey+' in Jira';
+      document.body.appendChild(t);
+      setTimeout(()=>t.remove(),2500);
+    }).catch(()=>{});
+  }
+
+  const activeArr4 = currentView === 'myepics' ? myEpicsTasks : priIssues;
+  activeArr4.push(moved);
+  if(currentView === 'myepics') renderMyEpicsBoard();
+  else renderPriBoard();
+
+  const activeTasksInCol = (currentView==='myepics'?myEpicsTasks:priIssues)
+    .filter(t=>(t.parent_key||'__none__')===epicKey);
+  if(activeTasksInCol.length > 1) {
+    const last = activeTasksInCol[activeTasksInCol.length-2];
+    pushRankToJira({issues:[priDragKey], rankAfterIssue:last.key});
+  }
+
+  priDragKey = null; priDragEpic = null;
+}
+
+async function renderMyEpics() {
+  const person = currentIam;
+  if(!person){
+    document.getElementById('myepics-board').innerHTML='<div style="padding:24px;color:#9EA0A4;font-size:13px">Select yourself in "I am" first</div>';
+    return;
+  }
+  const el = document.getElementById('myepics-board');
+  el.innerHTML = `<div style="padding:24px;display:flex;align-items:center;gap:8px;color:#9EA0A4">${spinHtml()} Loading your epics…</div>`;
+
+  try {
+    // Columns = only Epics and Milestones (same level in hierarchy)
+    // Initiatives and Legends are PARENT CONTEXT only - never columns
+    const columnTypes = ["Epic","Milestone"];
+    const myEpics = allIssues.filter(i=>columnTypes.includes(i.type)&&i.assignee===person);
+    if(!myEpics.length){
+      el.innerHTML='<div style="padding:32px;color:#9EA0A4;font-size:13px;text-align:center">No epics or milestones assigned to you</div>';
+      return;
+    }
+
+    const epicKeys = myEpics.map(e=>e.key);
+    try {
+      // Fetch direct children - Tasks and Sub-tasks only (NOT Milestones/Epics)
+      const jql = 'issueType in (Task,"Sub-task",Story,Bug) AND parent in ('+epicKeys.join(',')+')'+ ' ORDER BY rank ASC';
+      const td = await jiraGet('/rest/api/3/search/jql?jql='+encodeURIComponent(jql)+'&fields=summary,status,assignee,priority,issuetype,updated,parent&maxResults=200');
+      myEpicsTasks = (td.issues||[]).map(parseIssue);
+      // Also pick up tasks already in allIssues whose parent is one of our epics
+      const extraTasks = allIssues.filter(i=>{
+        if(['Epic','Milestone','Initiative','Legend'].includes(i.type)) return false;
+        if(myEpicsTasks.find(t=>t.key===i.key)) return false;
+        return epicKeys.includes(i.parent_key);
+      });
+      myEpicsTasks = [...myEpicsTasks, ...extraTasks];
+    } catch {
+      myEpicsTasks = allIssues.filter(i=>
+        !['Epic','Milestone','Initiative','Legend'].includes(i.type) &&
+        epicKeys.includes(i.parent_key)
+      );
+    }
+
+    window._myEpics = myEpics;
+    renderMyEpicsBoard();
+  } catch(e) {
+    document.getElementById('page-myepics').innerHTML=`<div style="padding:24px;color:#D6202B">Failed: ${e.message}</div>`;
+  }
+}
+
+function renderMyEpicsBoard() {
+  const myEpics = window._myEpics;
+  if(!myEpics || !myEpics.length) return;
+  const el = document.getElementById('myepics-board');
+  if(!el) return;
+
+  const priFilter = document.getElementById('priority-filter')?.value||'';
+  const statFilter = document.getElementById('status-filter-ctrl')?.value||'';
+  const unassignedOnly = document.getElementById('unassigned-filter')?.checked||false;
+  const search = (document.getElementById('search-input')?.value||'').toLowerCase();
+
+  // Helper: walk up allIssues to find ancestor of a given type
+  const findAncestorOfType = (issue, types) => {
+    let cur = issue;
+    for(let depth=0; depth<5; depth++){
+      if(!cur || !cur.parent_key) return null;
+      const par = allIssues.find(x=>x.key===cur.parent_key);
+      if(!par) return null;
+      if(types.includes(par.type)) return par;
+      cur = par;
+    }
+    return null;
+  };
+
+  el.innerHTML = '';
+  myEpics.forEach(epic => {
+    let tasks = myEpicsTasks.filter(i=>i.parent_key===epic.key);
+    if(priFilter) tasks=tasks.filter(t=>t.priority===priFilter);
+    if(statFilter) tasks=tasks.filter(t=>normStatus(t.status)===normStatus(statFilter));
+    if(unassignedOnly) tasks=tasks.filter(t=>t.assignee==='Unassigned');
+    if(search) tasks=tasks.filter(t=>t.summary.toLowerCase().includes(search)||t.key.toLowerCase().includes(search));
+
+    const sc = SC[epic.status]||SC.Backlog;
+
+    // Determine hierarchy by actual TYPE, not depth
+    const legendIssue   = findAncestorOfType(epic, ['Legend']);
+    const initIssue     = findAncestorOfType(epic, ['Initiative']);
+    // The epic itself may be an Initiative or Legend - show what it is
+    const colType = epic.type; // "Epic", "Initiative", "Milestone", etc.
+
+    // Build hierarchy row helper - fixed height slot
+    const hierRow = (label, issue, color, bg) => {
+      const content_html = issue
+        ? `<a href="${BASE()}${issue.key}" target="_blank" onclick="event.stopPropagation()"
+            style="font-size:10px;font-weight:700;color:${color};background:${bg};padding:2px 7px;
+            border-radius:3px;text-decoration:none;overflow:hidden;text-overflow:ellipsis;
+            white-space:nowrap;max-width:170px;display:inline-block"
+            title="${issue.summary}">${issue.key} · ${issue.summary.slice(0,22)}${issue.summary.length>22?'…':''}</a>`
+        : `<span style="font-size:10px;color:#C9CACC;font-style:italic">—</span>`;
+      return `<div style="display:flex;align-items:center;gap:6px;height:22px">
+        <span style="font-size:9px;font-weight:700;color:#73777C;text-transform:uppercase;letter-spacing:.04em;min-width:58px;flex-shrink:0">${label}</span>
+        ${content_html}
+      </div>`;
+    };
+
+    const col = document.createElement('div');
+    col.className = 'pri-epic-col';
+    col.innerHTML = `
+      <div class="pri-epic-hdr" style="background:#F0F9FF;border-bottom:2px solid #2E99CE;display:flex;flex-direction:column;padding:10px 12px;gap:4px">
+        <!-- Fixed-height hierarchy rows: Legend, Initiative, then the column type -->
+        ${hierRow('Legend',   legendIssue,  '#9A4500', '#FFF0E6')}
+        ${hierRow('Initiative', initIssue && initIssue.key !== (legendIssue?.key) ? initIssue : (epic.type==='Initiative'?null:initIssue), '#6B3FA0', '#F3EEFF')}
+        <!-- Divider -->
+        <div style="border-top:1px solid #C8E6F7;margin:3px 0"></div>
+        <!-- Column issue - larger -->
+        <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:2px">
+          <span style="font-size:9px;font-weight:700;color:#73777C;text-transform:uppercase;letter-spacing:.04em;min-width:58px;flex-shrink:0">${colType}</span>
+          <a href="${BASE()}${epic.key}" target="_blank" onclick="event.stopPropagation()"
+            style="font-size:10px;font-family:monospace;color:#125462;font-weight:700;text-decoration:none">${epic.key} ↗</a>
+        </div>
+        <div style="font-size:14px;font-weight:700;color:#125462;line-height:1.3;margin-bottom:6px">${epic.summary}</div>
+        <!-- Status / badges -->
+        <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
+          <span class="badge" style="background:${sc.bg};color:${sc.c}">${epic.status}</span>
+          ${pbadge(epic.priority)}
+          ${ava(epic.assignee,20)}
+          <span style="font-size:10px;color:#9EA0A4;margin-left:auto">${tasks.length} tasks</span>
+          <button onclick="event.stopPropagation();quickAddTaskFromBtn(this)" data-epic-key="${epic.key}"
+            style="background:#125462;border:none;color:#fff;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:14px;line-height:1;display:flex;align-items:center;justify-content:center;flex-shrink:0" title="Add task">+</button>
+        </div>
+      </div>
+      <div class="pri-epic-body pri-drop-zone" data-epic="${epic.key}"
+        ondragover="priDragOver(event,'${epic.key}')" ondragleave="priDragLeave(event)" ondrop="priDrop(event,'${epic.key}')">
+        ${tasks.length
+          ? tasks.map((t,idx)=>priCardHtml(t,idx+1)).join('')
+          : '<div style="font-size:12px;color:#C9CACC;padding:8px;font-style:italic">No tasks</div>'}
+      </div>`;
+    el.appendChild(col);
+  });
+}
+
+async function loadPriBoard() {
+  const projKey = document.getElementById('pri-proj').value;
+  if (!projKey) return;
+  const loadEl = document.getElementById('pri-loading');
+  loadEl.textContent = 'Loading…'; loadEl.style.display = 'inline';
+
+  try {
+    const fields = 'summary,status,assignee,priority,issuetype,parent,customfield_10014';
+    // Fetch epics/milestones
+    const epicJql = `project=${projKey} AND issuetype in (Epic,Milestone,Initiative,Legend) AND statusCategory != Done ORDER BY created ASC`;
+    const epicD = await jiraGet('/rest/api/3/search/jql?jql=' + encodeURIComponent(epicJql) + '&fields=' + fields + '&maxResults=100');
+    priEpics = (epicD.issues || []).map(parseIssue);
+
+    // Fetch all tasks
+    const taskJql = `project=${projKey} AND issuetype in (Task,"Sub-task") ORDER BY rank ASC`;
+    const taskD = await jiraGet('/rest/api/3/search/jql?jql=' + encodeURIComponent(taskJql) + '&fields=' + fields + '&maxResults=200');
+    priIssues = (taskD.issues || []).map(parseIssue);
+
+    renderPriBoard();
+  } catch(e) {
+    document.getElementById('pri-board').innerHTML = `<div style="padding:24px;color:#D6202B">Failed to load: ${e.message}</div>`;
+  }
+  loadEl.style.display = 'none';
+}
+
+function renderPriBoard() {
+  const statusFilter = document.getElementById('pri-status-filter').value;
+  const unassignedOnly = document.getElementById('pri-unassigned-only').checked;
+
+  // Filter tasks
+  let tasks = [...priIssues];
+  if (statusFilter === 'hide-done') tasks = tasks.filter(i => normStatus(i.status) !== 'Done');
+  if (statusFilter === 'only-active') tasks = tasks.filter(i => ['In Progress','Selected'].includes(normStatus(i.status)));
+  if (unassignedOnly) tasks = tasks.filter(i => i.assignee === 'Unassigned');
+
+  // Group tasks by parent epic
+  const byEpic = {};
+  const unassigned = [];
+  tasks.forEach(t => {
+    if (t.parent_key) {
+      if (!byEpic[t.parent_key]) byEpic[t.parent_key] = [];
+      byEpic[t.parent_key].push(t);
+    } else {
+      unassigned.push(t);
+    }
+  });
+
+  // Filter epics
+  let epics = [...priEpics].filter(e => ['Epic','Milestone'].includes(e.type));
+  if (unassignedOnly) epics = epics.filter(e => e.assignee === 'Unassigned' || (byEpic[e.key]||[]).length > 0);
+
+  const board = document.getElementById('pri-board');
+  board.innerHTML = '';
+
+  // Render epic columns
+  epics.forEach(epic => {
+    const epicTasks = byEpic[epic.key] || [];
+    // Find parent chain
+    const initiative = priEpics.find(e => e.key === epic.parent_key);
+    const legend = initiative ? priEpics.find(e => e.key === initiative.parent_key) : null;
+
+    const col = document.createElement('div');
+    col.className = 'pri-epic-col';
+    col.dataset.epicKey = epic.key;
+
+    const statusCfg = SC[epic.status] || SC.Backlog;
+    col.innerHTML = `
+      <div class="pri-epic-hdr">
+        <div style="display:flex;align-items:center;gap:5px;margin-bottom:3px;flex-wrap:wrap">
+          ${legend ? `<span style="font-size:9px;color:#9A4500;background:#FFF0E6;padding:1px 5px;border-radius:3px;font-weight:700">${legend.key}</span>` : ''}
+          ${initiative ? `<span style="font-size:9px;color:#6B3FA0;background:#F3EEFF;padding:1px 5px;border-radius:3px;font-weight:700">${initiative.key}</span>` : ''}
+        </div>
+        <div class="pri-epic-title">
+          <a href="${BASE()}${epic.key}" target="_blank" style="font-size:10px;font-family:monospace;color:#257AA5;font-weight:700">${epic.key}</a>
+          ${epic.summary}
+        </div>
+        <div class="pri-epic-meta">
+          <span class="badge" style="background:${statusCfg.bg};color:${statusCfg.c}">${epic.status}</span>
+          ${pbadge(epic.priority)}
+          ${ava(epic.assignee, 20)}
+          <span style="font-size:10px;color:#9EA0A4;margin-left:auto">${epicTasks.length} tasks</span>
+          <button onclick="event.stopPropagation();quickAddTaskFromBtn(this)" data-epic-key="${epic.key}" data-proj=""
+            style="background:#125462;border:none;color:#fff;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:14px;line-height:1;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-left:4px" title="Add task to this epic">+</button>
+        </div>
+      </div>
+      <div class="pri-epic-body pri-drop-zone" data-epic="${epic.key}"
+        ondragover="priDragOver(event,'${epic.key}')" ondragleave="priDragLeave(event)" ondrop="priDrop(event,'${epic.key}')">
+        ${epicTasks.map((t,idx) => priCardHtml(t, idx+1)).join('')}
+      </div>`;
+    board.appendChild(col);
+  });
+
+  // Unassigned column
+  if (unassigned.length > 0 || !document.getElementById('pri-unassigned-only')?.checked) {
+    const col = document.createElement('div');
+    col.className = 'pri-epic-col';
+    col.style.minWidth = '260px';
+    col.innerHTML = `
+      <div class="pri-epic-hdr" style="background:#FFF8EC">
+        <div class="pri-epic-title" style="color:#9A4500">⚠ No Epic assigned</div>
+        <div class="pri-epic-meta"><span style="font-size:10px;color:#9A4500">${unassigned.length} tasks</span></div>
+      </div>
+      <div class="pri-epic-body pri-drop-zone" data-epic="__none__"
+        ondragover="priDragOver(event,'__none__')" ondragleave="priDragLeave(event)" ondrop="priDrop(event,'__none__')">
+        ${unassigned.map((t,idx) => priCardHtml(t, idx+1)).join('')}
+      </div>`;
+    board.appendChild(col);
+  }
+}
+
+function priCardDropEl(e, el) {
+  e.preventDefault();
+  e.stopPropagation();
+  // Get drag info - try multiple sources
+  const dt = e.dataTransfer.getData('text/plain');
+  if(dt && dt.includes('|||')) {
+    const parts = dt.split('|||');
+    priDragKey = parts[0];
+    priDragEpic = parts[1]||'__none__';
+  } else {
+    priDragKey = priDragKey || window._priDragKey;
+    priDragEpic = priDragEpic || window._priDragEpic || '__none__';
+  }
+  if(!priDragKey) return;
+  const targetKey = el.getAttribute('data-key');
+  const targetEpic = el.getAttribute('data-epic');
+  if(priDragKey === targetKey) return;
+
+  const rect = el.getBoundingClientRect();
+  const before = e.clientY < rect.top + rect.height/2;
+
+  const activeArr = currentView === 'myepics' ? myEpicsTasks : priIssues;
+  const taskIdx = activeArr.findIndex(t => t.key === priDragKey);
+  const targetIdx = activeArr.findIndex(t => t.key === targetKey);
+  if(taskIdx === -1 || targetIdx === -1) return;
+
+  const [moved] = activeArr.splice(taskIdx, 1);
+
+  // Move to different epic if needed
+  if(priDragEpic !== targetEpic && targetEpic !== '__none__') {
+    moved.parent_key = targetEpic;
+    moved.parent_summary = priEpics.find(x=>x.key===targetEpic)?.summary||'';
+    jiraPut('/rest/api/3/issue/'+priDragKey, {fields:{parent:{key:targetEpic}}}).then(r=>{
+      const t=document.createElement('div');
+      t.style.cssText='position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#5E8E38;color:#fff;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;z-index:9999';
+      t.textContent='↗ Task moved to '+targetEpic+' in Jira';
+      document.body.appendChild(t);
+      setTimeout(()=>t.remove(),2500);
+    }).catch(()=>{});
+  }
+
+  const newTargetIdx = activeArr.findIndex(t => t.key === targetKey);
+  activeArr.splice(before ? newTargetIdx : newTargetIdx+1, 0, moved);
+
+  if(currentView === 'myepics') renderMyEpicsBoard();
+  else renderPriBoard();
+
+  // Update rank in Jira
+  const rankBody = before
+    ? {issues:[priDragKey], rankBeforeIssue:targetKey}
+    : {issues:[priDragKey], rankAfterIssue:targetKey};
+  pushRankToJira(rankBody);
+
+  priDragKey = null; priDragEpic = null;
+}
+
+function priDragStartEl(e, el) {
+  priDragKey = el.getAttribute('data-key');
+  priDragEpic = el.getAttribute('data-epic');
+  window._priDragKey = priDragKey;
+  window._priDragEpic = priDragEpic;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', priDragKey + '|||' + priDragEpic);
+  setTimeout(() => el.classList.add('dragging'), 0);
+}
+
+function priDragEnd(e) {
+  // Delay clearing so drop handler can still read values
+  setTimeout(()=>{ priDragKey=null; priDragEpic=null; window._priDragKey=null; window._priDragEpic=null; }, 100);
+  document.querySelectorAll('.pri-card').forEach(c => c.classList.remove('dragging','drag-over-top','drag-over-bottom'));
+  document.querySelectorAll('.pri-drop-zone').forEach(z => z.classList.remove('drag-over'));
+}
+
+function priDragOver(e, epicKey) {
+  e.preventDefault();
+  e.currentTarget.classList.add('drag-over');
+}
+
+function priDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over');
+}
+
+function priCardDragOver(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const card = e.currentTarget;
+  const rect = card.getBoundingClientRect();
+  document.querySelectorAll('.pri-card').forEach(c => c.classList.remove('drag-over-top','drag-over-bottom'));
+  card.classList.add(e.clientY < rect.top + rect.height/2 ? 'drag-over-top' : 'drag-over-bottom');
+}
+
+function priCardDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over-top','drag-over-bottom');
+}
 /* ══ BOOT ══════════════════════════════════════════════════════════ */
 loadAll();
 // Restore I Am selector
