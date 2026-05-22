@@ -298,7 +298,7 @@ button,select,textarea,input{font-family:inherit}
   </div>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v34</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v36</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -2159,11 +2159,13 @@ function renderSettings(){
                   ${currentProjectGroup===activePG?'<span style="font-size:10px;background:#125462;color:#fff;padding:1px 8px;border-radius:8px;margin-left:8px">Active</span>':''}
                 </div>
                 <div style="display:flex;gap:8px">
-                  <button onclick="selectProjectGroup(${JSON.stringify(activePG)});renderSettings();populateProjGroupSelector()"
+                  <button data-pg="${activePG}" onclick="selectProjectGroup(this.getAttribute('data-pg'));renderSettings();populateProjGroupSelector()"
                     style="font-size:11px;padding:5px 12px;border-radius:6px;border:1px solid #2E99CE;background:${currentProjectGroup===activePG?'#125462':'#fff'};color:${currentProjectGroup===activePG?'#fff':'#2E99CE'};cursor:pointer">
                     ${currentProjectGroup===activePG?'✓ Active':'Use this group'}
                   </button>
-                  <button onclick="deletePG(${JSON.stringify(activePG)})"
+                  <button 
+                    data-pgname="${activePG.replace(/"/g,'&quot;')}"
+                    onclick="const n=this.getAttribute('data-pgname');deletePG(n)"
                     style="font-size:11px;padding:5px 12px;border-radius:6px;border:1px solid #D6202B;background:#fff;color:#D6202B;cursor:pointer">Delete</button>
                 </div>
               </div>
@@ -2174,7 +2176,11 @@ function renderSettings(){
                 ${allProjects.map(p=>{
                   const inGroup=(projectGroups[activePG]||[]).includes(p.key);
                   return`<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:6px;background:${inGroup?'#E0F0F8':'#F7F8F9'};border:1px solid ${inGroup?'#2E99CE':'#E4E6E8'}">
-                    <input type="checkbox" ${inGroup?'checked':''} onchange="togglePGProject(${JSON.stringify(activePG)},'${p.key}',this.checked)" style="cursor:pointer">
+                    <input type="checkbox" ${inGroup?'checked':''} 
+                      data-group="${activePG.replace(/"/g,'&quot;')}" 
+                      data-key="${p.key}"
+                      onchange="togglePGProject(this.getAttribute('data-group'),this.getAttribute('data-key'),this.checked)" 
+                      style="cursor:pointer">
                     <span style="font-size:11px;font-weight:700;color:#257AA5;font-family:monospace;min-width:50px">${p.key}</span>
                     <span style="font-size:12px;color:#292E37;flex:1">${p.name}</span>
                     ${inGroup?'<span style="font-size:11px;color:#2E99CE">✓</span>':''}
@@ -2194,6 +2200,7 @@ function renderSettings(){
         <input class="form-input" id="new-group-name" placeholder="New team name (e.g. Marketing, Com Ops)…" style="flex:1"
           onkeydown="if(event.key==='Enter')createGroup()">
         <button class="primary-btn" onclick="createGroup()">+ Create team</button>
+      <div id="grp-create-msg" style="font-size:12px;color:#D6202B;margin-top:4px"></div>
       </div>
       ${gnames.length===0
         ? '<div style="font-size:13px;color:#9EA0A4;font-style:italic;padding:8px 0">No teams yet — create one above.</div>'
@@ -2225,7 +2232,10 @@ function renderSettings(){
                       <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;background:#E0F0F8;border:1px solid #2E99CE">
                         ${ava(m,24)}
                         <span style="flex:1;font-size:13px;font-weight:700;color:#125462">${m}</span>
-                        <button onclick="grpRemove(${JSON.stringify(activeGrp)},${idx})"
+                        <button 
+                          data-grp="${activeGrp.replace(/"/g,'&quot;')}" 
+                          data-member="${m.replace(/"/g,'&quot;')}"
+                          onclick="const g=this.getAttribute('data-grp');const mb=this.getAttribute('data-member');if(groups[g])groups[g]=groups[g].filter(x=>x!==mb);saveAll();renderSettings();"
                           style="background:none;border:none;cursor:pointer;color:#D6202B;font-size:20px;line-height:1;padding:0 6px">×</button>
                       </div>`).join('')}
                   </div>`}
@@ -2334,11 +2344,13 @@ function toggleProjectExclusion(key,exclude){
 }
 function createGroup(){
   const el=document.getElementById("new-group-name");
+  const msgEl=document.getElementById("grp-create-msg");
   const name=el?el.value.trim():"";
-  if(!name)return;
-  if(groups[name]){alert('A team called "'+name+'" already exists.');return;}
+  if(!name){if(msgEl)msgEl.textContent="Please enter a team name";return;}
+  if(groups[name]){if(msgEl)msgEl.textContent='A team called "'+name+'" already exists';return;}
   groups[name]=[];
   if(el) el.value="";
+  if(msgEl) msgEl.textContent="";
   saveAll();
   window._activeGrpTab=name;
   renderSettings();
@@ -2367,39 +2379,86 @@ async function searchGroupUsers(groupName,query){
   const el=document.getElementById("grp-results");
   if(!el)return;
   if(!query||query.length<2){el.innerHTML='';return;}
-  el.innerHTML=`<div style="font-size:12px;color:#9EA0A4;padding:4px">${spinHtml(14)} Searching for "${query}"…</div>`;
+  el.innerHTML=`<div style="font-size:12px;color:#9EA0A4;padding:4px">${spinHtml(14)} Searching…</div>`;
   try{
-    // Try both search endpoints for maximum compatibility
-    let users=[];
-    try{
-      const d=await jiraGet("/rest/api/3/user/search?query="+encodeURIComponent(query)+"&maxResults=10");
-      users=Array.isArray(d)?d:(d.values||[]);
-    }catch{
-      const d2=await jiraGet("/rest/api/3/user/picker?query="+encodeURIComponent(query)+"&maxResults=10");
-      users=(d2.users||[]).map(u=>({displayName:u.displayName,emailAddress:u.emailAddress,accountId:u.accountId}));
-    }
+    // Use the user picker API which is more reliable across Jira versions
+    const d=await jiraGet("/rest/api/3/user/search?query="+encodeURIComponent(query)+"&maxResults=10&startAt=0");
+    const users=Array.isArray(d)?d:[];
     if(!users.length){
-      el.innerHTML='<div style="font-size:12px;color:#9EA0A4;padding:8px">No users found for "'+query+'"</div>';
+      // Fallback to picker
+      try{
+        const d2=await jiraGet("/rest/api/3/user/picker?query="+encodeURIComponent(query)+"&maxResults=10");
+        const pickerUsers=(d2.users||[]);
+        if(pickerUsers.length){
+          renderGroupSearchResults(groupName, pickerUsers);
+          return;
+        }
+      }catch{}
+      el.innerHTML='<div style="font-size:12px;color:#9EA0A4;padding:8px;text-align:center">No users found for "<b>'+query+'</b>"<br><span style="font-size:11px">Try searching by email or full name</span></div>';
       return;
     }
-    el.innerHTML=users.map(u=>{
-      const name=u.displayName||'';
-      const email=u.emailAddress||'';
-      const inGroup=(groups[groupName]||[]).includes(name);
-      return`<div onclick="grpSearchAdd(${JSON.stringify(groupName)},${JSON.stringify(name)})"
-        style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;cursor:pointer;
-        background:${inGroup?'#E0F0F8':'#fff'};border:1px solid ${inGroup?'#2E99CE':'#E4E6E8'};margin-bottom:3px">
-        ${ava(name,24)}
-        <div style="flex:1;min-width:0">
-          <div style="font-size:12px;font-weight:600">${name}</div>
-          <div style="font-size:10px;color:#9EA0A4">${email}</div>
-        </div>
-        <span style="font-size:16px;color:${inGroup?'#2E99CE':'#5E8E38'};font-weight:700">${inGroup?'✓':'+'}</span>
-      </div>`;
-    }).join('');
+    renderGroupSearchResults(groupName, users);
   }catch(e){
-    el.innerHTML='<div style="font-size:12px;color:#D6202B;padding:8px">Search failed: '+e.message+'</div>';
+    el.innerHTML='<div style="font-size:12px;color:#D6202B;padding:8px">Search error: '+e.message+'</div>';
   }
+}
+
+function renderGroupSearchResults(groupName, users){
+  const el=document.getElementById("grp-results");
+  if(!el)return;
+  el.innerHTML=users.map(u=>{
+    const name=u.displayName||u.name||'';
+    const email=u.emailAddress||u.email||'';
+    if(!name)return'';
+    const inGroup=(groups[groupName]||[]).includes(name);
+    return`<div onclick="grpSearchAdd(${JSON.stringify(groupName)},${JSON.stringify(name)})"
+      style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:7px;cursor:pointer;
+      background:${inGroup?'#E0F0F8':'#fff'};border:1px solid ${inGroup?'#2E99CE':'#E4E6E8'};margin-bottom:4px">
+      ${ava(name,26)}
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;color:#292E37">${name}</div>
+        <div style="font-size:11px;color:#9EA0A4">${email}</div>
+      </div>
+      <span style="font-size:${inGroup?'14':'18'}px;color:${inGroup?'#2E99CE':'#5E8E38'};font-weight:700">${inGroup?'✓':'+'}</span>
+    </div>`;
+  }).join('');
+}
+
+/* ══ BOOT ══════════════════════════════════════════════════════════ */
+loadAll();
+// Restore I Am selector
+const iamSel = document.getElementById("iam-sel");
+if(iamSel) iamSel.value = currentIam||"";
+// Restore view tab highlight
+if(!currentView) currentView = "mytasks";
+document.querySelectorAll("#view-seg button").forEach(b=>{
+  const oc = b.getAttribute("onclick")||"";
+  b.classList.toggle("active", oc.includes("'"+currentView+"'"));
+});
+// Restore settings tab
+if(!settingsTab) settingsTab = "projects";
+// Show/hide manager
+updateManagerVisibility();
+
+if(cfg.email && cfg.token && cfg.url){
+  document.getElementById("setup-overlay").style.display = "none";
+  init().then(async ()=>{
+    await loadProjectGroups();
+    populateProjGroupSelector();
+    populateProjFilter();
+    if(currentGroup) {
+      const gs = document.getElementById("group-sel");
+      if(gs) gs.value = currentGroup;
+    }
+    if(!currentProjectGroup && Object.keys(projectGroups).length === 0){
+      // No project groups exist yet - don't force modal, just proceed
+    } else if(!currentProjectGroup && Object.keys(projectGroups).length > 0){
+      // Groups exist but none selected - show blocking modal
+      showProjectGroupModal();
+    }
+  });
+} else {
+  showSetup();
 }
 </script>
 </body>
