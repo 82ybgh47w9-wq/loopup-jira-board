@@ -298,7 +298,7 @@ button,select,textarea,input{font-family:inherit}
   </div>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v41</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v42</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -1436,37 +1436,33 @@ async function renderMyEpics() {
   el.innerHTML = `<div style="padding:24px;display:flex;align-items:center;gap:8px;color:#9EA0A4">${spinHtml()} Loading your epics…</div>`;
 
   try {
-    const epicTypes = ["Epic","Milestone","Initiative","Legend"];
-    const myEpics = allIssues.filter(i=>epicTypes.includes(i.type)&&i.assignee===person);
+    // Columns = only Epics and Milestones (same level in hierarchy)
+    // Initiatives and Legends are PARENT CONTEXT only - never columns
+    const columnTypes = ["Epic","Milestone"];
+    const myEpics = allIssues.filter(i=>columnTypes.includes(i.type)&&i.assignee===person);
     if(!myEpics.length){
-      el.innerHTML='<div style="padding:32px;color:#9EA0A4;font-size:13px;text-align:center">No epics assigned to you</div>';
+      el.innerHTML='<div style="padding:32px;color:#9EA0A4;font-size:13px;text-align:center">No epics or milestones assigned to you</div>';
       return;
     }
 
-    // Fetch ALL tasks for user's epics - including tasks under child issues
     const epicKeys = myEpics.map(e=>e.key);
     try {
-      // Get direct children first
-      const jql = 'issueType in (Task,Sub-task,Story,Bug,Milestone) AND parent in ('+epicKeys.join(',')+')'+ ' ORDER BY rank ASC';
+      // Fetch direct children - Tasks and Sub-tasks only (NOT Milestones/Epics)
+      const jql = 'issueType in (Task,"Sub-task",Story,Bug) AND parent in ('+epicKeys.join(',')+')'+ ' ORDER BY rank ASC';
       const td = await jiraGet('/rest/api/3/search/jql?jql='+encodeURIComponent(jql)+'&fields=summary,status,assignee,priority,issuetype,updated,parent&maxResults=200');
       myEpicsTasks = (td.issues||[]).map(parseIssue);
-      // Also include any tasks from allIssues whose ancestry includes these epics
-      // (for tasks that may have been loaded already)
+      // Also pick up tasks already in allIssues whose parent is one of our epics
       const extraTasks = allIssues.filter(i=>{
-        if(['Epic','Initiative','Legend','Milestone'].includes(i.type)) return false;
+        if(['Epic','Milestone','Initiative','Legend'].includes(i.type)) return false;
         if(myEpicsTasks.find(t=>t.key===i.key)) return false;
-        // Walk up to see if any ancestor is one of our epics
-        let cur = i;
-        for(let d=0;d<4;d++){
-          if(!cur.parent_key) return false;
-          if(epicKeys.includes(cur.parent_key)) return true;
-          cur = allIssues.find(x=>x.key===cur.parent_key)||{};
-        }
-        return false;
+        return epicKeys.includes(i.parent_key);
       });
       myEpicsTasks = [...myEpicsTasks, ...extraTasks];
     } catch {
-      myEpicsTasks = allIssues.filter(i=>!['Epic','Initiative','Legend','Milestone'].includes(i.type)&&epicKeys.includes(i.parent_key));
+      myEpicsTasks = allIssues.filter(i=>
+        !['Epic','Milestone','Initiative','Legend'].includes(i.type) &&
+        epicKeys.includes(i.parent_key)
+      );
     }
 
     window._myEpics = myEpics;
