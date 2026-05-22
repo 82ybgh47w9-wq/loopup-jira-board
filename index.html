@@ -356,7 +356,7 @@ button,select,textarea,input{font-family:inherit}
   
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v70</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v71</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -506,9 +506,14 @@ button,select,textarea,input{font-family:inherit}
       <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer">
         <input type="checkbox" id="pri-unassigned-only" onchange="renderPriBoard()"> Unassigned only
       </label>
-      <button id="pri-view-toggle" onclick="togglePriView()" 
-        style="margin-left:auto;padding:4px 12px;font-size:11px;font-weight:700;border:1px solid #125462;background:#fff;color:#125462;border-radius:6px;cursor:pointer;white-space:nowrap" 
-        title="Switch between vertical Epic columns and horizontal Priority bands">↕ Vertical view</button>
+      <div id="pri-view-toggle" style="display:inline-flex;border:1px solid #C9CACC;border-radius:6px;overflow:hidden;font-size:11px;font-weight:700">
+        <button data-mode="vertical" onclick="setPriViewMode('vertical')"
+          style="padding:4px 10px;border:none;background:#125462;color:#fff;cursor:pointer;white-space:nowrap"
+          title="Vertical: Epics as columns, tasks stacked top-to-bottom">↕ Vertical</button>
+        <button data-mode="horizontal" onclick="setPriViewMode('horizontal')"
+          style="padding:4px 10px;border:none;background:#fff;color:#73777C;cursor:pointer;white-space:nowrap;border-left:1px solid #C9CACC"
+          title="Horizontal: Priority bands, tasks flowing left-to-right per Epic">↔ Horizontal</button>
+      </div>
       <span id="pri-loading" style="font-size:12px;color:#9EA0A4;display:none"></span>
     </div>
     <div id="pri-board" style="flex:1;overflow:auto;display:flex;min-height:0">
@@ -3030,9 +3035,8 @@ async function populatePriProjects() {
 async function loadPriBoard() {
   const projKey = document.getElementById('pri-proj').value;
   if (!projKey) return;
-  // Sync toggle button label with current view mode
-  const btn = document.getElementById('pri-view-toggle');
-  if(btn) btn.textContent = priViewMode === 'horizontal' ? '↔ Horizontal view' : '↕ Vertical view';
+  // Sync toggle button visual state with current view mode
+  syncPriViewToggleVisuals();
   const loadEl = document.getElementById('pri-loading');
   loadEl.textContent = 'Loading…'; loadEl.style.display = 'inline';
 
@@ -3063,6 +3067,8 @@ function renderPriBoard() {
   const boardEl = document.getElementById('pri-board');
   if(boardEl) {
     boardEl.style.flexDirection = 'row';
+    boardEl.style.overflowX = '';
+    boardEl.style.overflowY = '';
     boardEl.style.overflow = 'auto';
   }
 
@@ -3252,16 +3258,30 @@ function priCardDragLeave(e) {
 
 /* ══ PRIORITISE — HORIZONTAL/TRANSPOSED VIEW ════════════════════════════════ */
 
-function togglePriView() {
-  priViewMode = priViewMode === 'horizontal' ? 'vertical' : 'horizontal';
+function setPriViewMode(mode) {
+  if(mode !== 'vertical' && mode !== 'horizontal') return;
+  if(priViewMode === mode) return; // already in this mode, no-op
+  priViewMode = mode;
   saveAll();
-  // Update button label
-  const btn = document.getElementById('pri-view-toggle');
-  if(btn) {
-    btn.textContent = priViewMode === 'horizontal' ? '↔ Horizontal view' : '↕ Vertical view';
-  }
+  syncPriViewToggleVisuals();
   appLogMsg('info','prioritise','Switched to '+priViewMode+' view');
   renderPriBoard();
+}
+
+function syncPriViewToggleVisuals() {
+  // Update the segmented toggle's active state visually
+  const wrap = document.getElementById('pri-view-toggle');
+  if(!wrap) return;
+  wrap.querySelectorAll('button[data-mode]').forEach(b => {
+    const active = b.getAttribute('data-mode') === priViewMode;
+    b.style.background = active ? '#125462' : '#fff';
+    b.style.color = active ? '#fff' : '#73777C';
+  });
+}
+
+// Keep togglePriView as a backwards-compatible alias in case anything else calls it
+function togglePriView() {
+  setPriViewMode(priViewMode === 'horizontal' ? 'vertical' : 'horizontal');
 }
 
 function togglePriBand(band) {
@@ -3375,9 +3395,13 @@ function priCardDropElH(e, el) {
 function renderPriBoardHorizontal() {
   const board = document.getElementById('pri-board');
   if(!board) return;
-  // Override board layout for horizontal mode (column layout, scroll both ways)
+  // Override board layout for horizontal mode:
+  //  - Outer board scrolls VERTICALLY only (priority bands stack down)
+  //  - Each Epic row scrolls HORIZONTALLY independently (so Epic card can stick-left)
   board.style.flexDirection = 'column';
-  board.style.overflow = 'auto';
+  board.style.overflow = ''; // clear any prior shorthand
+  board.style.overflowX = 'hidden';
+  board.style.overflowY = 'auto';
 
   const unassignedOnly = document.getElementById('pri-unassigned-only')?.checked || false;
 
@@ -3418,16 +3442,16 @@ function renderPriBoardHorizontal() {
     const pc = band === 'No priority' ? {bg:'#F4F4F5',c:'#73777C',d:'#9EA0A4'} : (PC[band] || PC.Medium);
     const collapsed = priBandCollapsed[band];
 
-    // Band wrapper — full width
+    // Band wrapper — full width (no min-width:max-content; per-row scroll handles overflow)
     const bandEl = document.createElement('div');
-    bandEl.style.cssText = 'width:100%;min-width:max-content;flex-shrink:0;border-bottom:2px solid '+pc.d+';margin-bottom:4px';
+    bandEl.style.cssText = 'width:100%;flex-shrink:0;border-bottom:2px solid '+pc.d+';margin-bottom:4px';
 
     // Band header (collapsible)
     const totalTasks = bandEpics.reduce((sum,e)=>sum+(byEpic[e.key]||[]).length, 0);
     const bandData = band.replace(/'/g,"\\'");
     bandEl.innerHTML = `
       <div onclick="togglePriBand('${bandData}')" 
-        style="position:sticky;left:0;display:flex;align-items:center;gap:10px;padding:10px 16px;background:${pc.bg};border-left:5px solid ${pc.d};cursor:pointer;z-index:3">
+        style="display:flex;align-items:center;gap:10px;padding:10px 16px;background:${pc.bg};border-left:5px solid ${pc.d};cursor:pointer">
         <span style="font-size:14px;color:${pc.c};transition:.15s;display:inline-block;transform:${collapsed?'none':'rotate(90deg)'}">›</span>
         <span style="font-size:13px;font-weight:700;color:${pc.c};text-transform:uppercase;letter-spacing:.04em">${band}</span>
         <span class="badge" style="background:${pc.d};color:#fff">${bandEpics.length} epic${bandEpics.length!==1?'s':''}</span>
@@ -3448,11 +3472,12 @@ function renderPriBoardHorizontal() {
       const legend = initiative ? priEpics.find(e => e.key === initiative.parent_key) : null;
 
       const row = document.createElement('div');
-      row.style.cssText = 'display:flex;align-items:stretch;gap:0;padding:6px 16px 6px 26px;border-bottom:1px solid #EEF1F3;min-width:max-content';
+      // Per-row horizontal scroll: tasks scroll while Epic card stays sticky-left
+      row.style.cssText = 'display:flex;align-items:stretch;gap:0;padding:6px 16px 6px 26px;border-bottom:1px solid #EEF1F3;overflow-x:auto;overflow-y:hidden;position:relative';
 
-      // Epic card (fixed width on the left of the row)
+      // Epic card (sticky-left within its row — stays in view as tasks scroll horizontally)
       const epicCardHtml = `
-        <div style="width:280px;min-width:280px;flex-shrink:0;background:#fff;border:1px solid #C8E6F7;border-left:3px solid #2E99CE;border-radius:8px;padding:8px 10px;margin-right:10px;display:flex;flex-direction:column;gap:4px">
+        <div style="width:280px;min-width:280px;flex-shrink:0;background:#fff;border:1px solid #C8E6F7;border-left:3px solid #2E99CE;border-radius:8px;padding:8px 10px;margin-right:10px;display:flex;flex-direction:column;gap:4px;position:sticky;left:0;z-index:2;box-shadow:2px 0 6px -2px rgba(0,0,0,0.12)">
           <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
             ${legend ? `<a href="${BASE()}${legend.key}" target="_blank" onclick="event.stopPropagation()"
               style="font-size:9px;font-weight:700;color:#9A4500;background:#FFF0E6;padding:1px 5px;border-radius:3px;text-decoration:none;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block"
