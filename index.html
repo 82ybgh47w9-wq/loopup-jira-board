@@ -298,7 +298,7 @@ button,select,textarea,input{font-family:inherit}
   </div>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v39</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v41</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -1077,13 +1077,6 @@ async function doPanePriority(val){locPri[openIssue.key]=val;openIssue={...openI
 /* ══ CREATE TASK ══ */
 let createState={projectKey:"",issueType:"Task",assignee:"",priority:"Medium",status:"Selected",epicKey:"",summary:"",description:"",epicSuggestions:[],loadingEpics:false};
 
-function openCreate(defaultAssignee,e){
-  if(e)e.stopPropagation();
-  createState={projectKey:currentProjFilter||"",issueType:"Task",assignee:defaultAssignee||currentIam||"",priority:"Medium",status:"Selected",epicKey:"",summary:"",description:"",epicSuggestions:[],loadingEpics:false};
-  document.getElementById("create-overlay").classList.add("open");
-  renderCreateBody();
-}
-function closeCreate(){document.getElementById("create-overlay").classList.remove("open");}
 
 /* ══ CREATE TASK ══════════════════════════════════════════════════ */
 createState = {
@@ -1429,37 +1422,7 @@ async function submitCreate() {
   }
 }
 
-function quickAddTaskFromBtn(btn) {
-  const epicKey = btn.getAttribute('data-epic-key')||'';
-  const projectKey = document.getElementById('pri-proj')?.value||currentProjFilter||'';
-  quickAddTask(epicKey, projectKey);
-}
 
-function quickAddTask(epicKey, projectKey) {
-  createState = {
-    projectKey: projectKey||'',
-    issueType:'Task', assignee:currentIam||'',
-    priority:'Medium', status:'Selected',
-    summary:'', description:'',
-    selLegend:'', selInit:'', selEpic: epicKey||'',
-    legends:[], initiatives:[], epics:[],
-    aiSuggestions:[], aiLoading:false
-  };
-  document.getElementById('create-overlay').classList.add('open');
-  renderCreateModal();
-  if(projectKey) {
-    loadCreateHierarchy().then(()=>{
-      if(epicKey) {
-        const ep = createState.epics.find(e=>e.key===epicKey);
-        if(ep?.parent_key) {
-          const init = createState.initiatives.find(i=>i.key===ep.parent_key);
-          if(init) { createState.selInit=init.key; if(init.parent_key) createState.selLegend=init.parent_key; }
-        }
-        refreshHierarchyRows();
-      }
-    });
-  }
-}
 
 
 /* ══ MY EPICS VIEW ════════════════════════════════════════════════ */
@@ -1827,7 +1790,13 @@ function priCardDropEl(e, el) {
   if(priDragEpic !== targetEpic && targetEpic !== '__none__') {
     moved.parent_key = targetEpic;
     moved.parent_summary = priEpics.find(x=>x.key===targetEpic)?.summary||'';
-    jiraPut('/rest/api/3/issue/'+priDragKey, {fields:{parent:{key:targetEpic}}});
+    jiraPut('/rest/api/3/issue/'+priDragKey, {fields:{parent:{key:targetEpic}}}).then(r=>{
+      const t=document.createElement('div');
+      t.style.cssText='position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#5E8E38;color:#fff;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;z-index:9999';
+      t.textContent='↗ Task moved to '+targetEpic+' in Jira';
+      document.body.appendChild(t);
+      setTimeout(()=>t.remove(),2500);
+    }).catch(()=>{});
   }
 
   const newTargetIdx = activeArr.findIndex(t => t.key === targetKey);
@@ -1866,7 +1835,13 @@ async function priDrop(e, epicKey) {
   if(epicKey !== '__none__' && epicKey !== priDragEpic) {
     moved.parent_key = epicKey;
     moved.parent_summary = priEpics.find(x=>x.key===epicKey)?.summary||'';
-    jiraPut('/rest/api/3/issue/'+priDragKey, {fields:{parent:{key:epicKey}}});
+    jiraPut('/rest/api/3/issue/'+priDragKey, {fields:{parent:{key:epicKey}}}).then(r=>{
+      const t=document.createElement('div');
+      t.style.cssText='position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#5E8E38;color:#fff;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;z-index:9999';
+      t.textContent='↗ Task moved to '+epicKey+' in Jira';
+      document.body.appendChild(t);
+      setTimeout(()=>t.remove(),2500);
+    }).catch(()=>{});
   }
 
   const activeArr4 = currentView === 'myepics' ? myEpicsTasks : priIssues;
@@ -1945,29 +1920,26 @@ function quickAddTaskFromBtn(btn) {
 
 
 async function pushRankToJira(rankBody) {
-  // Show saving indicator
   const indicator = document.createElement('div');
   indicator.id = 'rank-saving';
   indicator.style.cssText = 'position:fixed;bottom:16px;right:16px;background:#125462;color:#fff;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.2)';
   indicator.textContent = '↑ Saving order to Jira…';
   document.body.appendChild(indicator);
-
   try {
     const r = await jiraPost('/rest/agile/1.0/issue/rank', rankBody);
     if(r.ok || r.status === 204) {
       indicator.textContent = '✓ Order saved to Jira';
       indicator.style.background = '#5E8E38';
     } else {
-      const text = await r.text();
-      console.warn('Rank API response:', r.status, text);
-      // Try alternative: use lexorank via issue update
-      // Some Jira configs need rank via issue fields
       indicator.textContent = '⚠ Reorder saved locally (Jira rank API unavailable)';
       indicator.style.background = '#E08000';
     }
   } catch(e) {
-    console.warn('Rank error:', e);
     indicator.textContent = '⚠ Could not save order to Jira';
+    indicator.style.background = '#D6202B';
+  }
+  setTimeout(() => { if(indicator.parentNode) indicator.parentNode.removeChild(indicator); }, 2500);
+}
   
 /* ══ PROJECT GROUP MODAL ══════════════════════════════════════════ */
 let pgmSelectedProjects = new Set();
@@ -2075,10 +2047,6 @@ function onProjGroupChange() {
   if(currentIam) doFetch(false);
 }
 
-  indicator.style.background = '#D6202B';
-  }
-  setTimeout(() => { if(indicator.parentNode) indicator.parentNode.removeChild(indicator); }, 2500);
-}
 
 
 /* ══ PROJECT GROUPS (KV) ══════════════════════════════════════════ */
@@ -2260,7 +2228,7 @@ function renderSettings(){
                 <select data-grp="${activeGrp}" onchange="groupProjectAssignment[this.getAttribute('data-grp')]=this.value;saveAll()"
                   style="flex:1;font-size:12px;padding:4px 8px;border:1px solid #C9CACC;border-radius:6px;background:#fff">
                   <option value="">None (use global setting)</option>
-                  ${Object.keys(projectGroups).map(pg=>{const s=(groupProjectAssignment[activeGrp]||"")=== pg?"selected":"";return \`<option value="${pg}" \${s}>${pg}</option>\`;}).join("")}
+                  ${Object.keys(projectGroups).map(pg=>{const s=(groupProjectAssignment[activeGrp]||"")===pg?"selected":"";return "<option value=\""+pg+"\" "+s+">"+pg+"</option>";}).join("")}
                 </select>
               </div></div>
               <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Search to add members</div>
