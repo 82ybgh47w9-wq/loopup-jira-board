@@ -257,7 +257,7 @@ button,select,textarea,input{font-family:inherit}
   <select class="proj-select" id="proj-filter" onchange="onProjFilter()"><option value="">All projects</option></select>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v11</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v12</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -282,11 +282,23 @@ button,select,textarea,input{font-family:inherit}
     <button onclick="setView('manager')" id="btn-manager" style="display:none">Manager ★</button>
     <button onclick="setView('prioritise')" id="btn-prioritise">Prioritise</button>
   </div>
-  <div class="seg" id="level-seg">
-    <button class="active" onclick="setLevel('all')">All</button>
-    <button onclick="setLevel('epics')">Epics</button>
-    <button onclick="setLevel('tasks')">Tasks</button>
-  </div>
+  <select class="ctrl-select" id="priority-filter" onchange="renderMain()">
+    <option value="">All priorities</option>
+    <option value="Highest">Highest</option>
+    <option value="High">High</option>
+    <option value="Medium">Medium</option>
+    <option value="Low">Low</option>
+  </select>
+  <select class="ctrl-select" id="status-filter-ctrl" onchange="renderMain()">
+    <option value="">All statuses</option>
+    <option value="In Progress">In Progress</option>
+    <option value="Selected">Selected</option>
+    <option value="Backlog">Backlog</option>
+    <option value="Done">Done</option>
+  </select>
+  <label id="unassigned-filter-wrap" style="display:none;align-items:center;gap:5px;font-size:12px;cursor:pointer">
+    <input type="checkbox" id="unassigned-filter" onchange="renderMain()"> Unassigned only
+  </label>
   <div class="search-box">
     <span style="color:#C9CACC">⌕</span>
     <input id="search-input" placeholder="Search…" oninput="renderMain()">
@@ -318,6 +330,11 @@ button,select,textarea,input{font-family:inherit}
   </div>
   <div id="page-people" style="display:none"></div>
   <div id="page-done" style="display:none"></div>
+  <div id="page-myepics" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden">
+    <div id="myepics-board" style="flex:1;overflow-x:auto;overflow-y:hidden;display:flex;min-height:0">
+      <div style="flex:1;display:flex;align-items:center;justify-content:center;color:#9EA0A4;font-size:13px">Select yourself in "I am" to see your epics</div>
+    </div>
+  </div>
   <div id="page-prioritise" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden">
     <div id="pri-controls" style="display:flex;align-items:center;gap:8px;padding:8px 15px;background:#fff;border-bottom:1px solid #E4E6E8;flex-shrink:0;flex-wrap:wrap">
       <select class="proj-select" id="pri-proj" onchange="loadPriBoard()" style="max-width:200px"><option value="">— select project —</option></select>
@@ -467,16 +484,18 @@ function normStatus(s){if(!s)return"Backlog";const l=s.toLowerCase();if(l.includ
 function getVisibleTeam(){if(currentGroup&&groups[currentGroup])return groups[currentGroup];return teamMembers;}
 
 function getFiltered(forPerson){
-  const search=document.getElementById("search-input").value.toLowerCase();
-  const epicTypes=["Initiative","Legend","Epic","Milestone"];
-  const taskTypes=["Task","Sub-task"];
+  const search=(document.getElementById("search-input")?.value||"").toLowerCase();
+  const priFilter=document.getElementById("priority-filter")?.value||"";
+  const statFilter=document.getElementById("status-filter-ctrl")?.value||"";
+  const unassigned=document.getElementById("unassigned-filter")?.checked||false;
   return allIssues.map(gm).filter(i=>{
     if(forPerson&&i.assignee!==forPerson)return false;
     const vt=getVisibleTeam();
     if(!forPerson&&!vt.includes(i.assignee))return false;
     if(search&&!i.summary.toLowerCase().includes(search)&&!i.key.toLowerCase().includes(search))return false;
-    if(currentLevel==="epics"&&!epicTypes.includes(i.type))return false;
-    if(currentLevel==="tasks"&&!taskTypes.includes(i.type))return false;
+    if(priFilter&&i.priority!==priFilter)return false;
+    if(statFilter&&normStatus(i.status)!==normStatus(statFilter))return false;
+    if(unassigned&&i.assignee!=="Unassigned")return false;
     return true;
   });
 }
@@ -511,7 +530,7 @@ async function onDrop(e,status){
 }
 
 /* ══ INIT & FETCH ══ */
-function showPage(name){["welcome","loading","error","mytasks","manager","people","done","prioritise"].forEach(p=>{const el=document.getElementById("page-"+p);if(el)el.style.display="none";});const el=document.getElementById("page-"+name);if(!el)return;if(name==="manager")el.style.display="block";else if(name==="mytasks")el.style.display="flex";else el.style.display="flex";}
+function showPage(name){["welcome","loading","error","mytasks","myepics","manager","people","done","prioritise"].forEach(p=>{const el=document.getElementById("page-"+p);if(el)el.style.display="none";});const el=document.getElementById("page-"+name);if(!el)return;if(name==="manager")el.style.display="block";else if(name==="mytasks")el.style.display="flex";else el.style.display="flex";}
 
 async function init(){
   populateIamSelector();populateGroupSelector();
@@ -542,10 +561,32 @@ function updateManagerVisibility(){const isAdmin=adminUsers.includes(cfg.email)|
 function updateStats(){const m=allIssues.map(gm);const ns=i=>normStatus(i.status);document.getElementById("cnt-ip").textContent=m.filter(i=>ns(i)==="In Progress").length;document.getElementById("cnt-sel").textContent=m.filter(i=>ns(i)==="Selected").length;document.getElementById("cnt-back").textContent=m.filter(i=>ns(i)==="Backlog").length;document.getElementById("cnt-done").textContent=m.filter(i=>ns(i)==="Done").length;}
 
 /* ══ VIEW SWITCHING ══ */
-function setView(v){currentView=v;document.querySelectorAll("#view-seg button").forEach(b=>b.classList.remove("active"));const map={mytasks:0,people:1,done:2,manager:3};const btns=document.querySelectorAll("#view-seg button");if(btns[map[v]])btns[map[v]].classList.add("active");saveAll();renderMain();}
+function setView(v){
+  currentView=v;
+  document.querySelectorAll("#view-seg button").forEach(b=>b.classList.remove("active"));
+  // Find and activate matching button
+  document.querySelectorAll("#view-seg button").forEach(b=>{
+    if(b.getAttribute("onclick")&&b.getAttribute("onclick").includes("'"+v+"'"))b.classList.add("active");
+  });
+  // Show/hide unassigned filter (not relevant for mytasks)
+  const ua=document.getElementById("unassigned-filter-wrap");
+  if(ua)ua.style.display=v==="mytasks"?"none":"flex";
+  // Show/hide priority columns toggle (only for mytasks)
+  const mt=document.getElementById("matrix-toggle-wrap");
+  if(mt)mt.style.display=v==="mytasks"?"flex":"none";
+  saveAll();renderMain();
+}
 function setLevel(l){currentLevel=l;document.querySelectorAll("#level-seg button").forEach((b,i)=>b.classList.toggle("active",["all","epics","tasks"][i]===l));saveAll();renderMain();}
-function renderMain(){if(!allIssues.length)return;if(currentView==="mytasks"){showPage("mytasks");renderMyTasks();}else if(currentView==="manager"){showPage("manager");renderManager();}else if(currentView==="people"){showPage("people");renderPeople();}else if(currentView==="prioritise"){showPage("prioritise");populatePriProjects();if(document.getElementById("pri-proj").value)loadPriBoard();}
-else{showPage("done");renderDone();}updateStats();}
+function renderMain(){
+  if(!allIssues.length)return;
+  if(currentView==="mytasks"){showPage("mytasks");renderMyTasks();}
+  else if(currentView==="myepics"){showPage("myepics");renderMyEpics();}
+  else if(currentView==="manager"){showPage("manager");renderManager();}
+  else if(currentView==="people"){showPage("people");renderPeople();}
+  else if(currentView==="prioritise"){showPage("prioritise");populatePriProjects();if(document.getElementById("pri-proj").value)loadPriBoard();}
+  else{showPage("done");renderDone();}
+  updateStats();
+}
 
 /* ══ MY TASKS VIEW ══ */
 function renderMyTasks(){
@@ -553,7 +594,8 @@ function renderMyTasks(){
   const issues=getFiltered(person);
   const table=document.getElementById("matrix-table");
   const ns=i=>normStatus(i.status);
-  let html=`<thead><tr><th style="min-width:110px;text-align:left;position:sticky;left:0;z-index:3">Status</th>${PRI_COLS.map(p=>`<th class="pri-${p}">${p}</th>`).join("")}</tr></thead><tbody>`;
+  const useMatrix = document.getElementById("matrix-toggle")?.checked !== false;
+  let html=`<thead><tr><th style="min-width:110px;text-align:left;position:sticky;left:0;z-index:3">Status</th>${useMatrix?PRI_COLS.map(p=>`<th class="pri-${p}">${p}</th>`).join(""):'<th>Tasks</th>'}</tr></thead><tbody>`;
   STATUS_ROWS.forEach(rowStatus=>{
     const rowIssues=issues.filter(i=>ns(i)===rowStatus);
     const collapsed=rowCollapsed[rowStatus];
@@ -570,12 +612,19 @@ function renderMyTasks(){
       const showActive=!!currentIam;
       html+=`<tr>`;
       html+=`<td class="matrix-cell" style="width:110px;position:sticky;left:0;background:#fff"></td>`;
-      PRI_COLS.forEach(pri=>{
-        const cell=rowIssues.filter(i=>i.priority===pri).sort((a,b)=>a.summary.localeCompare(b.summary));
-        html+=`<td class="matrix-cell"><div class="matrix-cell-inner lane-drop-zone" ondragover="onDragOver(event,'${rowStatus}')" ondragleave="onDragLeave(event)" ondrop="onDrop(event,'${rowStatus}')">
-          ${cell.length?cell.map(i=>cardHtml(i,showActive,true,true)).join(""):'<div style="font-size:11px;color:#E4E6E8;padding:4px">—</div>'}
+      if(useMatrix){
+        PRI_COLS.forEach(pri=>{
+          const cell=rowIssues.filter(i=>i.priority===pri).sort((a,b)=>a.summary.localeCompare(b.summary));
+          html+=`<td class="matrix-cell"><div class="matrix-cell-inner lane-drop-zone" ondragover="onDragOver(event,'${rowStatus}')" ondragleave="onDragLeave(event)" ondrop="onDrop(event,'${rowStatus}')">
+            ${cell.length?cell.map(i=>cardHtml(i,showActive,true,true)).join(""):'<div style="font-size:11px;color:#E4E6E8;padding:4px">—</div>'}
+          </div></td>`;
+        });
+      } else {
+        const sorted=rowIssues.sort((a,b)=>PO[a.priority]-PO[b.priority]);
+        html+=`<td class="matrix-cell" colspan="1"><div class="matrix-cell-inner lane-drop-zone" ondragover="onDragOver(event,'${rowStatus}')" ondragleave="onDragLeave(event)" ondrop="onDrop(event,'${rowStatus}')">
+          ${sorted.length?sorted.map(i=>cardHtml(i,showActive,true,true)).join(""):'<div style="font-size:11px;color:#E4E6E8;padding:4px">—</div>'}
         </div></td>`;
-      });
+      }
       html+=`</tr>`;
     }
   });
@@ -1290,6 +1339,78 @@ function quickAddTask(epicKey, projectKey) {
         refreshHierarchyRows();
       }
     });
+  }
+}
+
+
+/* ══ MY EPICS VIEW ════════════════════════════════════════════════ */
+async function renderMyEpics() {
+  const person = currentIam;
+  if(!person){ document.getElementById("page-myepics").innerHTML='<div style="padding:24px;color:#9EA0A4;font-size:13px">Select yourself in "I am" first</div>'; return; }
+
+  const el = document.getElementById("myepics-board");
+  el.innerHTML = `<div style="padding:24px;display:flex;align-items:center;gap:8px;color:#9EA0A4">${spinHtml()} Loading your epics…</div>`;
+
+  try {
+    // Fetch epics owned by this person
+    const epicTypes = ["Epic","Milestone","Initiative","Legend"];
+    const myEpics = allIssues.filter(i=>epicTypes.includes(i.type)&&i.assignee===person);
+
+    if(!myEpics.length){
+      el.innerHTML='<div style="padding:32px;color:#9EA0A4;font-size:13px;text-align:center">No epics assigned to you</div>';
+      return;
+    }
+
+    // Get tasks for each epic - from allIssues first, then fetch remaining
+    const priFilter=document.getElementById("priority-filter")?.value||"";
+    const statFilter=document.getElementById("status-filter-ctrl")?.value||"";
+    const unassignedOnly=document.getElementById("unassigned-filter")?.checked||false;
+
+    el.innerHTML = "";
+    myEpics.forEach(epic=>{
+      // Find tasks under this epic from allIssues
+      let tasks = allIssues.filter(i=>i.parent_key===epic.key&&["Task","Sub-task"].includes(i.type));
+      // Apply filters
+      if(priFilter) tasks=tasks.filter(t=>t.priority===priFilter);
+      if(statFilter) tasks=tasks.filter(t=>normStatus(t.status)===normStatus(statFilter));
+      if(unassignedOnly) tasks=tasks.filter(t=>t.assignee==="Unassigned");
+
+      const sc=SC[epic.status]||SC.Backlog;
+      const col=document.createElement("div");
+      col.className="pri-epic-col";
+
+      // Find parent chain
+      const parent=allIssues.find(x=>x.key===epic.parent_key);
+      const grandparent=parent?allIssues.find(x=>x.key===parent.parent_key):null;
+
+      col.innerHTML=`
+        <div class="pri-epic-hdr" style="background:#F0F9FF;border-bottom:2px solid #2E99CE">
+          <div style="display:flex;align-items:center;gap:5px;margin-bottom:3px;flex-wrap:wrap">
+            ${grandparent?`<span style="font-size:9px;color:#9A4500;background:#FFF0E6;padding:1px 5px;border-radius:3px;font-weight:700">${grandparent.key}</span>`:''}
+            ${parent?`<span style="font-size:9px;color:#6B3FA0;background:#F3EEFF;padding:1px 5px;border-radius:3px;font-weight:700">${parent.key}</span>`:''}
+          </div>
+          <div class="pri-epic-title">
+            <a href="${BASE()}${epic.key}" target="_blank" style="font-size:10px;font-family:monospace;color:#125462;font-weight:700">${epic.key}</a>
+            ${epic.summary}
+          </div>
+          <div class="pri-epic-meta">
+            <span class="badge" style="background:${sc.bg};color:${sc.c}">${epic.status}</span>
+            ${pbadge(epic.priority)}
+            ${ava(epic.assignee,20)}
+            <span style="font-size:10px;color:#9EA0A4;margin-left:auto">${tasks.length} tasks</span>
+            <button onclick="event.stopPropagation();quickAddTaskFromBtn(this)" data-epic-key="${epic.key}"
+              style="background:#125462;border:none;color:#fff;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:14px;line-height:1;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-left:4px" title="Add task">+</button>
+          </div>
+        </div>
+        <div class="pri-epic-body">
+          ${tasks.length
+            ? tasks.map((t,idx)=>priCardHtml(t,idx+1)).join("")
+            : '<div style="font-size:12px;color:#C9CACC;padding:8px;font-style:italic">No tasks</div>'}
+        </div>`;
+      el.appendChild(col);
+    });
+  } catch(e) {
+    document.getElementById("page-myepics").innerHTML=`<div style="padding:24px;color:#D6202B">Failed: ${e.message}</div>`;
   }
 }
 
