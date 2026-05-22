@@ -298,7 +298,7 @@ button,select,textarea,input{font-family:inherit}
   </div>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v44</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v46</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -321,7 +321,7 @@ button,select,textarea,input{font-family:inherit}
     <button onclick="setView('myepics')">My Epics</button>
     <button onclick="setView('done')">Done</button>
     <button onclick="setView('prioritise')">Prioritise</button>
-    <button onclick="setView('manager')" id="btn-manager" style="display:none">Manager</button>
+    <button onclick="setView('manager')" id="btn-manager">Team</button>
   </div>
   <div id="group-sel-wrap" style="display:none;flex-direction:column;gap:1px">
     <span style="font-size:9px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em">Team</span>
@@ -670,7 +670,7 @@ function populateGroupSelector(){
   if(sel) sel.innerHTML='<option value="">All people</option>'+keys.map(g=>`<option value="${g}" ${g===currentGroup?"selected":""}>${g}</option>`).join("");
   if(wrap) wrap.style.display=keys.length?"flex":"none";
 }
-function updateManagerVisibility(){const isAdmin=adminUsers.includes(cfg.email)||cfg.email===ADMIN_EMAIL;document.getElementById("btn-manager").style.display=isAdmin?"inline-block":"none";if(!isAdmin&&currentView==="manager"){currentView="mytasks";}}
+function updateManagerVisibility(){document.getElementById("btn-manager").style.display="inline-block";}
 
 /* ══ STATS ══ */
 function updateStats(){const m=allIssues.map(gm);const ns=i=>normStatus(i.status);document.getElementById("cnt-ip").textContent=m.filter(i=>ns(i)==="In Progress").length;document.getElementById("cnt-sel").textContent=m.filter(i=>ns(i)==="Selected").length;document.getElementById("cnt-back").textContent=m.filter(i=>ns(i)==="Backlog").length;document.getElementById("cnt-done").textContent=m.filter(i=>ns(i)==="Done").length;}
@@ -1111,140 +1111,44 @@ function renderCreateModal() {
   const s = createState;
   const body = document.getElementById('create-body');
   if(!body) return;
-
-  // Projects user has tasks in (smart list)
   const userProjects = [...new Set(allIssues.filter(i=>i.assignee===currentIam).map(i=>i.project))];
   const otherProjects = allProjects.filter(p=>!userProjects.includes(p.key)).map(p=>p.key);
-
   body.innerHTML = `
-    <!-- STEP 1: Assignee + Project (top bar - unlikely to change) -->
-    <div style="display:flex;gap:12px;margin-bottom:16px">
-      <div style="flex:1">
-        <div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Assignee</div>
-        <select id="cr-assignee" onchange="createState.assignee=this.value" style="width:100%;padding:8px 10px;border:1px solid #E4E6E8;border-radius:8px;font-size:13px;background:#F7F8F9">
-          <option value="">Unassigned</option>
-          ${teamMembers.map(m=>`<option value="${m}" ${m===s.assignee?'selected':''}>${m}</option>`).join('')}
-        </select>
+    <div style="display:flex;gap:10px;margin-bottom:16px">
+      <div style="flex:1"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Assignee</div>
+        <select id="cr-assignee" onchange="createState.assignee=this.value" style="width:100%;height:38px;padding:0 10px;border:1px solid #E4E6E8;border-radius:8px;font-size:13px;background:#F7F8F9"><option value="">Unassigned</option>${teamMembers.map(m=>`<option value="${m}" ${m===s.assignee?'selected':''}>${m}</option>`).join('')}</select></div>
+      <div style="flex:1"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Project <span style="color:#D6202B">*</span></div>
+        <select id="cr-project" onchange="createState.projectKey=this.value;loadCreateHierarchy(this.value);renderCreateModal()" style="width:100%;height:38px;padding:0 10px;border:${s.projectKey?'1px solid #E4E6E8':'2px solid #2E99CE'};border-radius:8px;font-size:13px;background:${s.projectKey?'#F7F8F9':'#E0F0F8'}">
+          <option value="">— Select project —</option>
+          ${userProjects.length?'<optgroup label="Your projects">'+userProjects.map(k=>{const p=allProjects.find(x=>x.key===k);return`<option value="${k}" ${k===s.projectKey?'selected':''}>${k}${p?' — '+p.name:''}</option>`;}).join('')+'</optgroup>':''}
+          <optgroup label="All projects">${otherProjects.map(k=>{const p=allProjects.find(x=>x.key===k);return`<option value="${k}" ${k===s.projectKey?'selected':''}>${k}${p?' — '+p.name:''}</option>`;}).join('')}</optgroup>
+        </select></div>
+      <div style="width:150px;flex-shrink:0"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Due date</div>
+        <input id="cr-duedate" type="date" value="${s.dueDate||''}" onchange="createState.dueDate=this.value" style="width:100%;height:38px;padding:0 10px;border:1px solid #E4E6E8;border-radius:8px;font-size:13px;background:#F7F8F9;box-sizing:border-box"></div>
+    </div>
+    ${!s.projectKey?`<div style="text-align:center;padding:40px 20px;color:#C9CACC"><div style="font-size:32px;margin-bottom:8px">↑</div><div style="font-size:14px;font-weight:600;color:#9EA0A4">Select a project to get started</div></div>`:`
+    <div style="margin-bottom:14px"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Task name <span style="color:#D6202B">*</span></div>
+      <input id="cr-summary" class="form-input" value="${s.summary}" placeholder="What needs to be done?" oninput="createState.summary=this.value;scheduleAiSearch()" style="font-size:14px;height:38px;padding:0 12px;border-radius:8px;border:1px solid #E4E6E8;width:100%;box-sizing:border-box"></div>
+    <div style="margin-bottom:14px"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Select epic</div>
+      ${s.aiLoading?`<div style="padding:8px;font-size:12px;color:#9EA0A4">${spinHtml(14)} Finding matching epics…</div>`:''}
+      ${s.aiSuggestions.length?`<div style="font-size:10px;color:#5E8E38;font-weight:700;margin-bottom:4px">✦ Suggested</div>`:''}
+      <div style="max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
+        ${[...s.aiSuggestions,...(s.epics||[]).filter(ep=>!s.aiSuggestions.find(a=>a.key===ep.key))].map(ep=>{const sel=s.selEpic===ep.key;const isSug=!!s.aiSuggestions.find(a=>a.key===ep.key);return`<div onclick="selectEpicSuggestion('${ep.key}','${(ep.summary||'').replace(/'/g,"\'")}','${ep.project||''}')" style="display:flex;align-items:center;gap:8px;padding:${isSug?'8':'7'}px 10px;border-radius:8px;cursor:pointer;border:${sel?'2px solid #2E99CE':isSug?'1px solid #E4E6E8':'1px solid #EEF1F3'};background:${sel?'#E0F0F8':isSug?'#fff':'#F7F8F9'}"><span style="font-size:10px;font-weight:700;color:#257AA5;font-family:monospace">${ep.key}</span><span style="font-size:12px;color:#292E37;flex:1">${ep.summary||''}</span>${sel?'<span style="color:#2E99CE;font-weight:700">✓</span>':''}</div>`;}).join('')}
       </div>
-      <div style="flex:1">
-        <div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Project <span style="color:#D6202B">*</span></div>
-        <select id="cr-project" onchange="createState.projectKey=this.value;loadCreateHierarchy(this.value);renderCreateModal()" style="width:100%;padding:8px 10px;border:${s.projectKey?'1px solid #E4E6E8':'2px solid #2E99CE'};border-radius:8px;font-size:13px;background:${s.projectKey?'#F7F8F9':'#E0F0F8'}">
-          <option value="">— Select a project —</option>
-          ${s.projectKey && !userProjects.includes(s.projectKey) && !otherProjects.includes(s.projectKey) ? '' : ''}
-          ${userProjects.length ? '<optgroup label="Your projects">' + userProjects.map(k=>{const p=allProjects.find(x=>x.key===k); return `<option value="${k}" ${k===s.projectKey?'selected':''}>${k}${p?' — '+p.name:''}</option>`;}).join('') + '</optgroup>' : ''}
-          <optgroup label="All projects">
-            ${otherProjects.map(k=>{const p=allProjects.find(x=>x.key===k); return `<option value="${k}" ${k===s.projectKey?'selected':''}>${k}${p?' — '+p.name:''}</option>`;}).join('')}
-          </optgroup>
-        </select>
-      </div>
+      ${!s.showHierarchy?`<button onclick="createState.showHierarchy=true;renderCreateModal()" style="margin-top:8px;font-size:11px;color:#257AA5;background:none;border:1px dashed #C9CACC;border-radius:6px;padding:6px 12px;cursor:pointer;width:100%">+ Create a new epic (show hierarchy)</button>`:''}</div>
+    ${s.showHierarchy?`<div style="background:#F7F8F9;border-radius:10px;padding:12px;margin-bottom:14px;border:1px solid #E4E6E8"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Link to hierarchy</div><div id="hierarchy-rows"></div></div>`:''}
+    <div style="display:flex;gap:16px;margin-bottom:14px">
+      <div style="flex:1"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Status</div><div style="display:flex;gap:4px;flex-wrap:wrap">${['Selected','In Progress','Backlog'].map(st=>{const sel=s.status===st;const sc=SC[st]||SC.Backlog;return`<button onclick="createState.status='${st}';renderCreateModal()" style="padding:5px 12px;border-radius:16px;font-size:11px;font-weight:700;cursor:pointer;border:2px solid ${sel?sc.c:'transparent'};background:${sel?sc.bg:'#EEF1F3'};color:${sel?sc.c:'#73777C'}">${st}</button>`;}).join('')}</div></div>
+      <div style="flex:1"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Priority</div><div style="display:flex;gap:4px;flex-wrap:wrap">${['Highest','High','Medium','Low'].map(pr=>{const sel=s.priority===pr;const pc=PC[pr]||PC.Medium;return`<button onclick="createState.priority='${pr}';renderCreateModal()" style="padding:5px 12px;border-radius:16px;font-size:11px;font-weight:700;cursor:pointer;border:2px solid ${sel?pc.c:'transparent'};background:${sel?pc.bg:'#EEF1F3'};color:${sel?pc.c:'#73777C'}">${pr}</button>`;}).join('')}</div></div>
     </div>
-
-    ${!s.projectKey ? `
-    <!-- Prompt to select project -->
-    <div style="text-align:center;padding:40px 20px;color:#9EA0A4">
-      <div style="font-size:36px;margin-bottom:8px">↑</div>
-      <div style="font-size:14px;font-weight:600">Select a project to get started</div>
-      <div style="font-size:12px;margin-top:4px">The project determines which epics are available</div>
-    </div>
-    ` : `
-    <!-- STEP 2: Task summary (starts epic search as you type) -->
-    <div style="margin-bottom:12px">
-      <div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Task name <span style="color:#D6202B">*</span></div>
-      <input id="cr-summary" class="form-input" value="${s.summary}" placeholder="What needs to be done?" 
-        oninput="createState.summary=this.value;scheduleAiSearch()"
-        style="font-size:14px;padding:10px 12px;border-radius:8px;border:1px solid #E4E6E8;width:100%;box-sizing:border-box">
-    </div>
-
-    <!-- STEP 3: Epic selection (AI suggestions + all epics) -->
-    <div style="margin-bottom:12px">
-      <div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Select epic</div>
-      ${s.aiLoading ? `<div style="padding:8px;font-size:12px;color:#9EA0A4">${spinHtml(14)} Finding matching epics…</div>` : ''}
-      ${s.aiSuggestions.length ? `<div style="font-size:10px;color:#5E8E38;font-weight:700;margin-bottom:4px">✦ Suggested epics</div>` : ''}
-      <div style="max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;${!s.aiSuggestions.length && !s.epics.length ? 'display:none' : ''}">
-        ${s.aiSuggestions.map(ep=>{
-          const sel=s.selEpic===ep.key;
-          return `<div onclick="selectEpicSuggestion('${ep.key}','${(ep.summary||'').replace(/'/g,"\'")}','${ep.project||''}')" 
-            style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;cursor:pointer;border:2px solid ${sel?'#2E99CE':'#E4E6E8'};background:${sel?'#E0F0F8':'#fff'}">
-            <span style="font-size:10px;font-weight:700;color:#257AA5;font-family:monospace">${ep.key}</span>
-            <span style="font-size:12px;color:#292E37;flex:1">${ep.summary||''}</span>
-            ${sel?'<span style="color:#2E99CE;font-weight:700">✓</span>':''}
-          </div>`;}).join('')}
-        ${s.epics.filter(ep=>!s.aiSuggestions.find(a=>a.key===ep.key)).map(ep=>{
-          const sel=s.selEpic===ep.key;
-          return `<div onclick="selectEpicSuggestion('${ep.key}','${(ep.summary||'').replace(/'/g,"\'")}','${ep.project||''}')" 
-            style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;cursor:pointer;border:1px solid ${sel?'#2E99CE':'#EEF1F3'};background:${sel?'#E0F0F8':'#F7F8F9'}">
-            <span style="font-size:10px;font-weight:700;color:#257AA5;font-family:monospace">${ep.key}</span>
-            <span style="font-size:12px;color:#292E37;flex:1">${ep.summary||''}</span>
-            ${sel?'<span style="color:#2E99CE;font-weight:700">✓</span>':''}
-          </div>`;}).join('')}
-      </div>
-      ${!s.showHierarchy ? `<button onclick="createState.showHierarchy=true;renderCreateModal()" 
-        style="margin-top:8px;font-size:11px;color:#257AA5;background:none;border:1px dashed #C9CACC;border-radius:6px;padding:6px 12px;cursor:pointer;width:100%">
-        + Need to create a new epic? Show hierarchy…
-      </button>` : ''}
-    </div>
-
-    <!-- STEP 4: Hierarchy (hidden by default, shown on demand) -->
-    ${s.showHierarchy ? `
-    <div style="background:#F7F8F9;border-radius:10px;padding:12px;margin-bottom:12px;border:1px solid #E4E6E8">
-      <div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Link to hierarchy</div>
-      <div id="hierarchy-rows"></div>
-    </div>` : ''}
-
-    <!-- STEP 5: Status + Priority (clickable buttons) -->
-    <div style="display:flex;gap:16px;margin-bottom:12px">
-      <div style="flex:1">
-        <div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Status</div>
-        <div style="display:flex;gap:4px;flex-wrap:wrap">
-          ${['Selected','In Progress','Backlog'].map(st=>{
-            const sel=s.status===st;
-            const sc=SC[st]||SC.Backlog;
-            return `<button onclick="createState.status='${st}';renderCreateModal()" 
-              style="padding:5px 12px;border-radius:16px;font-size:11px;font-weight:700;cursor:pointer;border:2px solid ${sel?sc.c:'transparent'};background:${sel?sc.bg:'#EEF1F3'};color:${sel?sc.c:'#73777C'}">${st}</button>`;
-          }).join('')}
-        </div>
-      </div>
-      <div style="flex:1">
-        <div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Priority</div>
-        <div style="display:flex;gap:4px;flex-wrap:wrap">
-          ${['Highest','High','Medium','Low'].map(pr=>{
-            const sel=s.priority===pr;
-            const pc=PC[pr]||PC.Medium;
-            return `<button onclick="createState.priority='${pr}';renderCreateModal()" 
-              style="padding:5px 12px;border-radius:16px;font-size:11px;font-weight:700;cursor:pointer;border:2px solid ${sel?pc.c:'transparent'};background:${sel?pc.bg:'#EEF1F3'};color:${sel?pc.c:'#73777C'}">${pr}</button>`;
-          }).join('')}
-        </div>
-      </div>
-    </div>
-
-    <!-- STEP 6: Due date -->
-    <div style="margin-bottom:12px">
-      <div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Due date <span style="font-size:9px;font-weight:400;color:#C9CACC">(optional)</span></div>
-      <input id="cr-duedate" type="date" value="${s.dueDate||''}" onchange="createState.dueDate=this.value" 
-        style="padding:8px 10px;border:1px solid #E4E6E8;border-radius:8px;font-size:13px;background:#F7F8F9;width:200px">
-    </div>
-
-    <!-- STEP 7: Description -->
-    <div style="margin-bottom:12px">
-      <div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Description <span style="font-size:9px;font-weight:400;color:#C9CACC">(optional)</span></div>
-      <textarea id="cr-desc" placeholder="Add details…" oninput="createState.description=this.value"
-        style="width:100%;min-height:70px;padding:10px 12px;border:1px solid #E4E6E8;border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box">${s.description}</textarea>
-    </div>
-
-    <!-- STEP 8: Comment -->
-    <div style="margin-bottom:8px">
-      <div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Comment <span style="font-size:9px;font-weight:400;color:#C9CACC">(optional)</span></div>
-      <textarea id="cr-comment" placeholder="Add a comment…" oninput="createState.comment=this.value"
-        style="width:100%;min-height:50px;padding:10px 12px;border:1px solid #E4E6E8;border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box">${s.comment||''}</textarea>
-    </div>
-    `}
-  `;
-
-  // Auto-render hierarchy rows if hierarchy is shown
-  if(s.showHierarchy && s.projectKey) {
-    setTimeout(()=>renderHierarchyRows(), 10);
-  }
+    <div style="margin-bottom:12px"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Description</div>
+      <textarea id="cr-desc" placeholder="Add details…" oninput="createState.description=this.value" style="width:100%;min-height:60px;padding:10px 12px;border:1px solid #E4E6E8;border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box">${s.description}</textarea></div>
+    <div style="margin-bottom:4px"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Comment</div>
+      <textarea id="cr-comment" placeholder="Add a comment…" oninput="createState.comment=this.value" style="width:100%;min-height:50px;padding:10px 12px;border:1px solid #E4E6E8;border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box">${s.comment||''}</textarea></div>
+    `}`;
+  if(s.showHierarchy && s.projectKey) setTimeout(()=>renderHierarchyRows(),10);
 }
+
 
 
 async function loadCreateHierarchy() {
@@ -1362,32 +1266,27 @@ async function renderHierarchyRows(){
   const s=createState;
   const el=document.getElementById('hierarchy-rows');
   if(!el)return;
-  const hierTypes=[{label:'Legend',key:'selLegend',list:'legends',color:'#9A4500',bg:'#FFF0E6'},
-    {label:'Initiative',key:'selInit',list:'initiatives',color:'#6B3FA0',bg:'#F3EEFF'},
-    {label:'Epic',key:'selEpic',list:'epics',color:'#125462',bg:'#E0F0F8'}];
-  el.innerHTML=hierTypes.map(h=>{
-    const items=s[h.list]||[];
-    const sel=s[h.key]||'';
-    return `<div style="margin-bottom:8px">
-      <div style="font-size:10px;font-weight:700;color:${h.color};margin-bottom:3px">${h.label}</div>
-      <div style="display:flex;gap:6px;align-items:center">
-        <select onchange="createState['${h.key}']=this.value;refreshHierarchyRows()" 
-          style="flex:1;padding:6px 8px;border:1px solid #E4E6E8;border-radius:6px;font-size:12px;background:#fff">
-          <option value="">— Select or create new —</option>
-          ${items.map(i=>`<option value="${i.key}" ${i.key===sel?'selected':''}>${i.key} — ${i.summary}</option>`).join('')}
-        </select>
-        <button onclick="toggleInlineCreate('${h.label}')" 
-          style="background:${h.bg};color:${h.color};border:none;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:11px;font-weight:700;white-space:nowrap">+ New</button>
-      </div>
-      <div id="inline-create-${h.label}" style="display:none;margin-top:6px">
-        <div style="display:flex;gap:6px">
-          <input id="inline-name-${h.label}" class="form-input" placeholder="New ${h.label} name…" style="flex:1;font-size:12px">
-          <button onclick="createHierarchyItem('${h.label}')" class="primary-btn" style="font-size:11px;padding:5px 10px">Create</button>
-        </div>
-      </div>
-    </div>`;
-  }).join('');
+  const filtInits=s.selLegend?(s.initiatives||[]).filter(i=>i.parent_key===s.selLegend):(s.initiatives||[]);
+  const filtEpics=s.selInit?(s.epics||[]).filter(e=>e.parent_key===s.selInit):(s.epics||[]);
+  const rows=[
+    {label:'Legend',key:'selLegend',list:s.legends||[],color:'#9A4500',bg:'#FFF0E6'},
+    {label:'Initiative',key:'selInit',list:filtInits,color:'#6B3FA0',bg:'#F3EEFF'},
+    {label:'Epic',key:'selEpic',list:filtEpics,color:'#125462',bg:'#E0F0F8'}];
+  el.innerHTML=rows.map(h=>{const sel=s[h.key]||'';return`<div style="margin-bottom:8px">
+    <div style="font-size:10px;font-weight:700;color:${h.color};margin-bottom:3px">${h.label}</div>
+    <div style="display:flex;gap:6px;align-items:center">
+      <select onchange="createState['${h.key}']=this.value;refreshHierarchyRows()" style="flex:1;padding:6px 8px;border:1px solid #E4E6E8;border-radius:6px;font-size:12px;background:#fff">
+        <option value="">— Select or create new —</option>
+        ${h.list.map(i=>`<option value="${i.key}" ${i.key===sel?'selected':''}>${i.key} — ${i.summary}</option>`).join('')}
+      </select>
+      <button onclick="toggleInlineCreate('${h.label}')" style="background:${h.bg};color:${h.color};border:none;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:11px;font-weight:700;white-space:nowrap">+ New</button>
+    </div>
+    <div id="inline-create-${h.label}" style="display:none;margin-top:6px"><div style="display:flex;gap:6px">
+      <input id="inline-name-${h.label}" class="form-input" placeholder="New ${h.label} name…" style="flex:1;font-size:12px">
+      <button onclick="createHierarchyItem('${h.label}')" class="primary-btn" style="font-size:11px;padding:5px 10px">Create</button>
+    </div></div></div>`;}).join('');
 }
+
 
 function refreshHierarchyRows(){
   const s=createState;
