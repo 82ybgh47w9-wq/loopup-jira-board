@@ -298,7 +298,7 @@ button,select,textarea,input{font-family:inherit}
   </div>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v30</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v31</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -449,6 +449,7 @@ let expandState={}, rowCollapsed={Done:true,"In Progress":false,Selected:false,B
 let teamMembers=[...DEFAULT_TEAM], adminUsers=[ADMIN_EMAIL];
 let groups={}, excludedProjects=[];
 let activeFlags={};
+const gm=i=>({...i,status:locStat[i.key]||i.status,priority:locPri[i.key]||i.priority});
 let settingsTab="team";
 let createDefaults={};
 let allProjects=[];
@@ -539,7 +540,6 @@ const pbadge=p=>{const c=PC[p]||PC.Medium;return`<span class="badge" style="back
 const tbadge=t=>{const c=TC[t]||TC.Task;return`<span class="badge" style="background:${c.bg};color:${c.c}">${t}</span>`;};
 const klink=k=>`<a href="${BASE()}${k}" target="_blank" onclick="event.stopPropagation()" class="card-key">${k}</a>`;
 const spinHtml=(sz=16,col="#2E99CE")=>`<svg class="spinner" width="${sz}" height="${sz}" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="${col}" stroke-width="3" stroke-dasharray="42 20"/></svg>`;
-const gm=i=>({...i,status:locStat[i.key]||i.status,priority:locPri[i.key]||i.priority});
 
 function normStatus(s){if(!s)return"Backlog";const l=s.toLowerCase();if(l.includes("progress"))return"In Progress";if(l.includes("select")||l.includes("development"))return"Selected";if(l.includes("done")||l.includes("complet")||l.includes("resolv")||l.includes("closed"))return"Done";return"Backlog";}
 
@@ -2225,7 +2225,6 @@ function renderSettings(){
 
 
 /* ══ SETTINGS HELPERS ══════════════════════════════════════════════ */
-const gm=i=>({...i,status:locStat[i.key]||i.status,priority:locPri[i.key]||i.priority});
 
 function renderTeamList(){
   const el=document.getElementById("team-list");
