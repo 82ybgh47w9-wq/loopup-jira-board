@@ -354,7 +354,7 @@ button,select,textarea,input{font-family:inherit}
   
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v67</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v68</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -476,7 +476,7 @@ button,select,textarea,input{font-family:inherit}
         <option value="mine">My comments</option>
       </select>
       <button onclick="loadActivity()" class="icon-btn" style="font-size:11px;margin-left:auto">↻ Refresh</button>
-      <button onclick="clearAllCommentMarkers()" class="icon-btn" style="font-size:11px" title="Mark everything as read">✓ Clear all</button>
+      <button onclick="clearAllCommentMarkers()" class="icon-btn" style="font-size:11px" title="Mark all comments as read">✓ Mark all read</button>
     </div>
     <div id="activity-content" style="flex:1;overflow-y:auto;padding:0"></div>
   </div>
@@ -1002,7 +1002,16 @@ async function fetchAllTeamIssues(){
 }
 
 async function fetchProjects(){const d=await jiraGet("/rest/api/3/project/search?maxResults=100&orderBy=name&action=browse");return(d.values||[]).map(p=>({key:p.key,name:p.name}));}
-async function fetchComments(key){const d=await jiraGet("/rest/api/3/issue/"+key+"/comment?maxResults=50&orderBy=created");return(d.comments||[]).map(c=>({id:c.id,author:c.author?.displayName||"Unknown",body:extractText(c.body),created:(c.created||"").slice(0,16).replace("T"," ")}));}
+async function fetchComments(key){
+  const d=await jiraGet("/rest/api/3/issue/"+key+"/comment?maxResults=50&orderBy=-created");
+  return(d.comments||[]).map(c=>({
+    id:c.id,
+    author:c.author?.displayName||"Unknown",
+    body:extractText(c.body),
+    created:(c.created||"").slice(0,16).replace("T"," "),
+    createdRaw:c.created||""
+  })).sort((a,b)=>(b.createdRaw||"").localeCompare(a.createdRaw||""));
+}
 async function postComment(key, textOrBody) {
   try {
     // textOrBody can be a string (legacy) or an ADF body object
@@ -1244,6 +1253,11 @@ function populateMyTasksPersonSel() {
 
 function setView(v){
   if(!settingsTab) settingsTab='projects';
+  // If switching TO activity (Comments), force fresh refresh
+  if(v === "activity" && currentView !== "activity") {
+    activityLoaded = false;
+    window._activityLoadedAt = 0;
+  }
   currentView=v;
   document.querySelectorAll("#view-seg button").forEach(b=>{
     const onclick = b.getAttribute("onclick")||"";
@@ -1669,11 +1683,18 @@ async function renderPaneMain(){
 
 async function loadPaneComments(key){
   if(!commentsCache[key]){try{commentsCache[key]=await fetchComments(key);}catch{commentsCache[key]=[];}}
-  const cmts=commentsCache[key];
-  document.getElementById("cmt-count").textContent=`(${cmts.length})`;
-  document.getElementById("cmt-list").innerHTML=cmts.length
-    ?cmts.map(c=>`<div class="comment-item"><div style="display:flex;align-items:center;gap:7px;margin-bottom:5px">${ava(c.author,20)}<span style="font-size:12px;font-weight:700">${c.author}</span><span style="font-size:11px;color:#C9CACC;margin-left:auto">${c.created}</span></div><div style="font-size:13px;line-height:1.55;white-space:pre-wrap">${c.body}</div></div>`).join("")
-    :`<div style="font-size:13px;color:#9EA0A4;font-style:italic">No comments yet.</div>`;
+  renderPaneCommentList(key);
+}
+
+function renderPaneCommentList(key){
+  const cmts = commentsCache[key] || [];
+  const countEl = document.getElementById("cmt-count");
+  const listEl = document.getElementById("cmt-list");
+  if(!countEl || !listEl) return;
+  countEl.textContent = `(${cmts.length})`;
+  listEl.innerHTML = cmts.length
+    ? cmts.map(c=>`<div class="comment-item"><div style="display:flex;align-items:center;gap:7px;margin-bottom:5px">${ava(c.author,20)}<span style="font-size:12px;font-weight:700">${c.author}</span><span style="font-size:11px;color:#C9CACC;margin-left:auto">${c.created}</span></div><div style="font-size:13px;line-height:1.55;white-space:pre-wrap">${c.body}</div></div>`).join("")
+    : `<div style="font-size:13px;color:#9EA0A4;font-style:italic">No comments yet.</div>`;
 }
 
 async function submitPaneComment(key){
@@ -1689,11 +1710,27 @@ async function submitPaneComment(key){
   const msg = document.getElementById("post-msg");
   if(ok) {
     msg.textContent = "Posted ✓"; msg.style.color = "#5E8E38";
+    const postedText = txt;
+    const postedAuthor = currentIam || "You";
     ta.value = "";
     trackedMentions["cmt-text"] = [];
-    delete commentsCache[key];
+    // Optimistic update — prepend the new comment to cache so it appears immediately
+    if(!commentsCache[key]) commentsCache[key] = [];
+    commentsCache[key].unshift({
+      id: 'tmp-' + Date.now(),
+      author: postedAuthor,
+      body: postedText,
+      created: new Date().toISOString().slice(0,16).replace("T"," ") + " (sending…)",
+      createdRaw: new Date().toISOString()
+    });
+    // Render immediately with the optimistic entry
+    renderPaneCommentList(key);
     markCommentsRead(key);
-    await loadPaneComments(key);
+    // Then refetch in background to replace optimistic entry with the real one
+    setTimeout(async () => {
+      delete commentsCache[key];
+      await loadPaneComments(key);
+    }, 1500); // Wait 1.5s for Jira eventual consistency
     activityLoaded = false;
     doFetch(true);
   } else {
@@ -1807,7 +1844,7 @@ function renderCreateModal() {
     </div>
     ${!s.projectKey?`<div style="text-align:center;padding:40px 20px;color:#C9CACC"><div style="font-size:32px;margin-bottom:8px">↑</div><div style="font-size:14px;font-weight:600;color:#9EA0A4">Select a project to get started</div></div>`:`
     <div style="margin-bottom:14px"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Task name <span style="color:#D6202B">*</span></div>
-      <input id="cr-summary" class="form-input" value="${s.summary}" placeholder="What needs to be done?" oninput="createState.summary=this.value;scheduleAiSearch()" style="font-size:14px;height:38px;padding:0 12px;border-radius:8px;border:1px solid #E4E6E8;width:100%;box-sizing:border-box"></div>
+      <input id="cr-summary" class="form-input" value="${s.summary}" placeholder="What needs to be done?" oninput="createState.summary=this.value;scheduleAiSearch();updateCreateButtonState()" style="font-size:14px;height:38px;padding:0 12px;border-radius:8px;border:1px solid #E4E6E8;width:100%;box-sizing:border-box"></div>
     <div style="margin-bottom:14px"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Select epic</div>
       ${s.aiLoading?`<div style="padding:8px;font-size:12px;color:#9EA0A4">${spinHtml(14)} Finding matching epics…</div>`:''}
       ${s.aiSuggestions.length?`<div style="font-size:10px;color:#5E8E38;font-weight:700;margin-bottom:4px">✦ Suggested</div>`:''}
@@ -1826,12 +1863,38 @@ function renderCreateModal() {
       <textarea id="cr-comment" placeholder="Add a comment…" oninput="createState.comment=this.value" style="width:100%;min-height:50px;padding:10px 12px;border:1px solid #E4E6E8;border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box">${s.comment||''}</textarea></div>
     `}`;
   if(s.showHierarchy && s.projectKey) setTimeout(()=>renderHierarchyRows(),10);
+  setTimeout(updateCreateButtonState, 20);
   // Attach @mention typeahead to description and comment fields
   setTimeout(() => {
     attachMentionTypeahead('cr-desc');
     attachMentionTypeahead('cr-comment');
   }, 50);
 }
+
+function updateCreateButtonState() {
+  const btn = document.getElementById('create-submit-btn');
+  if(!btn) return;
+  const s = createState;
+  const hasProject = !!s.projectKey;
+  const hasName = !!(s.summary && s.summary.trim());
+  const hasEpic = !!s.selEpic;
+  const ready = hasProject && hasName && hasEpic;
+  btn.disabled = !ready;
+  btn.style.opacity = ready ? '1' : '0.5';
+  btn.style.cursor = ready ? 'pointer' : 'not-allowed';
+  // Set a hint as tooltip
+  if(!ready) {
+    const missing = [];
+    if(!hasProject) missing.push('select a project');
+    if(!hasName) missing.push('enter a task name');
+    if(!hasEpic) missing.push('select or create an Epic');
+    btn.title = 'To create: ' + missing.join(', ');
+  } else {
+    btn.title = 'Create this task in Jira';
+  }
+}
+
+
 
 async function loadCreateHierarchy() {
   const proj = createState.projectKey;
@@ -1918,6 +1981,7 @@ async function createHierarchyItem(level) {
       // Hide the inline form and re-render hierarchy
       const inlineEl = document.getElementById('inline-create-'+level);
       if(inlineEl) inlineEl.style.display = 'none';
+      if(window._inlineCreateOpen) window._inlineCreateOpen[level] = false;
       if(nameEl) nameEl.value = '';
       renderHierarchyRows();
     } else {
@@ -1973,6 +2037,14 @@ async function renderHierarchyRows(){
   const s=createState;
   const el=document.getElementById('hierarchy-rows');
   if(!el)return;
+  // Capture which inline-create panels are currently open so we can restore them
+  if(!window._inlineCreateOpen) window._inlineCreateOpen = {};
+  // Also capture any in-progress input values
+  const inputValues = {};
+  ['Legend','Initiative','Epic'].forEach(lvl => {
+    const inp = document.getElementById('inline-name-'+lvl);
+    if(inp) inputValues[lvl] = inp.value;
+  });
   const filtInits=s.selLegend?(s.initiatives||[]).filter(i=>i.parent_key===s.selLegend):(s.initiatives||[]);
   const filtEpics=s.selInit?(s.epics||[]).filter(e=>e.parent_key===s.selInit):(s.epics||[]);
   const rows=[
@@ -1992,6 +2064,18 @@ async function renderHierarchyRows(){
       <input id="inline-name-${h.label}" class="form-input" placeholder="New ${h.label} name…" style="flex:1;font-size:12px">
       <button onclick="createHierarchyItem('${h.label}')" class="primary-btn" style="font-size:11px;padding:5px 10px">Create</button>
     </div></div></div>`;}).join('');
+  // Restore previously open panels and input values
+  ['Legend','Initiative','Epic'].forEach(lvl => {
+    if(window._inlineCreateOpen && window._inlineCreateOpen[lvl]) {
+      const panel = document.getElementById('inline-create-'+lvl);
+      if(panel) panel.style.display = 'block';
+    }
+    if(inputValues[lvl]) {
+      const inp = document.getElementById('inline-name-'+lvl);
+      if(inp) inp.value = inputValues[lvl];
+    }
+  });
+  updateCreateButtonState();
 }
 
 function refreshHierarchyRows(){
@@ -2003,7 +2087,15 @@ function refreshHierarchyRows(){
 
 function toggleInlineCreate(level){
   const el=document.getElementById('inline-create-'+level);
-  if(el) el.style.display=el.style.display==='none'?'block':'none';
+  if(!el) return;
+  if(!window._inlineCreateOpen) window._inlineCreateOpen = {};
+  const isOpening = el.style.display === 'none';
+  el.style.display = isOpening ? 'block' : 'none';
+  window._inlineCreateOpen[level] = isOpening;
+  if(isOpening) {
+    // Focus the input
+    setTimeout(() => document.getElementById('inline-name-'+level)?.focus(), 30);
+  }
 }
 
 async function submitCreate(){
@@ -3397,7 +3489,10 @@ function renderActivity() {
                   style="font-size:10px;font-weight:700;color:#257AA5;font-family:monospace;text-decoration:none">${item.issue.key}</a>
                 <span style="font-size:10px;color:#9EA0A4;margin-left:auto">${timeStr}</span>
               </div>
-              <div style="font-size:11px;color:#73777C;margin-bottom:4px">${item.issue.summary}</div>
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+              <div style="font-size:11px;color:#73777C;flex:1">${item.issue.summary}</div>
+              ${!isNew && !item.isMine ? '<span style="font-size:9px;color:#9EA0A4;background:#EEF1F3;padding:1px 6px;border-radius:8px;white-space:nowrap" title="Marked as read">✓ read</span>' : ''}
+            </div>
               ${isComment?`<div style="font-size:12px;color:#292E37;background:#F7F8F9;padding:6px 10px;border-radius:6px;border-left:2px solid #C9CACC;line-height:1.4;max-height:60px;overflow:hidden">${item.text}</div>`:''}
             </div>
           </div>`;
