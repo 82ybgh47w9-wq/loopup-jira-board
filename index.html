@@ -298,7 +298,7 @@ button,select,textarea,input{font-family:inherit}
   </div>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v33</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v34</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -2005,9 +2005,11 @@ function selectProjectGroup(name) {
   currentProjectGroup = name;
   saveAll();
   populateProjGroupSelector();
-  // Update proj-filter options to only show group's projects
   populateProjFilter();
-  renderPGMGroups();
+  // Re-render settings if open to update active state
+  if(document.getElementById('settings-overlay').classList.contains('open')){
+    renderSettings();
+  }
 }
 
 function populateProjGroupSelector() {
@@ -2102,8 +2104,10 @@ function getActiveProjectsJQL() {
 function openSettings(tab){
   settingsTab=tab||"projects";
   document.getElementById("settings-overlay").classList.add("open");
-  // Load project groups before rendering
-  loadProjectGroups().then(()=>renderSettings());
+  // Always reload project groups from KV before rendering
+  loadProjectGroups().then(()=>{
+    renderSettings();
+  });
 }
 function closeSettings(){
   document.getElementById("settings-overlay").classList.remove("open");
@@ -2144,7 +2148,7 @@ function renderSettings(){
                 style="padding:8px 16px;font-size:12px;font-weight:700;cursor:pointer;border:none;background:transparent;
                 border-bottom:3px solid ${g===activePG?'#2E99CE':'transparent'};margin-bottom:-2px;
                 color:${g===activePG?'#2E99CE':'#9EA0A4'}">
-                ${g} <span style="font-size:10px;background:${g===activePG?'#E0F0F8':'#EEF1F3'};color:${g===activePG?'#125462':'#9EA0A4'};border-radius:10px;padding:1px 6px;margin-left:3px">${(projectGroups[g]||[]).length}</span>
+                ${g} <span id="pg-count-${g.replace(/[^a-z0-9]/gi,'_')}" style="font-size:10px;background:${g===activePG?'#E0F0F8':'#EEF1F3'};color:${g===activePG?'#125462':'#9EA0A4'};border-radius:10px;padding:1px 6px;margin-left:3px">${(projectGroups[g]||[]).length}</span>
               </button>`).join('')}
             </div>
             ${activePG ? `
@@ -2283,12 +2287,11 @@ function togglePGProject(groupName,projectKey,add){
   } else {
     projectGroups[groupName]=projectGroups[groupName].filter(k=>k!==projectKey);
   }
-  // Save immediately - don't re-render (avoids losing scroll position)
+  // Save to KV immediately
   saveProjectGroup(groupName,[...projectGroups[groupName]]);
-  // Just update the checkbox label count
-  const tabs=document.querySelectorAll('.settings-tabs ~ * button');
-  // Re-render to update count badge
-  renderSettings();
+  // Update just the count badge without re-rendering the whole tab
+  const countBadge=document.getElementById('pg-count-'+groupName.replace(/[^a-z0-9]/gi,'_'));
+  if(countBadge) countBadge.textContent=projectGroups[groupName].length;
 }
 /* ══ SETTINGS HELPERS ══════════════════════════════════════════════ */
 function renderTeamList(){
@@ -2354,28 +2357,49 @@ function toggleGroupMember(group,member,add){
 }
 function grpAdd(g,idx){const m=teamMembers.filter(x=>!(groups[g]||[]).includes(x)).sort()[idx];if(m){toggleGroupMember(g,m,true);renderSettings();}}
 function grpRemove(g,idx){const m=[...(groups[g]||[])].sort()[idx];if(m){toggleGroupMember(g,m,false);renderSettings();}}
-function grpSearchAdd(g,name){if(!teamMembers.includes(name))teamMembers.push(name);toggleGroupMember(g,name,true);renderSettings();}
+function grpSearchAdd(g,name){
+  if(!teamMembers.includes(name)) teamMembers.push(name);
+  toggleGroupMember(g,name,true);
+  saveAll();
+  renderSettings();
+}
 async function searchGroupUsers(groupName,query){
   const el=document.getElementById("grp-results");
   if(!el)return;
-  if(query.length<2){el.innerHTML="";return;}
-  el.innerHTML=`<div style="font-size:12px;color:#9EA0A4;padding:4px">${spinHtml(14)} Searching…</div>`;
+  if(!query||query.length<2){el.innerHTML='';return;}
+  el.innerHTML=`<div style="font-size:12px;color:#9EA0A4;padding:4px">${spinHtml(14)} Searching for "${query}"…</div>`;
   try{
-    const d=await jiraGet("/rest/api/3/user/search?query="+encodeURIComponent(query)+"&maxResults=10&includeActive=true");
-    const users=Array.isArray(d)?d:(d.values||[]);
-    if(!users.length){el.innerHTML='<div style="font-size:12px;color:#9EA0A4;padding:4px">No users found</div>';return;}
+    // Try both search endpoints for maximum compatibility
+    let users=[];
+    try{
+      const d=await jiraGet("/rest/api/3/user/search?query="+encodeURIComponent(query)+"&maxResults=10");
+      users=Array.isArray(d)?d:(d.values||[]);
+    }catch{
+      const d2=await jiraGet("/rest/api/3/user/picker?query="+encodeURIComponent(query)+"&maxResults=10");
+      users=(d2.users||[]).map(u=>({displayName:u.displayName,emailAddress:u.emailAddress,accountId:u.accountId}));
+    }
+    if(!users.length){
+      el.innerHTML='<div style="font-size:12px;color:#9EA0A4;padding:8px">No users found for "'+query+'"</div>';
+      return;
+    }
     el.innerHTML=users.map(u=>{
-      const name=u.displayName||"";
+      const name=u.displayName||'';
+      const email=u.emailAddress||'';
       const inGroup=(groups[groupName]||[]).includes(name);
       return`<div onclick="grpSearchAdd(${JSON.stringify(groupName)},${JSON.stringify(name)})"
         style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;cursor:pointer;
-        background:${inGroup?"#E0F0F8":"#fff"};border:1px solid ${inGroup?"#2E99CE":"#E4E6E8"}">
+        background:${inGroup?'#E0F0F8':'#fff'};border:1px solid ${inGroup?'#2E99CE':'#E4E6E8'};margin-bottom:3px">
         ${ava(name,24)}
-        <div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:600">${name}</div><div style="font-size:10px;color:#9EA0A4">${u.emailAddress||""}</div></div>
-        <span style="font-size:14px;color:${inGroup?"#2E99CE":"#5E8E38"};font-weight:700">${inGroup?"✓":"+"}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:600">${name}</div>
+          <div style="font-size:10px;color:#9EA0A4">${email}</div>
+        </div>
+        <span style="font-size:16px;color:${inGroup?'#2E99CE':'#5E8E38'};font-weight:700">${inGroup?'✓':'+'}</span>
       </div>`;
-    }).join("");
-  }catch{el.innerHTML='<div style="font-size:12px;color:#D6202B;padding:4px">Search failed</div>';}
+    }).join('');
+  }catch(e){
+    el.innerHTML='<div style="font-size:12px;color:#D6202B;padding:8px">Search failed: '+e.message+'</div>';
+  }
 }
 </script>
 </body>
