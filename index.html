@@ -202,7 +202,7 @@ button,select,textarea,input{font-family:inherit}
     <div style="font-size:17px;font-weight:700;margin-bottom:6px">🔗 Connect to Jira</div>
     <div style="font-size:12px;color:#9EA0A4;margin-bottom:16px">Credentials saved only in your browser, sent directly to Jira.</div>
     <label class="setup-label">Jira site URL</label>
-    <input class="setup-input" id="cfg-url" type="text" placeholder="https://yourcompany.atlassian.net">
+    <input class="setup-input" id="cfg-url" type="text" placeholder="https://yourcompany.atlassian.net" value="https://loopup.atlassian.net">
     <label class="setup-label">Your Atlassian email</label>
     <input class="setup-input" id="cfg-email" type="email" placeholder="you@company.com">
     <label class="setup-label">API Token</label>
@@ -257,7 +257,7 @@ button,select,textarea,input{font-family:inherit}
   <select class="proj-select" id="proj-filter" onchange="onProjFilter()"><option value="">All projects</option></select>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v6</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v8</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -392,7 +392,13 @@ async function clearActiveFlag(name){delete activeFlags[name];await kvSet("activ
 async function toggleActive(name,key){activeFlags[name]===key?await clearActiveFlag(name):await setActiveFlag(name,key);}
 
 /* ══ SETUP ══ */
-function showSetup(){document.getElementById("cfg-url").value=cfg.url||"https://loopup.atlassian.net";document.getElementById("cfg-email").value=cfg.email||"";document.getElementById("cfg-token").value=cfg.token||"";document.getElementById("setup-overlay").style.display="flex";}
+function showSetup(){
+  loadAll(); // Ensure latest saved values are loaded
+  document.getElementById("cfg-url").value=cfg.url||"https://loopup.atlassian.net";
+  document.getElementById("cfg-email").value=cfg.email||"";
+  document.getElementById("cfg-token").value=""; // Never pre-fill token for security
+  document.getElementById("setup-overlay").style.display="flex";
+}
 function saveConfig(){const url=(document.getElementById("cfg-url").value||"").trim().replace(/\/$/,"");const email=(document.getElementById("cfg-email").value||"").trim();const token=(document.getElementById("cfg-token").value||"").trim();if(!url||!email||!token){alert("Please fill in all fields.");return;}cfg={url,email,token};saveAll();document.getElementById("setup-overlay").style.display="none";init();}
 
 /* ══ JIRA API ══ */
@@ -1421,7 +1427,7 @@ async function doPaneStatus(val){locStat[openIssue.key]=val;openIssue={...openIs
 async function doPanePriority(val){locPri[openIssue.key]=val;openIssue={...openIssue,priority:val};saveAll();renderPaneHdr(openIssue);renderPaneMain();renderMain();await updatePriority(openIssue.key,val);setTimeout(()=>doFetch(true),1500);}
 
 /* ══ CREATE TASK ══ */
-let createState={projectKey:"",issueType:"Task",assignee:"",priority:"Medium",status:"Selected",epicKey:"",summary:"",description:"",epicSuggestions:[],loadingEpics:false};
+createState={projectKey:"",issueType:"Task",assignee:"",priority:"Medium",status:"Selected",epicKey:"",summary:"",description:"",epicSuggestions:[],loadingEpics:false};
 
 function openCreate(defaultAssignee,e){
   if(e)e.stopPropagation();
