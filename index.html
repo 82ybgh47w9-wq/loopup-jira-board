@@ -176,6 +176,22 @@ button,select,textarea,input{font-family:inherit}
 .user-result{padding:8px 10px;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:8px;border:1px solid #EEF1F3;margin-bottom:3px}
 .user-result:hover{background:#E0F0F8}
 .group-row{display:flex;align-items:center;gap:10px;padding:8px 12px;background:#F7F8F9;border-radius:8px;margin-bottom:4px}
+
+/* ── Prioritisation board ── */
+.pri-epic-col{min-width:260px;max-width:280px;flex-shrink:0;display:flex;flex-direction:column;border-right:1px solid #E4E6E8;height:100%}
+.pri-epic-hdr{padding:10px 12px;background:#F7F8F9;border-bottom:1px solid #E4E6E8;flex-shrink:0}
+.pri-epic-title{font-size:12px;font-weight:700;color:#292E37;margin-bottom:4px;line-height:1.3}
+.pri-epic-meta{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.pri-epic-body{overflow-y:auto;flex:1;padding:8px;display:flex;flex-direction:column;gap:6px;min-height:0}
+.pri-card{background:#fff;border:1px solid #E4E6E8;border-radius:7px;padding:8px 10px;cursor:grab;transition:box-shadow .15s;border-left:3px solid #E4E6E8}
+.pri-card:hover{box-shadow:0 2px 8px rgba(37,122,165,.12)}
+.pri-card.dragging{opacity:.35;cursor:grabbing}
+.pri-card.drag-over-top{border-top:3px solid #2E99CE}
+.pri-card.drag-over-bottom{border-bottom:3px solid #2E99CE}
+.pri-card.unassigned-card{border-left-color:#F0A500}
+.pri-drop-zone{min-height:50px;border-radius:6px;transition:.15s}
+.pri-drop-zone.drag-over{background:#E0F0F8;border:2px dashed #2E99CE}
+.pri-rank-num{font-size:9px;font-weight:700;color:#C9CACC;margin-right:4px;min-width:16px}
 </style>
 </head>
 <body>
@@ -264,6 +280,7 @@ button,select,textarea,input{font-family:inherit}
     <button onclick="setView('people')">Team</button>
     <button onclick="setView('done')">Done</button>
     <button onclick="setView('manager')" id="btn-manager" style="display:none">Manager ★</button>
+    <button onclick="setView('prioritise')" id="btn-prioritise">Prioritise</button>
   </div>
   <div class="seg" id="level-seg">
     <button class="active" onclick="setLevel('all')">All</button>
@@ -301,6 +318,23 @@ button,select,textarea,input{font-family:inherit}
   </div>
   <div id="page-people" style="display:none"></div>
   <div id="page-done" style="display:none"></div>
+  <div id="page-prioritise" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden">
+    <div id="pri-controls" style="display:flex;align-items:center;gap:8px;padding:8px 15px;background:#fff;border-bottom:1px solid #E4E6E8;flex-shrink:0;flex-wrap:wrap">
+      <select class="proj-select" id="pri-proj" onchange="loadPriBoard()" style="max-width:200px"><option value="">— select project —</option></select>
+      <select class="ctrl-select" id="pri-status-filter" onchange="renderPriBoard()">
+        <option value="">All statuses</option>
+        <option value="hide-done">Hide Done</option>
+        <option value="only-active">In Progress + Selected only</option>
+      </select>
+      <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer">
+        <input type="checkbox" id="pri-unassigned-only" onchange="renderPriBoard()"> Unassigned only
+      </label>
+      <span id="pri-loading" style="font-size:12px;color:#9EA0A4;display:none"></span>
+    </div>
+    <div id="pri-board" style="flex:1;overflow-x:auto;overflow-y:hidden;display:flex;min-height:0">
+      <div style="flex:1;display:flex;align-items:center;justify-content:center;color:#9EA0A4;font-size:13px">Select a project to load the prioritisation board</div>
+    </div>
+  </div>
 </div>
 
 <!-- RIGHT PANE -->
@@ -471,7 +505,7 @@ async function onDrop(e,status){
 }
 
 /* ══ INIT & FETCH ══ */
-function showPage(name){["welcome","loading","error","mytasks","manager","people","done"].forEach(p=>{const el=document.getElementById("page-"+p);if(el)el.style.display="none";});const el=document.getElementById("page-"+name);if(!el)return;if(name==="manager")el.style.display="block";else if(name==="mytasks")el.style.display="flex";else el.style.display="flex";}
+function showPage(name){["welcome","loading","error","mytasks","manager","people","done","prioritise"].forEach(p=>{const el=document.getElementById("page-"+p);if(el)el.style.display="none";});const el=document.getElementById("page-"+name);if(!el)return;if(name==="manager")el.style.display="block";else if(name==="mytasks")el.style.display="flex";else el.style.display="flex";}
 
 async function init(){
   populateIamSelector();populateGroupSelector();
@@ -504,7 +538,8 @@ function updateStats(){const m=allIssues.map(gm);const ns=i=>normStatus(i.status
 /* ══ VIEW SWITCHING ══ */
 function setView(v){currentView=v;document.querySelectorAll("#view-seg button").forEach(b=>b.classList.remove("active"));const map={mytasks:0,people:1,done:2,manager:3};const btns=document.querySelectorAll("#view-seg button");if(btns[map[v]])btns[map[v]].classList.add("active");saveAll();renderMain();}
 function setLevel(l){currentLevel=l;document.querySelectorAll("#level-seg button").forEach((b,i)=>b.classList.toggle("active",["all","epics","tasks"][i]===l));saveAll();renderMain();}
-function renderMain(){if(!allIssues.length)return;if(currentView==="mytasks"){showPage("mytasks");renderMyTasks();}else if(currentView==="manager"){showPage("manager");renderManager();}else if(currentView==="people"){showPage("people");renderPeople();}else{showPage("done");renderDone();}updateStats();}
+function renderMain(){if(!allIssues.length)return;if(currentView==="mytasks"){showPage("mytasks");renderMyTasks();}else if(currentView==="manager"){showPage("manager");renderManager();}else if(currentView==="people"){showPage("people");renderPeople();}else if(currentView==="prioritise"){showPage("prioritise");populatePriProjects();if(document.getElementById("pri-proj").value)loadPriBoard();}
+else{showPage("done");renderDone();}updateStats();}
 
 /* ══ MY TASKS VIEW ══ */
 function renderMyTasks(){
@@ -877,17 +912,18 @@ function openCreate(defaultAssignee,e){
 function closeCreate(){document.getElementById("create-overlay").classList.remove("open");}
 
 function renderCreateBody(){
-  const teamOpts=teamMembers.map(m=>`<option value="${m}" ${m===createState.assignee?"selected":""}>${m}</option>`).join("");
-  const projOpts=allProjects.filter(p=>!excludedProjects.includes(p.key)).map(p=>`<option value="${p.key}" ${p.key===createState.projectKey?"selected":""}>${p.key} — ${p.name}</option>`).join("");
-  const typeOpts=ISSUE_TYPES.map(t=>`<option value="${t}" ${t===createState.issueType?"selected":""}>${t}</option>`).join("");
-  const priOpts=Object.keys(PC).map(p=>`<option value="${p}" ${p===createState.priority?"selected":""}>${p}</option>`).join("");
-  const statOpts=["Selected","In Progress","Backlog"].map(s=>`<option value="${s}" ${s===createState.status?"selected":""}>${s}</option>`).join("");
+  const projOpts = allProjects.filter(p=>!excludedProjects.includes(p.key))
+    .map(p=>`<option value="${p.key}" ${p.key===createState.projectKey?"selected":""}>${p.key} — ${p.name}</option>`).join('');
+  const assigneeOpts = teamMembers.map(m=>`<option value="${m}" ${m===createState.assignee?"selected":""}>${m}</option>`).join('');
+  const typeOpts = ISSUE_TYPES.map(t=>`<option value="${t}" ${t===createState.issueType?"selected":""}>${t}</option>`).join('');
+  const priOpts = Object.keys(PC).map(p=>`<option value="${p}" ${p===createState.priority?"selected":""}>${p}</option>`).join('');
+  const statOpts = ['Selected','In Progress','Backlog'].map(s=>`<option value="${s}" ${s===createState.status?"selected":""}>${s}</option>`).join('');
 
-  document.getElementById("create-body").innerHTML=`
+  document.getElementById('create-body').innerHTML=`
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div>
         <label class="form-label">Project *</label>
-        <select class="form-select" id="ct-proj" onchange="createState.projectKey=this.value;triggerEpicSearch()">${projOpts}</select>
+        <select class="form-select" id="ct-proj" onchange="createState.projectKey=this.value;loadHierarchyForCreate()">${projOpts}</select>
       </div>
       <div>
         <label class="form-label">Issue type *</label>
@@ -895,7 +931,7 @@ function renderCreateBody(){
       </div>
       <div>
         <label class="form-label">Assignee</label>
-        <select class="form-select" id="ct-assignee" onchange="createState.assignee=this.value"><option value="">Unassigned</option>${teamOpts}</select>
+        <select class="form-select" id="ct-assignee" onchange="createState.assignee=this.value"><option value="">Unassigned</option>${assigneeOpts}</select>
       </div>
       <div>
         <label class="form-label">Priority</label>
@@ -906,35 +942,192 @@ function renderCreateBody(){
         <select class="form-select" id="ct-status" onchange="createState.status=this.value">${statOpts}</select>
       </div>
     </div>
+
     <div>
       <label class="form-label">Summary (task name) *</label>
-      <input class="form-input" id="ct-summary" type="text" placeholder="What needs to be done?" value="${createState.summary}"
-        oninput="createState.summary=this.value;debouncedEpicSearch()" onblur="triggerEpicSearch()">
+      <input class="form-input" id="ct-summary" type="text" placeholder="What needs to be done?"
+        oninput="createState.summary=this.value;debouncedEpicSearch()">
     </div>
-    <!-- EPIC / PARENT LINK -->
-    <div>
-      <label class="form-label">Link to Epic / Initiative / Legend *</label>
-      <div style="display:flex;gap:8px;margin-bottom:6px">
-        <input class="form-input" id="ct-epic-search" type="text" placeholder="Type to search or select from suggestions below…" 
-          value="${createState.epicKey}" oninput="createState.epicKey=this.value" style="flex:1">
-        <button class="icon-btn" onclick="triggerEpicSearch()" style="white-space:nowrap">${spinHtml(13)} Search</button>
+
+    <!-- HIERARCHY SECTION -->
+    <div style="border:1px solid #E4E6E8;border-radius:8px;overflow:hidden">
+      <div style="padding:10px 12px;background:#F7F8F9;border-bottom:1px solid #E4E6E8;font-size:11px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.05em">
+        Link to hierarchy (Project → Legend → Initiative → Epic)
       </div>
+      <div style="padding:12px" id="ct-hierarchy">
+        ${createState.projectKey ? '' : '<div style="font-size:13px;color:#9EA0A4;font-style:italic">Select a project above first</div>'}
+      </div>
+    </div>
+
+    <!-- AI SUGGESTIONS -->
+    <div id="epic-suggestion-wrap" style="display:${createState.projectKey?'block':'none'}">
+      <label class="form-label">AI suggested epics</label>
       <div id="epic-suggestions" style="display:flex;flex-direction:column;gap:4px;max-height:160px;overflow-y:auto">
-        ${createState.loadingEpics?`<div style="font-size:12px;color:#9EA0A4;padding:6px">${spinHtml()} Finding relevant epics…</div>`:""}
-        ${createState.epicSuggestions.map(e=>`<div class="epic-suggestion" onclick="selectEpic('${e.key}','${e.summary.replace(/'/g,"\\'")}')">
-          ${tbadge(e.type||"Epic")}
-          <span style="font-size:10px;font-family:monospace;color:#257AA5">${e.key}</span>
-          <span style="font-size:12px;color:#292E37;flex:1">${e.summary}</span>
-          <span style="font-size:10px;color:#9EA0A4">${e.project||""}</span>
-        </div>`).join("")}
+        <div style="font-size:12px;color:#9EA0A4;font-style:italic">Type a task name above to get suggestions…</div>
       </div>
     </div>
+
     <div>
       <label class="form-label">Description <span style="font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
-      <textarea class="form-textarea" id="ct-desc" placeholder="Add more detail…" onchange="createState.description=this.value">${createState.description}</textarea>
+      <textarea class="form-textarea" id="ct-desc" placeholder="Add more detail…" onchange="createState.description=this.value"></textarea>
     </div>
     <div id="create-msg" style="font-size:12px;min-height:18px"></div>`;
+
+  if(createState.projectKey) loadHierarchyForCreate();
 }
+
+async function loadHierarchyForCreate(){
+  const proj = createState.projectKey;
+  if(!proj) return;
+  const el = document.getElementById('ct-hierarchy');
+  if(!el) return;
+  el.innerHTML = `<div style="color:#9EA0A4;font-size:12px">${spinHtml(14)} Loading hierarchy…</div>`;
+
+  try {
+    // Fetch Legends (top level under project)
+    const legendJql = `project=${proj} AND issuetype=Legend ORDER BY created ASC`;
+    const ld = await jiraGet('/rest/api/3/search/jql?jql='+encodeURIComponent(legendJql)+'&fields=summary,issuetype,parent&maxResults=50');
+    const legends = (ld.issues||[]).map(parseIssue);
+
+    // Fetch Initiatives
+    const initJql = `project=${proj} AND issuetype=Initiative ORDER BY created ASC`;
+    const id = await jiraGet('/rest/api/3/search/jql?jql='+encodeURIComponent(initJql)+'&fields=summary,issuetype,parent&maxResults=100');
+    const initiatives = (id.issues||[]).map(parseIssue);
+
+    // Fetch Epics
+    const epicJql = `project=${proj} AND issuetype=Epic ORDER BY created ASC`;
+    const ed = await jiraGet('/rest/api/3/search/jql?jql='+encodeURIComponent(epicJql)+'&fields=summary,issuetype,parent&maxResults=100');
+    const epics = (ed.issues||[]).map(parseIssue);
+
+    createState._legends = legends;
+    createState._initiatives = initiatives;
+    createState._epics = epics;
+
+    renderHierarchyPicker(legends, initiatives, epics);
+  } catch(e) {
+    el.innerHTML = `<div style="color:#D6202B;font-size:12px">Failed to load: ${e.message}</div>`;
+  }
+}
+
+function renderHierarchyPicker(legends, initiatives, epics){
+  const el = document.getElementById('ct-hierarchy');
+  if(!el) return;
+
+  const selLegend = createState._selLegend || '';
+  const selInit = createState._selInit || '';
+  const selEpic = createState._selEpic || '';
+
+  const filteredInits = selLegend ? initiatives.filter(i=>i.parent_key===selLegend) : initiatives;
+  const filteredEpics = selInit ? epics.filter(e=>e.parent_key===selInit) : (selLegend ? epics.filter(e=>{
+    const init = initiatives.find(i=>i.key===e.parent_key);
+    return init && init.parent_key===selLegend;
+  }) : epics);
+
+  el.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:10px">
+
+      <!-- Legend -->
+      <div>
+        <label class="form-label" style="margin-bottom:4px">Legend</label>
+        <div style="display:flex;gap:6px">
+          <select class="form-select" id="ct-legend" onchange="createState._selLegend=this.value;createState._selInit='';createState._selEpic='';renderHierarchyPicker(createState._legends,createState._initiatives,createState._epics)" style="flex:1">
+            <option value="">— select or create new —</option>
+            ${legends.map(l=>`<option value="${l.key}" ${l.key===selLegend?'selected':''}>${l.key} — ${l.summary}</option>`).join('')}
+          </select>
+          <button class="icon-btn" onclick="showCreateInline('legend')" title="Create new Legend">+ New</button>
+        </div>
+        <div id="create-legend-inline" style="display:none;margin-top:6px">
+          <input class="form-input" id="new-legend-name" placeholder="New Legend name…" style="margin-bottom:4px">
+          <button class="primary-btn" onclick="createInlineItem('legend')" style="font-size:11px;padding:5px 10px">Create Legend</button>
+        </div>
+      </div>
+
+      <!-- Initiative -->
+      <div>
+        <label class="form-label" style="margin-bottom:4px">Initiative</label>
+        <div style="display:flex;gap:6px">
+          <select class="form-select" id="ct-init" onchange="createState._selInit=this.value;createState._selEpic='';renderHierarchyPicker(createState._legends,createState._initiatives,createState._epics)" style="flex:1" ${!selLegend?'disabled':''}>
+            <option value="">— ${selLegend?'select or create new':'select Legend first'} —</option>
+            ${filteredInits.map(i=>`<option value="${i.key}" ${i.key===selInit?'selected':''}>${i.key} — ${i.summary}</option>`).join('')}
+          </select>
+          <button class="icon-btn" onclick="showCreateInline('initiative')" ${!selLegend?'disabled':''} title="Create new Initiative">+ New</button>
+        </div>
+        <div id="create-initiative-inline" style="display:none;margin-top:6px">
+          <input class="form-input" id="new-initiative-name" placeholder="New Initiative name…" style="margin-bottom:4px">
+          <button class="primary-btn" onclick="createInlineItem('initiative')" style="font-size:11px;padding:5px 10px">Create Initiative</button>
+        </div>
+      </div>
+
+      <!-- Epic -->
+      <div>
+        <label class="form-label" style="margin-bottom:4px">Epic *</label>
+        <div style="display:flex;gap:6px">
+          <select class="form-select" id="ct-epic-sel" onchange="createState._selEpic=this.value;createState.epicKey=this.value" style="flex:1" ${!selInit?'disabled':''}>
+            <option value="">— ${selInit?'select or create new':'select Initiative first'} —</option>
+            ${filteredEpics.map(e=>`<option value="${e.key}" ${e.key===selEpic?'selected':''}>${e.key} — ${e.summary}</option>`).join('')}
+          </select>
+          <button class="icon-btn" onclick="showCreateInline('epic')" ${!selInit?'disabled':''} title="Create new Epic">+ New</button>
+        </div>
+        <div id="create-epic-inline" style="display:none;margin-top:6px">
+          <input class="form-input" id="new-epic-name" placeholder="New Epic name…" style="margin-bottom:4px">
+          <button class="primary-btn" onclick="createInlineItem('epic')" style="font-size:11px;padding:5px 10px">Create Epic</button>
+        </div>
+      </div>
+
+      ${selEpic ? `<div style="background:#F0FBF0;border-radius:6px;padding:8px 10px;font-size:12px;color:#3B6D11;font-weight:600">✓ Will be created under: ${selEpic}</div>` : ''}
+    </div>`;
+}
+
+function showCreateInline(type){
+  const el = document.getElementById('create-'+type+'-inline');
+  if(el) el.style.display = el.style.display==='none' ? 'block' : 'none';
+}
+
+async function createInlineItem(type){
+  const proj = createState.projectKey;
+  let name, parentKey, issueTypeName;
+
+  if(type==='legend'){
+    name = (document.getElementById('new-legend-name').value||'').trim();
+    if(!name){alert('Please enter a name');return;}
+    issueTypeName = 'Legend';
+    parentKey = null;
+  } else if(type==='initiative'){
+    name = (document.getElementById('new-initiative-name').value||'').trim();
+    if(!name){alert('Please enter a name');return;}
+    issueTypeName = 'Initiative';
+    parentKey = createState._selLegend;
+    if(!parentKey){alert('Please select a Legend first');return;}
+  } else if(type==='epic'){
+    name = (document.getElementById('new-epic-name').value||'').trim();
+    if(!name){alert('Please enter a name');return;}
+    issueTypeName = 'Epic';
+    parentKey = createState._selInit;
+    if(!parentKey){alert('Please select an Initiative first');return;}
+  }
+
+  const btn = event.target;
+  btn.disabled=true; btn.textContent='Creating…';
+
+  const payload = {fields:{project:{key:proj},summary:name,issuetype:{name:issueTypeName}}};
+  if(parentKey) payload.fields.parent = {key:parentKey};
+
+  const result = await createIssue(payload);
+  if(result.success){
+    btn.textContent='✓ Created '+result.key;
+    // Reload hierarchy
+    await loadHierarchyForCreate();
+    // Auto-select the newly created item
+    if(type==='legend') createState._selLegend = result.key;
+    if(type==='initiative') createState._selInit = result.key;
+    if(type==='epic'){ createState._selEpic = result.key; createState.epicKey = result.key; }
+    renderHierarchyPicker(createState._legends, createState._initiatives, createState._epics);
+  } else {
+    btn.disabled=false; btn.textContent='Create '+type;
+    alert('Failed to create. Check project permissions.');
+  }
+}
+
 
 let epicSearchTimer=null;
 function debouncedEpicSearch(){clearTimeout(epicSearchTimer);epicSearchTimer=setTimeout(triggerEpicSearch,800);}
@@ -1555,6 +1748,244 @@ function toggleGroupProject(group, key, exclude){
 function grpAdd(g,idx){ const m=teamMembers.filter(x=>!(groups[g]||[]).includes(x)).sort()[idx]; if(m){toggleGroupMember(g,m,true);renderSettings();} }
 function grpRemove(g,idx){ const m=[...(groups[g]||[])].sort()[idx]; if(m){toggleGroupMember(g,m,false);renderSettings();} }
 function grpSearchAdd(g,name){ if(!teamMembers.includes(name))teamMembers.push(name); toggleGroupMember(g,name,true); renderSettings(); }
+
+
+/* ══ PRIORITISATION BOARD ══════════════════════════════════════════ */
+let priIssues = [];
+let priEpics = [];
+let priDragKey = null;
+let priDragEpic = null;
+
+async function loadPriBoard() {
+  const projKey = document.getElementById('pri-proj').value;
+  if (!projKey) return;
+  const loadEl = document.getElementById('pri-loading');
+  loadEl.textContent = 'Loading…'; loadEl.style.display = 'inline';
+
+  try {
+    const fields = 'summary,status,assignee,priority,issuetype,parent,customfield_10014';
+    // Fetch epics/milestones
+    const epicJql = `project=${projKey} AND issuetype in (Epic,Milestone,Initiative,Legend) AND statusCategory != Done ORDER BY created ASC`;
+    const epicD = await jiraGet('/rest/api/3/search/jql?jql=' + encodeURIComponent(epicJql) + '&fields=' + fields + '&maxResults=100');
+    priEpics = (epicD.issues || []).map(parseIssue);
+
+    // Fetch all tasks
+    const taskJql = `project=${projKey} AND issuetype in (Task,"Sub-task") ORDER BY rank ASC`;
+    const taskD = await jiraGet('/rest/api/3/search/jql?jql=' + encodeURIComponent(taskJql) + '&fields=' + fields + '&maxResults=200');
+    priIssues = (taskD.issues || []).map(parseIssue);
+
+    renderPriBoard();
+  } catch(e) {
+    document.getElementById('pri-board').innerHTML = `<div style="padding:24px;color:#D6202B">Failed to load: ${e.message}</div>`;
+  }
+  loadEl.style.display = 'none';
+}
+
+function renderPriBoard() {
+  const statusFilter = document.getElementById('pri-status-filter').value;
+  const unassignedOnly = document.getElementById('pri-unassigned-only').checked;
+
+  // Filter tasks
+  let tasks = [...priIssues];
+  if (statusFilter === 'hide-done') tasks = tasks.filter(i => normStatus(i.status) !== 'Done');
+  if (statusFilter === 'only-active') tasks = tasks.filter(i => ['In Progress','Selected'].includes(normStatus(i.status)));
+  if (unassignedOnly) tasks = tasks.filter(i => i.assignee === 'Unassigned');
+
+  // Group tasks by parent epic
+  const byEpic = {};
+  const unassigned = [];
+  tasks.forEach(t => {
+    if (t.parent_key) {
+      if (!byEpic[t.parent_key]) byEpic[t.parent_key] = [];
+      byEpic[t.parent_key].push(t);
+    } else {
+      unassigned.push(t);
+    }
+  });
+
+  // Filter epics
+  let epics = [...priEpics].filter(e => ['Epic','Milestone'].includes(e.type));
+  if (unassignedOnly) epics = epics.filter(e => e.assignee === 'Unassigned' || (byEpic[e.key]||[]).length > 0);
+
+  const board = document.getElementById('pri-board');
+  board.innerHTML = '';
+
+  // Render epic columns
+  epics.forEach(epic => {
+    const epicTasks = byEpic[epic.key] || [];
+    // Find parent chain
+    const initiative = priEpics.find(e => e.key === epic.parent_key);
+    const legend = initiative ? priEpics.find(e => e.key === initiative.parent_key) : null;
+
+    const col = document.createElement('div');
+    col.className = 'pri-epic-col';
+    col.dataset.epicKey = epic.key;
+
+    const statusCfg = SC[epic.status] || SC.Backlog;
+    col.innerHTML = `
+      <div class="pri-epic-hdr">
+        <div style="display:flex;align-items:center;gap:5px;margin-bottom:3px;flex-wrap:wrap">
+          ${legend ? `<span style="font-size:9px;color:#9A4500;background:#FFF0E6;padding:1px 5px;border-radius:3px;font-weight:700">${legend.key}</span>` : ''}
+          ${initiative ? `<span style="font-size:9px;color:#6B3FA0;background:#F3EEFF;padding:1px 5px;border-radius:3px;font-weight:700">${initiative.key}</span>` : ''}
+        </div>
+        <div class="pri-epic-title">
+          <a href="${BASE()}${epic.key}" target="_blank" style="font-size:10px;font-family:monospace;color:#257AA5;font-weight:700">${epic.key}</a>
+          ${epic.summary}
+        </div>
+        <div class="pri-epic-meta">
+          <span class="badge" style="background:${statusCfg.bg};color:${statusCfg.c}">${epic.status}</span>
+          ${pbadge(epic.priority)}
+          ${ava(epic.assignee, 20)}
+          <span style="font-size:10px;color:#9EA0A4;margin-left:auto">${epicTasks.length} tasks</span>
+        </div>
+      </div>
+      <div class="pri-epic-body pri-drop-zone" data-epic="${epic.key}"
+        ondragover="priDragOver(event,'${epic.key}')" ondragleave="priDragLeave(event)" ondrop="priDrop(event,'${epic.key}')">
+        ${epicTasks.map((t,idx) => priCardHtml(t, idx+1)).join('')}
+      </div>`;
+    board.appendChild(col);
+  });
+
+  // Unassigned column
+  if (unassigned.length > 0 || !document.getElementById('pri-unassigned-only')?.checked) {
+    const col = document.createElement('div');
+    col.className = 'pri-epic-col';
+    col.style.minWidth = '260px';
+    col.innerHTML = `
+      <div class="pri-epic-hdr" style="background:#FFF8EC">
+        <div class="pri-epic-title" style="color:#9A4500">⚠ No Epic assigned</div>
+        <div class="pri-epic-meta"><span style="font-size:10px;color:#9A4500">${unassigned.length} tasks</span></div>
+      </div>
+      <div class="pri-epic-body pri-drop-zone" data-epic="__none__"
+        ondragover="priDragOver(event,'__none__')" ondragleave="priDragLeave(event)" ondrop="priDrop(event,'__none__')">
+        ${unassigned.map((t,idx) => priCardHtml(t, idx+1)).join('')}
+      </div>`;
+    board.appendChild(col);
+  }
+}
+
+function priCardHtml(t, rank) {
+  const sc = SC[t.status] || SC.Backlog;
+  const pc = PC[t.priority] || PC.Medium;
+  const isUnassigned = t.assignee === 'Unassigned';
+  return `<div class="pri-card ${isUnassigned?'unassigned-card':''}"
+    draggable="true"
+    data-key="${t.key}"
+    data-epic="${t.parent_key||'__none__'}"
+    ondragstart="priDragStart(event,'${t.key}','${t.parent_key||'__none__'}')"
+    ondragend="priDragEnd(event)"
+    ondragover="priCardDragOver(event)"
+    ondragleave="priCardDragLeave(event)"
+    ondrop="priCardDrop(event,'${t.key}','${t.parent_key||'__none__'}')"
+    onclick="openPane('${t.key}')">
+    <div style="display:flex;align-items:center;gap:4px;margin-bottom:3px">
+      <span class="pri-rank-num">#${rank}</span>
+      <a href="${BASE()}${t.key}" target="_blank" onclick="event.stopPropagation()" class="card-key">${t.key}</a>
+      ${t.parent_key ? `<span style="font-size:9px;color:#C9CACC;font-family:monospace">↑${t.parent_key}</span>` : ''}
+      <div style="margin-left:auto">${ava(t.assignee, 20)}</div>
+    </div>
+    <div style="font-size:12px;font-weight:600;color:#292E37;line-height:1.3;margin-bottom:5px">${t.summary}</div>
+    <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
+      <span class="badge" style="background:${sc.bg};color:${sc.c}">${t.status}</span>
+      <span class="badge" style="background:${pc.bg};color:${pc.c}"><span class="pri-dot" style="background:${pc.d}"></span>${t.priority}</span>
+      ${isUnassigned ? '<span class="badge" style="background:#FFF0CC;color:#9A4500">Unassigned</span>' : ''}
+    </div>
+  </div>`;
+}
+
+/* Drag and drop for prioritisation */
+function priDragStart(e, key, epicKey) {
+  priDragKey = key; priDragEpic = epicKey;
+  e.dataTransfer.effectAllowed = 'move';
+  setTimeout(() => { const el = document.querySelector(`[data-key="${key}"]`); if(el) el.classList.add('dragging'); }, 0);
+}
+function priDragEnd(e) {
+  priDragKey = null; priDragEpic = null;
+  document.querySelectorAll('.pri-card').forEach(c => c.classList.remove('dragging','drag-over-top','drag-over-bottom'));
+  document.querySelectorAll('.pri-drop-zone').forEach(z => z.classList.remove('drag-over'));
+}
+function priDragOver(e, epicKey) { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }
+function priDragLeave(e) { e.currentTarget.classList.remove('drag-over'); }
+function priCardDragOver(e) {
+  e.preventDefault(); e.stopPropagation();
+  const card = e.currentTarget;
+  const rect = card.getBoundingClientRect();
+  const mid = rect.top + rect.height / 2;
+  document.querySelectorAll('.pri-card').forEach(c => c.classList.remove('drag-over-top','drag-over-bottom'));
+  card.classList.add(e.clientY < mid ? 'drag-over-top' : 'drag-over-bottom');
+}
+function priCardDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over-top','drag-over-bottom');
+}
+
+async function priCardDrop(e, targetKey, targetEpic) {
+  e.preventDefault(); e.stopPropagation();
+  if (!priDragKey || priDragKey === targetKey) return;
+  const card = e.currentTarget;
+  const rect = card.getBoundingClientRect();
+  const before = e.clientY < rect.top + rect.height / 2;
+
+  // Reorder in local array
+  const taskIdx = priIssues.findIndex(t => t.key === priDragKey);
+  const targetIdx = priIssues.findIndex(t => t.key === targetKey);
+  if (taskIdx === -1 || targetIdx === -1) return;
+
+  const [moved] = priIssues.splice(taskIdx, 1);
+
+  // If dragged to different epic, update parent
+  if (priDragEpic !== targetEpic && targetEpic !== '__none__') {
+    moved.parent_key = targetEpic;
+    moved.parent_summary = priEpics.find(e=>e.key===targetEpic)?.summary || '';
+    // Update parent in Jira
+    jiraPut('/rest/api/3/issue/' + priDragKey, { fields: { parent: { key: targetEpic } } });
+  }
+
+  const newTargetIdx = priIssues.findIndex(t => t.key === targetKey);
+  priIssues.splice(before ? newTargetIdx : newTargetIdx + 1, 0, moved);
+
+  renderPriBoard();
+
+  // Update rank in Jira
+  try {
+    const rankBody = before
+      ? { issues: [priDragKey], rankBeforeIssue: targetKey }
+      : { issues: [priDragKey], rankAfterIssue: targetKey };
+    await jiraPost('/rest/agile/1.0/issue/rank', rankBody);
+  } catch(err) { console.warn('Rank update failed:', err); }
+}
+
+async function priDrop(e, epicKey) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  if (!priDragKey) return;
+  // Dropped on column (not on a specific card) — move to end
+  const taskIdx = priIssues.findIndex(t => t.key === priDragKey);
+  if (taskIdx === -1) return;
+  const [moved] = priIssues.splice(taskIdx, 1);
+  if (epicKey !== '__none__') {
+    moved.parent_key = epicKey;
+    moved.parent_summary = priEpics.find(e=>e.key===epicKey)?.summary || '';
+    jiraPut('/rest/api/3/issue/' + priDragKey, { fields: { parent: { key: epicKey } } });
+  }
+  priIssues.push(moved);
+  renderPriBoard();
+  // Rank after last issue in column
+  const colTasks = priIssues.filter(t => (t.parent_key||'__none__') === epicKey);
+  if (colTasks.length > 1) {
+    const last = colTasks[colTasks.length - 2];
+    jiraPost('/rest/agile/1.0/issue/rank', { issues: [priDragKey], rankAfterIssue: last.key });
+  }
+}
+
+/* Populate pri project selector */
+function populatePriProjects() {
+  const sel = document.getElementById('pri-proj');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— select project —</option>' +
+    allProjects.filter(p=>!excludedProjects.includes(p.key))
+      .map(p=>`<option value="${p.key}">${p.key} — ${p.name}</option>`).join('');
+  if (currentProjFilter) sel.value = currentProjFilter;
+}
 
 
 /* ══ BOOT ══ */
