@@ -231,8 +231,8 @@ button,select,textarea,input{font-family:inherit}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div style="width:24px;height:24px;border-radius:50%;border:2.5px solid #2E99CE;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#2E99CE;flex-shrink:0">◎</div>
-  <span style="font-size:14px;font-weight:700;white-space:nowrap">LoopUp Jira</span>
+  <img src="https://raw.githubusercontent.com/82ybgh47w9-wq/loopup-jira-board/main/logo.png" height="28" style="flex-shrink:0" onerror="this.style.display='none'">
+  <span style="font-size:14px;font-weight:700;white-space:nowrap;color:#292E37">Jira</span>
   <div class="divider"></div>
   <span style="font-size:11px;color:#9EA0A4;white-space:nowrap">I am</span>
   <select class="iam-select" id="iam-sel" onchange="onIamChange()"><option value="">— select —</option></select>
@@ -240,10 +240,11 @@ button,select,textarea,input{font-family:inherit}
   <div class="divider"></div>
   <select class="proj-select" id="proj-filter" onchange="onProjFilter()"><option value="">All projects</option></select>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v6</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
-    <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none">Jira ↗</a>
     <button class="icon-btn" onclick="openSettings('team')">⚙ Settings</button>
   </div>
 </div>
@@ -1009,8 +1010,6 @@ function renderSettings(){
     const gnames=Object.keys(groups);
     const activeGrp=window._activeGrpTab||(gnames[0]||null);
     window._activeGrpTab=activeGrp;
-
-    // Group project exclusions stored in groupProjects[groupName] = array of excluded project keys
     if(!window.groupProjects) window.groupProjects={};
 
     body.innerHTML=`
@@ -1022,72 +1021,425 @@ function renderSettings(){
       ${gnames.length===0
         ? '<div style="font-size:13px;color:#9EA0A4;font-style:italic">No groups yet — create one above.</div>'
         : `<div>
-            <!-- Group tabs -->
-            <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:14px;border-bottom:1px solid #E4E6E8;padding-bottom:0">
+            <div style="display:flex;gap:0;flex-wrap:wrap;border-bottom:2px solid #E4E6E8;margin-bottom:14px">
               ${gnames.map(g=>`
-                <button onclick="window._activeGrpTab='${g.replace(/'/g,"\'")}';renderSettings()"
-                  style="padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer;border:none;background:transparent;
-                  border-bottom:3px solid ${g===activeGrp?'#2E99CE':'transparent'};
-                  color:${g===activeGrp?'#2E99CE':'#9EA0A4'};white-space:nowrap">${g}
-                  <span style="font-size:10px;background:${g===activeGrp?'#E0F0F8':'#EEF1F3'};color:${g===activeGrp?'#125462':'#9EA0A4'};border-radius:10px;padding:1px 6px;margin-left:4px">${(groups[g]||[]).length}</span>
+                <button onclick="window._activeGrpTab=${JSON.stringify(g)};renderSettings()"
+                  style="padding:8px 16px;font-size:12px;font-weight:700;cursor:pointer;border:none;background:transparent;
+                  border-bottom:3px solid ${g===activeGrp?'#2E99CE':'transparent'};margin-bottom:-2px;
+                  color:${g===activeGrp?'#2E99CE':'#9EA0A4'}">
+                  ${g} <span style="font-size:10px;background:${g===activeGrp?'#E0F0F8':'#EEF1F3'};color:${g===activeGrp?'#125462':'#9EA0A4'};border-radius:10px;padding:1px 6px;margin-left:3px">${(groups[g]||[]).length}</span>
                 </button>`).join('')}
             </div>
 
             ${activeGrp ? `
-            <!-- Active group panel -->
             <div>
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
                 <span style="font-size:14px;font-weight:700">${activeGrp}</span>
-                <button onclick="deleteGroup('${activeGrp.replace(/'/g,"\'")}');window._activeGrpTab=null;renderSettings()"
-                  style="background:none;border:1px solid #D6202B;color:#D6202B;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px">Delete group</button>
+                <button onclick="deleteGroup(${JSON.stringify(activeGrp)});window._activeGrpTab=null;renderSettings()"
+                  style="border:1px solid #D6202B;color:#D6202B;background:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px">Delete</button>
               </div>
 
-              <!-- Members section -->
-              <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Members</div>
-
-              <!-- Current members -->
+              <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Members (${(groups[activeGrp]||[]).length})</div>
               ${(groups[activeGrp]||[]).length===0
-                ? '<div style="font-size:13px;color:#9EA0A4;font-style:italic;margin-bottom:10px">No members yet</div>'
-                : `<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px">
-                    ${[...(groups[activeGrp]||[])].sort().map(m=>`
+                ? '<div style="font-size:13px;color:#9EA0A4;font-style:italic;margin-bottom:10px;padding:8px">No members yet</div>'
+                : `<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px">
+                    ${[...(groups[activeGrp]||[])].sort().map((m,idx)=>`
                       <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;background:#E0F0F8;border:1px solid #2E99CE">
                         ${ava(m,24)}
                         <span style="flex:1;font-size:13px;font-weight:700;color:#125462">${m}</span>
-                        <button onclick="toggleGroupMember('${activeGrp.replace(/'/g,"\'")}','${m.replace(/'/g,"\'")}',false);renderSettings()"
-                          style="background:none;border:none;cursor:pointer;color:#D6202B;font-size:16px;line-height:1;padding:2px 4px">×</button>
+                        <button onclick="grpRemove(${JSON.stringify(activeGrp)},${idx})"
+                          style="background:none;border:none;cursor:pointer;color:#D6202B;font-size:18px;line-height:1;padding:2px 6px">×</button>
                       </div>`).join('')}
                   </div>`}
 
-              <!-- Search to add -->
               <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Add members</div>
               <input class="form-input" id="grp-search-input" placeholder="Search Jira users by name…"
-                oninput="searchGroupUsers('${activeGrp.replace(/'/g,"\'")}',this.value)" style="margin-bottom:6px">
-              <div id="grp-results" style="display:flex;flex-direction:column;gap:4px;max-height:160px;overflow-y:auto;margin-bottom:14px"></div>
+                oninput="searchGroupUsers(${JSON.stringify(activeGrp)},this.value)" style="margin-bottom:6px">
+              <div id="grp-results" style="display:flex;flex-direction:column;gap:4px;max-height:140px;overflow-y:auto;margin-bottom:12px"></div>
 
-              <!-- Non-member team members (quick add) -->
               ${teamMembers.filter(m=>!(groups[activeGrp]||[]).includes(m)).length>0
                 ? `<div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Quick add from team</div>
                   <div style="display:flex;flex-direction:column;gap:4px;max-height:180px;overflow-y:auto;margin-bottom:14px">
-                    ${teamMembers.filter(m=>!(groups[activeGrp]||[]).includes(m)).sort().map(m=>`
-                      <div onclick="toggleGroupMember('${activeGrp.replace(/'/g,"\'")}','${m.replace(/'/g,"\'")}',true);renderSettings()"
+                    ${teamMembers.filter(m=>!(groups[activeGrp]||[]).includes(m)).sort().map((m,idx)=>`
+                      <div onclick="grpAdd(${JSON.stringify(activeGrp)},${idx})"
                         style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;cursor:pointer;background:#F7F8F9;border:1px solid #E4E6E8">
                         ${ava(m,24)}
                         <span style="flex:1;font-size:13px;color:#292E37">${m}</span>
-                        <span style="font-size:14px;color:#C9CACC">+</span>
+                        <span style="font-size:16px;color:#5E8E38;font-weight:700">+</span>
                       </div>`).join('')}
-                  </div>`
-                : ''}
+                  </div>` : ''}
 
-              <!-- Project scope for this group -->
-              <div style="border-top:1px solid #E4E6E8;padding-top:12px;margin-top:4px">
+              <div style="border-top:1px solid #E4E6E8;padding-top:12px">
                 <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Project scope</div>
-                <div style="font-size:12px;color:#9EA0A4;margin-bottom:8px">Based on your global project list. Uncheck to narrow this group's scope.</div>
-                <div style="max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
+                <div style="font-size:12px;color:#9EA0A4;margin-bottom:8px">Uncheck to narrow this group to specific projects.</div>
+                <div style="max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
                   ${allProjects.filter(p=>!excludedProjects.includes(p.key)).map(p=>{
                     if(!window.groupProjects[activeGrp]) window.groupProjects[activeGrp]=[];
-                    const excluded=window.groupProjects[activeGrp].includes(p.key);
+                    const excl=window.groupProjects[activeGrp].includes(p.key);
                     return`<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;background:#F7F8F9">
-                      <input type="checkbox" ${excluded?'':'checked'} onchange="toggleGroupProject('${activeGrp.replace(/'/g,"\'")}','${p.key}',!this.checked)" style="cursor:pointer">
+                      <input type="checkbox" ${excl?'':'checked'} onchange="toggleGroupProject(${JSON.stringify(activeGrp)},'${p.key}',!this.checked)" style="cursor:pointer">
+                      <span style="font-size:11px;font-weight:700;color:#257AA5;font-family:monospace">${p.key}</span>
+                      <span style="font-size:12px;color:#292E37">${p.name}</span>
+                    </div>`;
+                  }).join('')}
+                </div>
+              </div>
+            </div>` : ''}
+          </div>`}`;
+  }else if(settingsTab==="projects"){
+    body.innerHTML=`
+      <div style="font-size:12px;color:#9EA0A4">Excluded projects won't appear in project filter or epic search.</div>
+      <div style="max-height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
+        ${allProjects.map(p=>`<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;background:#F7F8F9">
+          <input type="checkbox" ${excludedProjects.includes(p.key)?"":"checked"} onchange="toggleProjectExclusion('${p.key}',!this.checked)" style="cursor:pointer">
+          <span style="font-size:12px;font-weight:600;color:#257AA5;font-family:monospace">${p.key}</span>
+          <span style="font-size:12px;color:#292E37">${p.name}</span>
+        </div>`).join("")}
+      </div>`;
+  }else if(settingsTab==="admin"){
+    const isOwner=cfg.email===ADMIN_EMAIL||adminUsers.includes(cfg.email);
+    if(!isOwner){body.innerHTML=`<div style="font-size:13px;color:#9EA0A4;font-style:italic">Only admin users can manage access.</div>`;return;}
+    body.innerHTML=`
+      <div style="font-size:12px;color:#9EA0A4">Users with Manager Board access:</div>
+      <div id="admin-list" style="display:flex;flex-direction:column;gap:5px"></div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <input class="form-input" id="admin-email-input" placeholder="Email to grant manager access…" style="flex:1">
+        <button class="primary-btn" onclick="grantAdmin()">Grant</button>
+      </div>`;
+    renderAdminList();
+  }else{
+    body.innerHTML=`
+      <label class="form-label">Jira site URL</label><input class="setup-input" id="cfg-url2" type="text" value="${cfg.url}">
+      <label class="form-label">Email</label><input class="setup-input" id="cfg-email2" type="email" value="${cfg.email}">
+      <label class="form-label">API Token</label><input class="setup-input" id="cfg-token2" type="password" value="${cfg.token}">
+      <button class="primary-btn" style="margin-top:12px;width:100%;padding:9px" onclick="updateCredentials()">Save credentials</button>`;
+  }
+}
+
+function renderTeamList(){const el=document.getElementById("team-list");if(!el)return;el.innerHTML=teamMembers.map((m,i)=>`<div class="team-member-row">${ava(m,26)}<span style="flex:1;font-size:13px;font-weight:600">${m}</span><button onclick="removeTeamMember(${i})" style="background:none;border:none;cursor:pointer;color:#D6202B;font-size:18px">×</button></div>`).join("");}
+function renderAdminList(){const el=document.getElementById("admin-list");if(!el)return;el.innerHTML=adminUsers.map((e,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:7px 12px;background:#F7F8F9;border-radius:8px"><span style="flex:1;font-size:13px">${e}</span>${e===ADMIN_EMAIL?'<span style="font-size:11px;color:#9EA0A4">owner</span>':`<button onclick="revokeAdmin(${i})" style="background:none;border:none;cursor:pointer;color:#D6202B;font-size:12px">Revoke</button>`}</div>`).join("");}
+
+async function searchJiraUsers(q){const el=document.getElementById("user-results");if(!el)return;if(q.length<2){el.innerHTML="";return;}el.innerHTML=`<div style="font-size:12px;color:#9EA0A4;padding:6px">${spinHtml(14)} Searching…</div>`;try{const d=await jiraGet("/rest/api/3/user/search?query="+encodeURIComponent(q)+"&maxResults=8");const users=Array.isArray(d)?d:(d.values||[]);el.innerHTML=users.length?users.map(u=>`<div class="user-result" onclick="addTeamMember('${(u.displayName||"").replace(/'/g,"\\'")}')">${ava(u.displayName||"",24)}<div><div style="font-size:12px;font-weight:600">${u.displayName||""}</div><div style="font-size:10px;color:#9EA0A4">${u.emailAddress||""}</div></div></div>`).join(""):'<div style="font-size:12px;color:#9EA0A4;padding:6px">No users found</div>';}catch{el.innerHTML='<div style="font-size:12px;color:#D6202B;padding:6px">Search failed</div>';}}
+
+function addTeamMember(name){if(!teamMembers.includes(name)){teamMembers.push(name);saveAll();renderTeamList();populateIamSelector();}}
+function removeTeamMember(i){teamMembers.splice(i,1);saveAll();renderTeamList();populateIamSelector();}
+function grantAdmin(){const e=(document.getElementById("admin-email-input").value||"").trim();if(!e||adminUsers.includes(e))return;adminUsers.push(e);saveAll();renderAdminList();}
+function revokeAdmin(i){if(adminUsers[i]===ADMIN_EMAIL)return;adminUsers.splice(i,1);saveAll();renderAdminList();}
+function updateCredentials(){cfg.url=(document.getElementById("cfg-url2").value||"").trim().replace(/\/$/,"");cfg.email=(document.getElementById("cfg-email2").value||"").trim();cfg.token=(document.getElementById("cfg-token2").value||"").trim();saveAll();closeSettings();init();}
+function toggleProjectExclusion(key,exclude){if(exclude){if(!excludedProjects.includes(key))excludedProjects.push(key);}else{excludedProjects=excludedProjects.filter(k=>k!==key);}saveAll();}
+
+function createGroup(){
+  const inp=document.getElementById("new-group-name");
+  const name=(inp?inp.value:"").trim();
+  if(!name){alert("Please enter a group name first.");return;}
+  if(groups[name]){alert("'"+name+"' already exists.");return;}
+  groups[name]=[];
+  saveAll();populateGroupSelector();renderSettings();
+}
+function deleteGroup(name){
+  if(!confirm("Delete group '"+name+"'?"))return;
+  delete groups[name];
+  if(currentGroup===name){currentGroup="";}
+  saveAll();populateGroupSelector();renderSettings();
+}
+function toggleGroupMember(group,member,add){
+  if(!groups[group])groups[group]=[];
+  if(add){if(!groups[group].includes(member))groups[group].push(member);}
+  else{groups[group]=groups[group].filter(m=>m!==member);}
+  saveAll();populateGroupSelector();
+}
+
+
+async function searchGroupUsers(groupName, query){
+  const el=document.getElementById('grp-results');
+  if(!el)return;
+  if(query.length<2){el.innerHTML='';return;}
+  el.innerHTML=`<div style="font-size:12px;color:#9EA0A4;padding:4px">${spinHtml(14)} Searching…</div>`;
+  try{
+    const d=await jiraGet('/rest/api/3/user/search?query='+encodeURIComponent(query)+'&maxResults=8');
+    const users=Array.isArray(d)?d:(d.values||[]);
+    if(!users.length){el.innerHTML='<div style="font-size:12px;color:#9EA0A4;padding:4px">No users found</div>';return;}
+    el.innerHTML=users.map((u,idx)=>{
+      const name=u.displayName||'';
+      const inGroup=(groups[groupName]||[]).includes(name);
+      return`<div onclick="grpSearchAdd(${JSON.stringify(groupName)},${JSON.stringify(name)})"
+        style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;cursor:pointer;
+        background:${inGroup?'#E0F0F8':'#fff'};border:1px solid ${inGroup?'#2E99CE':'#E4E6E8'}">
+        ${ava(name,24)}
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:600">${name}</div>
+          <div style="font-size:10px;color:#9EA0A4">${u.emailAddress||''}</div>
+        </div>
+        <span style="font-size:14px;color:${inGroup?'#2E99CE':'#5E8E38'};font-weight:700">${inGroup?'✓':'+'}</span>
+      </div>`;
+    }).join('');
+  }catch{el.innerHTML='<div style="font-size:12px;color:#D6202B;padding:4px">Search failed — check connection</div>';}
+}
+
+
+async function loadPaneComments(key){
+  if(!commentsCache[key]){try{commentsCache[key]=await fetchComments(key);}catch{commentsCache[key]=[];}}
+  const cmts=commentsCache[key];
+  document.getElementById("cmt-count").textContent=`(${cmts.length})`;
+  document.getElementById("cmt-list").innerHTML=cmts.length
+    ?cmts.map(c=>`<div class="comment-item"><div style="display:flex;align-items:center;gap:7px;margin-bottom:5px">${ava(c.author,20)}<span style="font-size:12px;font-weight:700">${c.author}</span><span style="font-size:11px;color:#C9CACC;margin-left:auto">${c.created}</span></div><div style="font-size:13px;line-height:1.55;white-space:pre-wrap">${c.body}</div></div>`).join("")
+    :`<div style="font-size:13px;color:#9EA0A4;font-style:italic">No comments yet.</div>`;
+}
+
+async function submitPaneComment(key){
+  const txt=(document.getElementById("cmt-text").value||"").trim();if(!txt)return;
+  const btn=document.getElementById("post-btn");btn.disabled=true;btn.innerHTML=spinHtml(13,"#fff")+" Posting…";
+  const ok=await postComment(key,txt);
+  const msg=document.getElementById("post-msg");
+  if(ok){msg.textContent="Posted ✓";msg.style.color="#5E8E38";document.getElementById("cmt-text").value="";delete commentsCache[key];await loadPaneComments(key);doFetch(true);}
+  else{msg.textContent="Failed";msg.style.color="#D6202B";btn.disabled=false;btn.innerHTML="Post to Jira";}
+  setTimeout(()=>{if(msg)msg.textContent="";},3000);
+}
+
+async function renderPaneSubtasks(){
+  const i=openIssue;
+  const el=document.getElementById("pane-body");
+  el.innerHTML=`<div class="pane-section"><div class="pane-section-title">Subtasks</div><div id="subtask-list">${spinHtml()} Loading…</div></div>`;
+  if(!subtasksCache[i.key]){
+    try{
+      const d=await jiraGet("/rest/api/3/issue/"+i.key+"?fields=subtasks");
+      subtasksCache[i.key]=(d.fields?.subtasks||[]).map(s=>({key:s.key,summary:s.fields?.summary||"",status:s.fields?.status?.name||"",type:s.fields?.issuetype?.name||"Sub-task",assignee:s.fields?.assignee?.displayName||"Unassigned"}));
+    }catch{subtasksCache[i.key]=[];}
+  }
+  const subs=subtasksCache[i.key];
+  // Update tab label with count + highlight if has subtasks
+  const tabBtn=document.getElementById("subtasks-tab-btn");
+  if(tabBtn){
+    tabBtn.textContent=subs.length>0?`Subtasks (${subs.length}) ●`:"Subtasks";
+    tabBtn.style.color=subs.length>0?"#8F6AC8":"";
+  }
+  document.getElementById("subtask-list").innerHTML=subs.length
+    ?`<div style="font-size:12px;color:#8F6AC8;font-weight:700;margin-bottom:8px;padding:6px 10px;background:#F3EEFF;border-radius:6px">${subs.length} subtask${subs.length>1?"s":""} linked to this issue</div>`+
+      subs.map(s=>`<div class="subtask-row" onclick="openPane('${s.key}')" style="cursor:pointer">
+        ${klink(s.key)}
+        ${spill(s.status)}
+        <span style="flex:1;font-size:12px;color:#292E37">${s.summary}</span>
+        ${ava(s.assignee,20)}
+      </div>`).join("")
+    :`<div style="font-size:13px;color:#9EA0A4;font-style:italic;padding:8px 0">No subtasks on this issue.</div>`;
+}
+
+async function doPaneStatus(val){locStat[openIssue.key]=val;openIssue={...openIssue,status:val};saveAll();renderPaneHdr(openIssue);renderPaneMain();updateStats();renderMain();await transitionIssue(openIssue.key,val);setTimeout(()=>doFetch(true),1500);}
+async function doPanePriority(val){locPri[openIssue.key]=val;openIssue={...openIssue,priority:val};saveAll();renderPaneHdr(openIssue);renderPaneMain();renderMain();await updatePriority(openIssue.key,val);setTimeout(()=>doFetch(true),1500);}
+
+/* ══ CREATE TASK ══ */
+let createState={projectKey:"",issueType:"Task",assignee:"",priority:"Medium",status:"Selected",epicKey:"",summary:"",description:"",epicSuggestions:[],loadingEpics:false};
+
+function openCreate(defaultAssignee,e){
+  if(e)e.stopPropagation();
+  createState={projectKey:currentProjFilter||"",issueType:"Task",assignee:defaultAssignee||currentIam||"",priority:"Medium",status:"Selected",epicKey:"",summary:"",description:"",epicSuggestions:[],loadingEpics:false};
+  document.getElementById("create-overlay").classList.add("open");
+  renderCreateBody();
+}
+function closeCreate(){document.getElementById("create-overlay").classList.remove("open");}
+
+function renderCreateBody(){
+  const teamOpts=teamMembers.map(m=>`<option value="${m}" ${m===createState.assignee?"selected":""}>${m}</option>`).join("");
+  const projOpts=allProjects.filter(p=>!excludedProjects.includes(p.key)).map(p=>`<option value="${p.key}" ${p.key===createState.projectKey?"selected":""}>${p.key} — ${p.name}</option>`).join("");
+  const typeOpts=ISSUE_TYPES.map(t=>`<option value="${t}" ${t===createState.issueType?"selected":""}>${t}</option>`).join("");
+  const priOpts=Object.keys(PC).map(p=>`<option value="${p}" ${p===createState.priority?"selected":""}>${p}</option>`).join("");
+  const statOpts=["Selected","In Progress","Backlog"].map(s=>`<option value="${s}" ${s===createState.status?"selected":""}>${s}</option>`).join("");
+
+  document.getElementById("create-body").innerHTML=`
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div>
+        <label class="form-label">Project *</label>
+        <select class="form-select" id="ct-proj" onchange="createState.projectKey=this.value;triggerEpicSearch()">${projOpts}</select>
+      </div>
+      <div>
+        <label class="form-label">Issue type *</label>
+        <select class="form-select" id="ct-type" onchange="createState.issueType=this.value">${typeOpts}</select>
+      </div>
+      <div>
+        <label class="form-label">Assignee</label>
+        <select class="form-select" id="ct-assignee" onchange="createState.assignee=this.value"><option value="">Unassigned</option>${teamOpts}</select>
+      </div>
+      <div>
+        <label class="form-label">Priority</label>
+        <select class="form-select" id="ct-priority" onchange="createState.priority=this.value">${priOpts}</select>
+      </div>
+      <div style="grid-column:1/-1">
+        <label class="form-label">Status</label>
+        <select class="form-select" id="ct-status" onchange="createState.status=this.value">${statOpts}</select>
+      </div>
+    </div>
+    <div>
+      <label class="form-label">Summary (task name) *</label>
+      <input class="form-input" id="ct-summary" type="text" placeholder="What needs to be done?" value="${createState.summary}"
+        oninput="createState.summary=this.value;debouncedEpicSearch()" onblur="triggerEpicSearch()">
+    </div>
+    <!-- EPIC / PARENT LINK -->
+    <div>
+      <label class="form-label">Link to Epic / Initiative / Legend *</label>
+      <div style="display:flex;gap:8px;margin-bottom:6px">
+        <input class="form-input" id="ct-epic-search" type="text" placeholder="Type to search or select from suggestions below…" 
+          value="${createState.epicKey}" oninput="createState.epicKey=this.value" style="flex:1">
+        <button class="icon-btn" onclick="triggerEpicSearch()" style="white-space:nowrap">${spinHtml(13)} Search</button>
+      </div>
+      <div id="epic-suggestions" style="display:flex;flex-direction:column;gap:4px;max-height:160px;overflow-y:auto">
+        ${createState.loadingEpics?`<div style="font-size:12px;color:#9EA0A4;padding:6px">${spinHtml()} Finding relevant epics…</div>`:""}
+        ${createState.epicSuggestions.map(e=>`<div class="epic-suggestion" onclick="selectEpic('${e.key}','${e.summary.replace(/'/g,"\\'")}')">
+          ${tbadge(e.type||"Epic")}
+          <span style="font-size:10px;font-family:monospace;color:#257AA5">${e.key}</span>
+          <span style="font-size:12px;color:#292E37;flex:1">${e.summary}</span>
+          <span style="font-size:10px;color:#9EA0A4">${e.project||""}</span>
+        </div>`).join("")}
+      </div>
+    </div>
+    <div>
+      <label class="form-label">Description <span style="font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
+      <textarea class="form-textarea" id="ct-desc" placeholder="Add more detail…" onchange="createState.description=this.value">${createState.description}</textarea>
+    </div>
+    <div id="create-msg" style="font-size:12px;min-height:18px"></div>`;
+}
+
+let epicSearchTimer=null;
+function debouncedEpicSearch(){clearTimeout(epicSearchTimer);epicSearchTimer=setTimeout(triggerEpicSearch,800);}
+async function triggerEpicSearch(){
+  const summary=document.getElementById("ct-summary")?.value||"";
+  const proj=document.getElementById("ct-proj")?.value||"";
+  if(summary.length<3)return;
+  createState.loadingEpics=true;createState.epicSuggestions=[];
+  const sugEl=document.getElementById("epic-suggestions");
+  if(sugEl)sugEl.innerHTML=`<div style="font-size:12px;color:#9EA0A4;padding:6px">${spinHtml()} Searching Jira for relevant epics…</div>`;
+  const suggestions=await searchEpicsWithAI(summary,proj);
+  createState.epicSuggestions=suggestions;createState.loadingEpics=false;
+  if(sugEl)sugEl.innerHTML=suggestions.length
+    ?suggestions.map(e=>`<div class="epic-suggestion" onclick="selectEpic('${e.key}','${(e.summary||"").replace(/'/g,"\\'")}')">
+        ${tbadge(e.type||"Epic")}
+        <span style="font-size:10px;font-family:monospace;color:#257AA5">${e.key}</span>
+        <span style="font-size:12px;color:#292E37;flex:1">${e.summary}</span>
+        <span style="font-size:10px;color:#9EA0A4">${e.project||""}</span>
+      </div>`).join("")
+    :`<div style="font-size:12px;color:#9EA0A4;padding:6px">No suggestions found. Enter an epic key manually above.</div>`;
+}
+function selectEpic(key,summary){createState.epicKey=key;const inp=document.getElementById("ct-epic-search");if(inp)inp.value=key+" — "+summary;const sugEl=document.getElementById("epic-suggestions");if(sugEl)sugEl.innerHTML=`<div style="font-size:12px;color:#3B6D11;padding:6px">✓ Selected: ${key} — ${summary}</div>`;}
+
+async function submitCreate(){
+  const summary=(document.getElementById("ct-summary")?.value||"").trim();
+  const proj=document.getElementById("ct-proj")?.value||"";
+  const epicKey=(document.getElementById("ct-epic-search")?.value||"").split("—")[0].trim();
+  const msg=document.getElementById("create-msg");
+  if(!summary){msg.textContent="Please enter a summary.";msg.style.color="#D6202B";return;}
+  if(!proj){msg.textContent="Please select a project.";msg.style.color="#D6202B";return;}
+  const btn=document.getElementById("create-submit-btn");btn.disabled=true;btn.innerHTML=spinHtml(13,"#fff")+" Creating…";
+  const assignee=document.getElementById("ct-assignee")?.value||"";
+  const priority=document.getElementById("ct-priority")?.value||"Medium";
+  const issueType=document.getElementById("ct-type")?.value||"Task";
+  const desc=document.getElementById("ct-desc")?.value||"";
+  const payload={fields:{project:{key:proj},summary,issuetype:{name:issueType},priority:{name:priority},description:desc?{type:"doc",version:1,content:[{type:"paragraph",content:[{type:"text",text:desc}]}]}:undefined}};
+  if(assignee){
+    // look up account ID
+    try{const users=await jiraGet("/rest/api/3/user/search?query="+encodeURIComponent(assignee)+"&maxResults=1");if(users[0])payload.fields.assignee={accountId:users[0].accountId};}catch{}
+  }
+  if(epicKey&&epicKey.includes("-")){payload.fields.parent={key:epicKey};}
+  const result=await createIssue(payload);
+  if(result.success){
+    // transition to desired status
+    const status=document.getElementById("ct-status")?.value||"Selected";
+    if(status!=="To Do"&&status!=="Backlog")await transitionIssue(result.key,status);
+    msg.textContent="✓ Created "+result.key;msg.style.color="#3B6D11";
+    setTimeout(()=>{closeCreate();doFetch(true);},1200);
+  }else{msg.textContent="Failed to create. Check project permissions.";msg.style.color="#D6202B";btn.disabled=false;btn.innerHTML="Create in Jira";}
+}
+
+/* ══ SETTINGS ══ */
+function openSettings(tab){settingsTab=tab||"team";document.getElementById("settings-overlay").classList.add("open");renderSettings();}
+function closeSettings(){document.getElementById("settings-overlay").classList.remove("open");saveAll();populateIamSelector();populateGroupSelector();renderMain();}
+function setSettingsTab(t){settingsTab=t;document.querySelectorAll(".settings-tabs button").forEach((b,i)=>b.classList.toggle("active",["team","groups","projects","admin","credentials"][i]===t));renderSettings();}
+
+function renderSettings(){
+  const body=document.getElementById("settings-body");
+  if(settingsTab==="team"){
+    body.innerHTML=`
+      <div style="font-size:12px;color:#5D7987;padding:8px 10px;background:#E0F0F8;border-radius:6px;margin-bottom:8px">
+        <strong>Finding people:</strong> Search by first name, last name, or email. Try "Allison", "Harry", or part of their name.
+      </div>
+      <div style="display:flex;gap:8px">
+        <input class="form-input" id="user-search" placeholder="Search by name or email…" oninput="searchJiraUsers(this.value)" style="flex:1">
+        <button class="primary-btn" onclick="searchJiraUsers(document.getElementById('user-search').value)">Search</button>
+      </div>
+      <div id="user-results" style="max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:3px;margin-top:6px"></div>
+      <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-top:12px">Current team (${teamMembers.length} people)</div>
+      <div id="team-list" style="display:flex;flex-direction:column;gap:5px"></div>`;
+    renderTeamList();
+  }else if(settingsTab==="groups"){
+    const gnames=Object.keys(groups);
+    const activeGrp=window._activeGrpTab||(gnames[0]||null);
+    window._activeGrpTab=activeGrp;
+    if(!window.groupProjects) window.groupProjects={};
+
+    body.innerHTML=`
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+        <input class="form-input" id="new-group-name" placeholder="New group name…" style="flex:1" onkeydown="if(event.key==='Enter')createGroup()">
+        <button class="primary-btn" onclick="createGroup()">+ Create</button>
+      </div>
+
+      ${gnames.length===0
+        ? '<div style="font-size:13px;color:#9EA0A4;font-style:italic">No groups yet — create one above.</div>'
+        : `<div>
+            <div style="display:flex;gap:0;flex-wrap:wrap;border-bottom:2px solid #E4E6E8;margin-bottom:14px">
+              ${gnames.map(g=>`
+                <button onclick="window._activeGrpTab=${JSON.stringify(g)};renderSettings()"
+                  style="padding:8px 16px;font-size:12px;font-weight:700;cursor:pointer;border:none;background:transparent;
+                  border-bottom:3px solid ${g===activeGrp?'#2E99CE':'transparent'};margin-bottom:-2px;
+                  color:${g===activeGrp?'#2E99CE':'#9EA0A4'}">
+                  ${g} <span style="font-size:10px;background:${g===activeGrp?'#E0F0F8':'#EEF1F3'};color:${g===activeGrp?'#125462':'#9EA0A4'};border-radius:10px;padding:1px 6px;margin-left:3px">${(groups[g]||[]).length}</span>
+                </button>`).join('')}
+            </div>
+
+            ${activeGrp ? `
+            <div>
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+                <span style="font-size:14px;font-weight:700">${activeGrp}</span>
+                <button onclick="deleteGroup(${JSON.stringify(activeGrp)});window._activeGrpTab=null;renderSettings()"
+                  style="border:1px solid #D6202B;color:#D6202B;background:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px">Delete</button>
+              </div>
+
+              <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Members (${(groups[activeGrp]||[]).length})</div>
+              ${(groups[activeGrp]||[]).length===0
+                ? '<div style="font-size:13px;color:#9EA0A4;font-style:italic;margin-bottom:10px;padding:8px">No members yet</div>'
+                : `<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px">
+                    ${[...(groups[activeGrp]||[])].sort().map((m,idx)=>`
+                      <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;background:#E0F0F8;border:1px solid #2E99CE">
+                        ${ava(m,24)}
+                        <span style="flex:1;font-size:13px;font-weight:700;color:#125462">${m}</span>
+                        <button onclick="grpRemove(${JSON.stringify(activeGrp)},${idx})"
+                          style="background:none;border:none;cursor:pointer;color:#D6202B;font-size:18px;line-height:1;padding:2px 6px">×</button>
+                      </div>`).join('')}
+                  </div>`}
+
+              <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Add members</div>
+              <input class="form-input" id="grp-search-input" placeholder="Search Jira users by name…"
+                oninput="searchGroupUsers(${JSON.stringify(activeGrp)},this.value)" style="margin-bottom:6px">
+              <div id="grp-results" style="display:flex;flex-direction:column;gap:4px;max-height:140px;overflow-y:auto;margin-bottom:12px"></div>
+
+              ${teamMembers.filter(m=>!(groups[activeGrp]||[]).includes(m)).length>0
+                ? `<div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Quick add from team</div>
+                  <div style="display:flex;flex-direction:column;gap:4px;max-height:180px;overflow-y:auto;margin-bottom:14px">
+                    ${teamMembers.filter(m=>!(groups[activeGrp]||[]).includes(m)).sort().map((m,idx)=>`
+                      <div onclick="grpAdd(${JSON.stringify(activeGrp)},${idx})"
+                        style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;cursor:pointer;background:#F7F8F9;border:1px solid #E4E6E8">
+                        ${ava(m,24)}
+                        <span style="flex:1;font-size:13px;color:#292E37">${m}</span>
+                        <span style="font-size:16px;color:#5E8E38;font-weight:700">+</span>
+                      </div>`).join('')}
+                  </div>` : ''}
+
+              <div style="border-top:1px solid #E4E6E8;padding-top:12px">
+                <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Project scope</div>
+                <div style="font-size:12px;color:#9EA0A4;margin-bottom:8px">Uncheck to narrow this group to specific projects.</div>
+                <div style="max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
+                  ${allProjects.filter(p=>!excludedProjects.includes(p.key)).map(p=>{
+                    if(!window.groupProjects[activeGrp]) window.groupProjects[activeGrp]=[];
+                    const excl=window.groupProjects[activeGrp].includes(p.key);
+                    return`<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;background:#F7F8F9">
+                      <input type="checkbox" ${excl?'':'checked'} onchange="toggleGroupProject(${JSON.stringify(activeGrp)},'${p.key}',!this.checked)" style="cursor:pointer">
                       <span style="font-size:11px;font-weight:700;color:#257AA5;font-family:monospace">${p.key}</span>
                       <span style="font-size:12px;color:#292E37">${p.name}</span>
                     </div>`;
@@ -1197,6 +1549,12 @@ function toggleGroupProject(group, key, exclude){
   if(exclude){ if(!window.groupProjects[group].includes(key)) window.groupProjects[group].push(key); }
   else { window.groupProjects[group]=window.groupProjects[group].filter(k=>k!==key); }
 }
+
+
+/* Member name safe helper - avoids apostrophe issues in onclick */
+function grpAdd(g,idx){ const m=teamMembers.filter(x=>!(groups[g]||[]).includes(x)).sort()[idx]; if(m){toggleGroupMember(g,m,true);renderSettings();} }
+function grpRemove(g,idx){ const m=[...(groups[g]||[])].sort()[idx]; if(m){toggleGroupMember(g,m,false);renderSettings();} }
+function grpSearchAdd(g,name){ if(!teamMembers.includes(name))teamMembers.push(name); toggleGroupMember(g,name,true); renderSettings(); }
 
 
 /* ══ BOOT ══ */
