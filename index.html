@@ -257,7 +257,7 @@ button,select,textarea,input{font-family:inherit}
   <select class="proj-select" id="proj-filter" onchange="onProjFilter()"><option value="">All projects</option></select>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v18</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v19</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -518,12 +518,22 @@ function cardHtml(issue,showActiveBtn=false,compact=false,draggable=false){
 }
 
 /* ══ DRAG & DROP ══ */
-function onDragStart(e,key){dragKey=key;e.currentTarget.classList.add("dragging");e.dataTransfer.effectAllowed="move";}
-function onDragEnd(e){e.currentTarget.classList.remove("dragging");dragKey=null;document.querySelectorAll(".lane-drop-zone").forEach(z=>z.classList.remove("drag-over"));}
+function onDragStart(e,key){
+  dragKey=key; window._dragKey=key;
+  e.currentTarget.classList.add("dragging");
+  e.dataTransfer.effectAllowed="move";
+  e.dataTransfer.setData("text/plain",key);
+}
+function onDragEnd(e){
+  e.currentTarget.classList.remove("dragging");
+  setTimeout(()=>{dragKey=null;window._dragKey=null;},100);
+  document.querySelectorAll(".lane-drop-zone").forEach(z=>z.classList.remove("drag-over"));
+}
 function onDragOver(e,status){e.preventDefault();e.dataTransfer.dropEffect="move";e.currentTarget.classList.add("drag-over");}
 function onDragLeave(e){e.currentTarget.classList.remove("drag-over");}
 async function onDrop(e,status){
   e.preventDefault();e.currentTarget.classList.remove("drag-over");
+  if(!dragKey){dragKey=e.dataTransfer.getData("text/plain")||window._dragKey;}
   if(!dragKey)return;
   const issue=allIssues.find(i=>i.key===dragKey);
   if(!issue||normStatus(issue.status)===status)return;
@@ -533,6 +543,7 @@ async function onDrop(e,status){
 }
 async function onDropMatrix(e,status,priority){
   e.preventDefault();e.currentTarget.classList.remove("drag-over");
+  if(!dragKey){dragKey=e.dataTransfer.getData("text/plain")||window._dragKey;}
   if(!dragKey)return;
   const issue=allIssues.find(i=>i.key===dragKey);
   if(!issue)return;
@@ -1388,10 +1399,12 @@ async function renderMyEpics() {
     // Fetch ALL tasks for user's epics (not just managed team tasks)
     const epicKeys = myEpics.map(e=>e.key);
     let allEpicTasks = [];
+    myEpicsTasks = []; // Reset
     try {
       const jql = 'issueFunction in subtasksOf("issue in ('+epicKeys.join(',')+')") OR parent in ('+epicKeys.join(',')+') ORDER BY rank ASC';
       const td = await jiraGet('/rest/api/3/search/jql?jql='+encodeURIComponent(jql)+'&fields=summary,status,assignee,priority,issuetype,updated,parent&maxResults=200');
       allEpicTasks = (td.issues||[]).map(parseIssue);
+      myEpicsTasks = [...allEpicTasks];
     } catch {
       // fallback to allIssues
       allEpicTasks = allIssues.filter(i=>['Task','Sub-task'].includes(i.type)&&epicKeys.includes(i.parent_key));
@@ -1459,6 +1472,7 @@ async function renderMyEpics() {
 /* ══ PRIORITISATION BOARD ══════════════════════════════════════════ */
 let priIssues = [];
 let priEpics = [];
+let myEpicsTasks = []; // Tasks for My Epics drag reorder
 let priDragKey = null;
 let priDragEpic = null;
 // Also store on window for cross-event reliability
@@ -1666,11 +1680,12 @@ function priCardDropEl(e, el) {
   const rect = el.getBoundingClientRect();
   const before = e.clientY < rect.top + rect.height/2;
 
-  const taskIdx = priIssues.findIndex(t => t.key === priDragKey);
-  const targetIdx = priIssues.findIndex(t => t.key === targetKey);
+  const activeArr = currentView === 'myepics' ? myEpicsTasks : priIssues;
+  const taskIdx = activeArr.findIndex(t => t.key === priDragKey);
+  const targetIdx = activeArr.findIndex(t => t.key === targetKey);
   if(taskIdx === -1 || targetIdx === -1) return;
 
-  const [moved] = priIssues.splice(taskIdx, 1);
+  const [moved] = activeArr.splice(taskIdx, 1);
 
   // Move to different epic if needed
   if(priDragEpic !== targetEpic && targetEpic !== '__none__') {
@@ -1679,10 +1694,11 @@ function priCardDropEl(e, el) {
     jiraPut('/rest/api/3/issue/'+priDragKey, {fields:{parent:{key:targetEpic}}});
   }
 
-  const newTargetIdx = priIssues.findIndex(t => t.key === targetKey);
-  priIssues.splice(before ? newTargetIdx : newTargetIdx+1, 0, moved);
+  const newTargetIdx = activeArr.findIndex(t => t.key === targetKey);
+  activeArr.splice(before ? newTargetIdx : newTargetIdx+1, 0, moved);
 
-  renderPriBoard();
+  if(currentView === 'myepics') renderMyEpics();
+  else renderPriBoard();
 
   // Update rank in Jira
   const rankBody = before
@@ -1705,10 +1721,11 @@ async function priDrop(e, epicKey) {
   }
   if(!priDragKey) return;
 
-  const taskIdx = priIssues.findIndex(t => t.key === priDragKey);
+  const activeArr2 = currentView === 'myepics' ? myEpicsTasks : priIssues;
+  const taskIdx = activeArr2.findIndex(t => t.key === priDragKey);
   if(taskIdx === -1) return;
 
-  const [moved] = priIssues.splice(taskIdx, 1);
+  const [moved] = activeArr2.splice(taskIdx, 1);
 
   if(epicKey !== '__none__' && epicKey !== priDragEpic) {
     moved.parent_key = epicKey;
@@ -1716,8 +1733,10 @@ async function priDrop(e, epicKey) {
     jiraPut('/rest/api/3/issue/'+priDragKey, {fields:{parent:{key:epicKey}}});
   }
 
-  priIssues.push(moved);
-  renderPriBoard();
+  const activeArr2 = currentView === 'myepics' ? myEpicsTasks : priIssues;
+  activeArr2.push(moved);
+  if(currentView === 'myepics') renderMyEpics();
+  else renderPriBoard();
 
   const colTasks = priIssues.filter(t=>(t.parent_key||'__none__')===epicKey);
   if(colTasks.length > 1) {
