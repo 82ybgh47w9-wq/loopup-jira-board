@@ -373,7 +373,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v78</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v79</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -600,7 +600,10 @@ const STOR = "loopup-v6";
 const PROXY = "https://jira-proxy.82ybgh47w9.workers.dev";
 const KV = PROXY + "/kv";
 const ADMIN_EMAIL = "marcus.greensit@loopup.com";
-const DEFAULT_TEAM = ["Steve O'Reilly","Tim Hutchinson","Harry Newman","Marcus Greensit","Karl Smith","Graham Cropley","Andrew McIntyre","Elin Morgan","Steve Kirk"];
+// v79: team list is now auto-discovered from Jira data (assignee displayNames in fetched issues).
+// DEFAULT_TEAM kept as empty array purely so existing references compile; the array is no longer
+// the source of truth — teamMembers gets populated by fetchAllTeamIssues() after each load.
+const DEFAULT_TEAM = [];
 const STATUS_ROWS = ["Done","In Progress","Selected","Backlog"];
 const PRI_COLS = ["Highest","High","Medium","Low"];
 const PRI_ORD = {Highest:0,High:1,Medium:2,Low:3};
@@ -1052,11 +1055,12 @@ function buildADFFromTextarea(textareaId) {
 function parseIssue(i){const f=i.fields;return{key:i.key,summary:f.summary||"",type:f.issuetype?.name||"Task",status:f.status?.name||"Backlog",assignee:f.assignee?.displayName||"Unassigned",assigneeEmail:f.assignee?.emailAddress||"",priority:f.priority?.name||"Medium",updated:(f.updated||"").slice(0,10),parent_key:f.parent?.key||null,parent_summary:f.parent?.fields?.summary||"",parent_type:f.parent?.fields?.issuetype?.name||"",description:extractText(f.description),project:f.project?.key||i.key.split("-")[0],projectName:f.project?.name||"",subtasks:(f.subtasks||[]).map(s=>({key:s.key,summary:s.fields?.summary||"",status:s.fields?.status?.name||"",type:s.fields?.issuetype?.name||"Sub-task"})),epicLink:f.customfield_10014||null,commentCount:(f.comment?.total||0)};}
 
 async function fetchAllTeamIssues(){
-  const visibleTeam=getVisibleTeam();
-  const assignees=visibleTeam.map(m=>'"'+m+'"').join(",");
+  // v79: team list is auto-discovered from results — no more `assignee in (team)` pre-filter.
+  // The project-group scope already narrows the data appropriately, and discovering team
+  // members from real assignees means every user gets a fresh, accurate list with zero setup.
   const fields="summary,status,assignee,priority,issuetype,updated,parent,description,project,subtasks,customfield_10014,comment";
   const projScope = getActiveProjectsJQL();
-  let jql='assignee in ('+assignees+') AND statusCategory != Done ORDER BY updated DESC';
+  let jql='statusCategory != Done ORDER BY updated DESC';
   if(currentProjFilter) jql='project='+currentProjFilter+' AND '+jql;
   else if(projScope) jql=projScope+' AND '+jql;
   let all=[],token=null,iter=0;
@@ -1071,10 +1075,32 @@ async function fetchAllTeamIssues(){
     iter++;
   }
   appLogMsg("info","fetch","Active issues fetched: "+all.length+" (pages: "+(iter+1)+")");
-  let doneJql='assignee in ('+assignees+') AND statusCategory=Done AND updated>=-'+doneDays+'d ORDER BY updated DESC';
+  let doneJql='statusCategory=Done AND updated>=-'+doneDays+'d ORDER BY updated DESC';
   if(currentProjFilter) doneJql='project='+currentProjFilter+' AND '+doneJql;
   else if(projScope) doneJql=projScope+' AND '+doneJql;
   try{const dd=await jiraGet("/rest/api/3/search/jql?jql="+encodeURIComponent(doneJql)+"&fields="+fields+"&maxResults=50&startAt=0");all=all.concat((dd.issues||[]).map(parseIssue));}catch{}
+  // v79: auto-discover team members from this fetch's assignees.
+  // We add new names to teamMembers (never remove — leavers/inactive members fall off naturally
+  // as their issues age out of the active set, but we don't want a brief data hiccup to wipe
+  // someone's name from dropdowns mid-session).
+  const discovered = new Set();
+  for(const i of all) {
+    if(i.assignee && i.assignee !== 'Unassigned') discovered.add(i.assignee);
+  }
+  // Always include the logged-in user even if they have no current issues.
+  if(currentIam) discovered.add(currentIam);
+  let added = [];
+  for(const name of discovered) {
+    if(!teamMembers.includes(name)) {
+      teamMembers.push(name);
+      added.push(name);
+    }
+  }
+  if(added.length) {
+    teamMembers.sort();
+    saveAll();
+    appLogMsg('info','team','Auto-discovered new team members: '+added.join(', '));
+  }
   return all;
 }
 
