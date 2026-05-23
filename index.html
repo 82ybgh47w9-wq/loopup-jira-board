@@ -349,7 +349,7 @@ button,select,textarea,input{font-family:inherit}
   <!-- Right-aligned actions -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v73</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v74</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -2365,26 +2365,34 @@ function quickAddTaskFromBtn(btn) {
 
 
 async function pushRankToJira(rankBody) {
-  appLogMsg("info","jira","Pushing rank",rankBody);
+  appLogMsg("info","jira","Pushing rank (PUT /rest/agile/1.0/issue/rank)",rankBody);
   const indicator = document.createElement('div');
   indicator.id = 'rank-saving';
   indicator.style.cssText = 'position:fixed;bottom:16px;right:16px;background:#125462;color:#fff;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.2)';
   indicator.textContent = '↑ Saving order to Jira…';
   document.body.appendChild(indicator);
   try {
-    const r = await jiraPost('/rest/agile/1.0/issue/rank', rankBody);
+    // Jira's rank endpoint requires PUT, not POST.
+    const r = await jiraPut('/rest/agile/1.0/issue/rank', rankBody);
     if(r.ok || r.status === 204) {
       indicator.textContent = '✓ Order saved to Jira';
       indicator.style.background = '#5E8E38';
+      appLogMsg("info","jira","Rank saved successfully (status "+r.status+")");
     } else {
-      indicator.textContent = '⚠ Reorder saved locally (Jira rank API unavailable)';
+      // 207 = partial success (some issues ranked, some failed)
+      let bodyText = '';
+      try { bodyText = await r.text(); } catch{}
+      const detail = bodyText ? ' — '+bodyText.slice(0,200) : '';
+      indicator.textContent = '⚠ Reorder saved locally (Jira returned '+r.status+')';
       indicator.style.background = '#E08000';
+      appLogMsg("warn","jira","Rank API returned "+r.status+detail);
     }
   } catch(e) {
     indicator.textContent = '⚠ Could not save order to Jira';
     indicator.style.background = '#D6202B';
+    appLogMsg("error","jira","Rank API exception: "+e.message);
   }
-  setTimeout(() => { if(indicator.parentNode) indicator.parentNode.removeChild(indicator); }, 2500);
+  setTimeout(() => { if(indicator.parentNode) indicator.parentNode.removeChild(indicator); }, 3500);
 }
   
 /* ══ PROJECT GROUP MODAL ══════════════════════════════════════════ */
