@@ -373,7 +373,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v77</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v78</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -4001,12 +4001,38 @@ async function loadActivity() {
     // v76: quote Sub-task in JQL — hyphenated values without quotes break parsing on some instances.
     const typeFilter = 'issuetype in (Epic, Task, "Sub-task")';
     const jqlA = '(assignee = "'+personEsc+'") AND '+typeFilter+' AND updated >= -'+doneDays+'d ORDER BY updated DESC';
-    // v76: Query B intentionally OMITS the issuetype filter — we want to catch @mentions wherever
-    // they appear (a comment on an Initiative or Legend is rare but real). Client-side filter still
-    // applies isMine/isMyIssue/isMention rules, so over-fetch is safe.
-    // Also drop the inner phrase quotes from text~ — Lucene matches multi-word values as phrase-like
-    // already, and the escaped form was excluding some mentions on some instances.
-    const jqlB = '(commentAuthor = "'+personEsc+'" OR text ~ "'+personEsc+'") AND updated >= -'+doneDays+'d ORDER BY updated DESC';
+    // v78: Use accountId, not just displayName, for Query B.
+    // Why: commentAuthor's displayName lookup is flaky/laggy in Jira Cloud, and ADF mention nodes
+    // store the user reference as accountId (attrs.id) — the text index reliably tokenises that,
+    // even when it misses attrs.text (the "@Display Name" form). Without accountId we keep missing
+    // comments like COPS-68 where the user authored a comment but commentAuthor JQL can't find it.
+    // Fetch accountId once via /rest/api/3/myself (cached on window._myAccountId).
+    if(!window._myAccountId) {
+      try {
+        const me = await jiraGet('/rest/api/3/myself');
+        if(me && me.accountId) {
+          window._myAccountId = me.accountId;
+          appLogMsg('info','activity','Resolved current user accountId: '+me.accountId);
+        }
+      } catch(e) {
+        appLogMsg('warn','activity','Could not fetch /myself: '+(e.message||e));
+      }
+    }
+    const acctId = window._myAccountId || '';
+    // Build Query B with up to 4 OR clauses to maximise recall:
+    //   - commentAuthor = displayName (original — works when user-lookup index is healthy)
+    //   - commentAuthor = accountId    (preferred — bypasses the displayName lookup)
+    //   - text ~ displayName           (catches mentions of "Marcus Greensit" in plaintext)
+    //   - text ~ accountId             (catches @mention attrs.id reliably)
+    const clauses = [
+      'commentAuthor = "'+personEsc+'"',
+      'text ~ "'+personEsc+'"',
+    ];
+    if(acctId) {
+      clauses.push('commentAuthor = "'+acctId+'"');
+      clauses.push('text ~ "'+acctId+'"');
+    }
+    const jqlB = '('+clauses.join(' OR ')+') AND updated >= -'+doneDays+'d ORDER BY updated DESC';
     appLogMsg('info','activity','Activity JQL A (assignee): '+jqlA);
     appLogMsg('info','activity','Activity JQL B (mentions/authored): '+jqlB);
 
