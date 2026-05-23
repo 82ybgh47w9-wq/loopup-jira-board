@@ -368,10 +368,12 @@ button,select,textarea,input{font-family:inherit}
     <span style="color:#C9CACC">⌕</span>
     <input id="search-input" placeholder="Search tasks…" oninput="renderMain()" style="width:100%;font-size:13px;border:none;outline:none;background:transparent">
   </div>
-  <!-- Right-aligned actions -->
-  <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+  <!-- Right-aligned actions: v76 — added margin-left:auto so they stay right even when the
+       search box is hidden (which happens on Comments view via setView). Without this the
+       search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
+  <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v75</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v76</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -3996,9 +3998,15 @@ async function loadActivity() {
     // Why split: Query A doesn't depend on Jira's flaky commentAuthor index (assignee is rock-solid),
     // so it reliably catches every comment on my own tasks even when index lags.
     const personEsc = person.replace(/"/g, '\\\\"');
-    const typeFilter = 'issuetype in (Epic, Task, Sub-task)';
+    // v76: quote Sub-task in JQL — hyphenated values without quotes break parsing on some instances.
+    const typeFilter = 'issuetype in (Epic, Task, "Sub-task")';
     const jqlA = '(assignee = "'+personEsc+'") AND '+typeFilter+' AND updated >= -'+doneDays+'d ORDER BY updated DESC';
-    const jqlB = '(commentAuthor = "'+personEsc+'" OR text ~ "\\"'+personEsc+'\\"") AND '+typeFilter+' AND updated >= -'+doneDays+'d ORDER BY updated DESC';
+    // v76: Query B intentionally OMITS the issuetype filter — we want to catch @mentions wherever
+    // they appear (a comment on an Initiative or Legend is rare but real). Client-side filter still
+    // applies isMine/isMyIssue/isMention rules, so over-fetch is safe.
+    // Also drop the inner phrase quotes from text~ — Lucene matches multi-word values as phrase-like
+    // already, and the escaped form was excluding some mentions on some instances.
+    const jqlB = '(commentAuthor = "'+personEsc+'" OR text ~ "'+personEsc+'") AND updated >= -'+doneDays+'d ORDER BY updated DESC';
     appLogMsg('info','activity','Activity JQL A (assignee): '+jqlA);
     appLogMsg('info','activity','Activity JQL B (mentions/authored): '+jqlB);
 
@@ -4037,9 +4045,12 @@ async function loadActivity() {
     // Cap at 30 issues to avoid hammering the API.
     try {
       const knownKeys = new Set(issues.map(i => i.key));
+      // v76 fix: allIssues holds PARSED items (i.assignee is the displayName string),
+      // not raw Jira shape (i.fields.assignee.displayName). The old check was always false,
+      // so the supplemental fetch silently no-op'd since v69. Use the parsed shape now.
       const myAssignedKeys = (allIssues || [])
         .filter(i => {
-          const a = (i.fields?.assignee?.displayName) || '';
+          const a = i.assignee || '';
           return a === person && !knownKeys.has(i.key);
         })
         .slice(0, 30)
