@@ -396,7 +396,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v84</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v85</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -1166,11 +1166,13 @@ async function createIssue(payload){
 /* ══ AI EPIC SEARCH ══ */
 async function searchEpicsWithAI(taskName,projectKey){
   try{
-    // v84: restrict AI suggestions to actual Epics. Previously this included
-    // Legend / Initiative / Milestone, so clicking a "suggestion" could silently
-    // set selEpic to a Legend key — meaning the task got created under that
-    // Legend's project root rather than under a real Epic.
-    const jql='issuetype = Epic'+( projectKey?' AND project='+projectKey:'')+ ' ORDER BY updated DESC';
+    // v85: include Milestone as a valid task parent. LoopUp's MKT-style
+    // projects use Milestones (e.g. MKT-508) at the level other projects use
+    // Epics — tasks attach directly under them. Restricting to just Epic
+    // returned zero results in those projects, which is what made the
+    // search "flash and show nothing". Legend / Initiative stay excluded
+    // because they're too high in the hierarchy to be direct task parents.
+    const jql='issuetype in (Epic, Milestone)'+( projectKey?' AND project='+projectKey:'')+ ' ORDER BY updated DESC';
     const d=await jiraGet("/rest/api/3/search/jql?jql="+encodeURIComponent(jql)+"&fields=summary,issuetype,project,status&maxResults=50");
     const epics=(d.issues||[]).map(i=>({key:i.key,summary:i.fields.summary,type:i.fields.issuetype?.name,project:i.fields.project?.name,status:i.fields.status?.name}));
     const r=await fetch(PROXY+"/ai",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({task:taskName,epics})});
@@ -2543,11 +2545,28 @@ function renderCreateModal() {
     ${!s.projectKey?`<div style="text-align:center;padding:40px 20px;color:#C9CACC"><div style="font-size:32px;margin-bottom:8px">↑</div><div style="font-size:14px;font-weight:600;color:#9EA0A4">Select a project to get started</div></div>`:`
     <div style="margin-bottom:14px"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Task name <span style="color:#D6202B">*</span></div>
       <input id="cr-summary" class="form-input" value="${s.summary}" placeholder="What needs to be done?" oninput="createState.summary=this.value;scheduleAiSearch();updateCreateButtonState()" style="font-size:14px;height:38px;padding:0 12px;border-radius:8px;border:1px solid #E4E6E8;width:100%;box-sizing:border-box"></div>
-    <div style="margin-bottom:14px"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Select epic</div>
-      ${s.aiLoading?`<div style="padding:8px;font-size:12px;color:#9EA0A4">${spinHtml(14)} Finding matching epics…</div>`:''}
+    <div style="margin-bottom:14px"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center"><span>Select parent (Epic or Milestone)</span><span style="font-weight:600;color:#C9CACC;text-transform:none;letter-spacing:0">${(()=>{const list=[...s.aiSuggestions,...(s.epics||[]).filter(ep=>!s.aiSuggestions.find(a=>a.key===ep.key))];const ep=list.filter(x=>x.type==='Epic'||!x.type).length;const ms=list.filter(x=>x.type==='Milestone').length;return list.length?(ep+' epics · '+ms+' milestones'):'';})()}</span></div>
+      ${s.aiLoading?`<div style="padding:8px;font-size:12px;color:#9EA0A4">${spinHtml(14)} Finding matching parents…</div>`:''}
+      <input id="cr-epic-filter" placeholder="🔍 Filter by key or summary…" value="${s.epicFilter||''}" oninput="createState.epicFilter=this.value;renderCreateModal();setTimeout(()=>{const el=document.getElementById('cr-epic-filter');if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length);}},10)" style="width:100%;padding:6px 10px;font-size:12px;border:1px solid #E4E6E8;border-radius:6px;margin-bottom:6px;box-sizing:border-box">
       ${s.aiSuggestions.length?`<div style="font-size:10px;color:#5E8E38;font-weight:700;margin-bottom:4px">✦ Suggested</div>`:''}
-      <div style="max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
-        ${[...s.aiSuggestions,...(s.epics||[]).filter(ep=>!s.aiSuggestions.find(a=>a.key===ep.key))].map(ep=>{const sel=s.selEpic===ep.key;const isSug=!!s.aiSuggestions.find(a=>a.key===ep.key);return`<div onclick="selectEpicSuggestion('${ep.key}','${(ep.summary||'').replace(/'/g,"\\'")}','${ep.project||''}')" style="display:flex;align-items:center;gap:8px;padding:${isSug?'8':'7'}px 10px;border-radius:8px;cursor:pointer;border:${sel?'2px solid #2E99CE':isSug?'1px solid #E4E6E8':'1px solid #EEF1F3'};background:${sel?'#E0F0F8':isSug?'#fff':'#F7F8F9'}"><span style="font-size:10px;font-weight:700;color:#257AA5;font-family:monospace">${ep.key}</span><span style="font-size:12px;color:#292E37;flex:1">${ep.summary||''}</span>${sel?'<span style="color:#2E99CE;font-weight:700">✓</span>':''}</div>`;}).join('')}
+      <div style="max-height:320px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;border:1px solid #EEF1F3;border-radius:8px;padding:4px;background:#FCFCFD">
+        ${(()=>{
+          const filt=(s.epicFilter||'').toLowerCase().trim();
+          const combined=[...s.aiSuggestions,...(s.epics||[]).filter(ep=>!s.aiSuggestions.find(a=>a.key===ep.key))];
+          const visible=filt?combined.filter(ep=>(ep.key||'').toLowerCase().includes(filt)||(ep.summary||'').toLowerCase().includes(filt)):combined;
+          if(!visible.length){
+            return '<div style="padding:16px;text-align:center;color:#9EA0A4;font-size:12px">'+(filt?'No matches for "'+filt+'"':combined.length?'':'No epics or milestones found in this project — use "+ Create" below to add one')+'</div>';
+          }
+          return visible.map(ep=>{
+            const sel=s.selEpic===ep.key;
+            const isSug=!!s.aiSuggestions.find(a=>a.key===ep.key);
+            const t=ep.type||'Epic';
+            const isMs=t==='Milestone';
+            const typeBg=isMs?'#E0F0F8':'#F3EEFF';
+            const typeC=isMs?'#125462':'#6B3FA0';
+            return`<div onclick="selectEpicSuggestion('${ep.key}','${(ep.summary||'').replace(/'/g,"\\'")}','${ep.project||''}')" style="display:flex;align-items:center;gap:8px;padding:${isSug?'8':'7'}px 10px;border-radius:8px;cursor:pointer;border:${sel?'2px solid #2E99CE':isSug?'1px solid #E4E6E8':'1px solid #EEF1F3'};background:${sel?'#E0F0F8':isSug?'#fff':'#F7F8F9'}"><span style="font-size:9px;font-weight:700;background:${typeBg};color:${typeC};padding:2px 6px;border-radius:8px;text-transform:uppercase;letter-spacing:.04em">${t}</span><span style="font-size:10px;font-weight:700;color:#257AA5;font-family:monospace">${ep.key}</span><span style="font-size:12px;color:#292E37;flex:1">${ep.summary||''}</span>${sel?'<span style="color:#2E99CE;font-weight:700">✓</span>':''}</div>`;
+          }).join('');
+        })()}
       </div>
       ${!s.showHierarchy?`<button onclick="createState.showHierarchy=true;renderCreateModal()" style="margin-top:8px;font-size:11px;color:#257AA5;background:none;border:1px dashed #C9CACC;border-radius:6px;padding:6px 12px;cursor:pointer;width:100%">+ Create a new epic (show hierarchy)</button>`:''}</div>
     ${s.showHierarchy?`<div style="background:#F7F8F9;border-radius:10px;padding:12px;margin-bottom:14px;border:1px solid #E4E6E8"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Link to hierarchy</div><div id="hierarchy-rows"></div></div>`:''}
@@ -2598,10 +2617,13 @@ async function loadCreateHierarchy() {
   const proj = createState.projectKey;
   if(!proj) return;
   try {
+    // v85: include Milestone alongside Epic — both are valid direct parents
+    // for a Task in LoopUp's hierarchy. We keep them in the same list and
+    // tag each row with its type so the user can tell them apart.
     const [ld, id, ed] = await Promise.all([
       jiraGet('/rest/api/3/search/jql?jql='+encodeURIComponent('project='+proj+' AND issuetype=Legend ORDER BY created ASC')+'&fields=summary,issuetype,parent&maxResults=50'),
       jiraGet('/rest/api/3/search/jql?jql='+encodeURIComponent('project='+proj+' AND issuetype=Initiative ORDER BY created ASC')+'&fields=summary,issuetype,parent&maxResults=100'),
-      jiraGet('/rest/api/3/search/jql?jql='+encodeURIComponent('project='+proj+' AND issuetype=Epic ORDER BY created ASC')+'&fields=summary,issuetype,parent&maxResults=100'),
+      jiraGet('/rest/api/3/search/jql?jql='+encodeURIComponent('project='+proj+' AND issuetype in (Epic, Milestone) ORDER BY updated DESC')+'&fields=summary,issuetype,parent&maxResults=150'),
     ]);
     createState.legends = (ld.issues||[]).map(parseIssue);
     createState.initiatives = (id.issues||[]).map(parseIssue);
