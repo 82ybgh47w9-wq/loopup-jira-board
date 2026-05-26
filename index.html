@@ -436,7 +436,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v94</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v95</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -3835,7 +3835,47 @@ async function submitCreate(){
     }
 
     closeCreate();
-    doFetch(false);
+    // v95: optimistically insert the new task into allIssues so the user
+    // sees it on the board immediately. Without this, the doFetch below can
+    // miss the new issue (Jira's search index has 1-2s of lag between create
+    // and indexed-for-search), and the user is left thinking the create
+    // didn't work.
+    try {
+      const optimisticIssue = {
+        key: newKey,
+        summary: s.summary.trim(),
+        type: 'Task',
+        status: s.status || 'Selected',
+        assignee: s.assignee || 'Unassigned',
+        assigneeEmail: '',
+        priority: s.priority || 'Medium',
+        updated: new Date().toISOString().slice(0,10),
+        parent_key: s.selEpic || null,
+        parent_summary: '',
+        parent_type: '',
+        description: s.description || '',
+        project: s.projectKey,
+        projectName: (allProjects.find(p=>p.key===s.projectKey)||{}).name || '',
+        subtasks: [],
+        epicLink: s.selEpic || null,
+        commentCount: 0,
+        _justCreated: true
+      };
+      // Pull parent_summary / parent_type from createState cache if we have it
+      const parent = (s.epics||[]).find(e=>e.key===s.selEpic);
+      if(parent){
+        optimisticIssue.parent_summary = parent.summary || '';
+        optimisticIssue.parent_type = parent.type || '';
+      }
+      // De-dup just in case
+      if(!allIssues.find(i=>i.key===newKey)) allIssues.unshift(optimisticIssue);
+      try { updateStats(); } catch{}
+      try { renderMain(); } catch{}
+      appLogMsg('info','create','Optimistically inserted '+newKey+' into local board');
+    } catch(e) { appLogMsg('warn','create','Optimistic insert failed: '+(e.message||e)); }
+    // Then run a proper fetch after a short delay so Jira's index catches up
+    // and we replace the optimistic stub with the real, complete record.
+    setTimeout(()=>doFetch(true), 1500);
 
     // Show success toast
     const toast = document.createElement('div');
