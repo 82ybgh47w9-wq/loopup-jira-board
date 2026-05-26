@@ -436,7 +436,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v96</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v98</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -2238,8 +2238,37 @@ function openPane(key){
 }
 function closePaneOverlay(){document.getElementById("pane-overlay").classList.remove("open");openIssue=null;}
 
+// v98: pane-header colour palette per issue type. Mirrors Jira's own typing —
+// purple Epic, teal Milestone, green Task/Story, grey Sub-task, orange Legend,
+// deeper purple Initiative — so the user can tell at a glance what level of
+// the hierarchy they're looking at. Each entry is [gradient-from, gradient-to,
+// active-text-color] so the contained badges/buttons match.
+const PANE_HDR_PALETTE = {
+  'Epic':       ['#6B3FA0', '#8F6AC8', '#6B3FA0'],
+  'Milestone':  ['#125462', '#257AA5', '#125462'],
+  'Initiative': ['#5A2D8F', '#8F6AC8', '#6B3FA0'],
+  'Legend':     ['#9A4500', '#C47A3A', '#9A4500'],
+  'Task':       ['#3D6B1E', '#5E8E38', '#3D6B1E'],
+  'Story':      ['#3D6B1E', '#5E8E38', '#3D6B1E'],
+  'Bug':        ['#A32D2D', '#D6202B', '#A32D2D'],
+  'Sub-task':   ['#5D7987', '#73777C', '#5D7987'],
+  'Subtask':    ['#5D7987', '#73777C', '#5D7987']
+};
+function getPaneHdrStyle(type){
+  const p = PANE_HDR_PALETTE[type] || ['#125462', '#257AA5', '#125462'];
+  return {
+    bg: 'linear-gradient(135deg,'+p[0]+','+p[1]+')',
+    activeColor: p[2]
+  };
+}
+
 function renderPaneHdr(i){
   const isActive=activeFlags[i.assignee]===i.key;
+  // v98: paint the header with a type-coloured gradient so it's instantly
+  // obvious whether you're looking at an Epic, Milestone, Task, etc.
+  const pal = getPaneHdrStyle(i.type);
+  const paneEl = document.getElementById("pane-hdr");
+  if(paneEl) paneEl.style.background = pal.bg;
   document.getElementById("pane-hdr").innerHTML=`
     <div style="display:flex;justify-content:space-between;align-items:flex-start">
       <div style="flex:1;margin-right:10px">
@@ -2261,7 +2290,7 @@ function renderPaneHdr(i){
         <span style="font-size:10px;color:rgba(255,255,255,.55);font-weight:600;margin-left:2px">✎</span>
       </div>
       <button onclick="(async()=>{await toggleActive('${i.assignee.replace(/'/g,"\\'")}','${i.key}');renderPaneHdr(openIssue)})();renderMain()"
-        style="margin-left:auto;font-size:11px;padding:4px 10px;border-radius:12px;border:none;cursor:pointer;font-weight:700;${isActive?"background:#fff;color:#125462":"background:rgba(255,255,255,.2);color:#fff"}">
+        style="margin-left:auto;font-size:11px;padding:4px 10px;border-radius:12px;border:none;cursor:pointer;font-weight:700;${isActive?'background:#fff;color:'+pal.activeColor:'background:rgba(255,255,255,.2);color:#fff'}">
         ${isActive?"● Active — clear":"○ Set as active"}
       </button>
     </div>`;
@@ -3869,6 +3898,16 @@ async function submitCreate(){
       }
       // De-dup just in case
       if(!allIssues.find(i=>i.key===newKey)) allIssues.unshift(optimisticIssue);
+      // v97: also push the new task into priIssues if the user is on Prioritise,
+      // so it appears immediately under its parent column. priIssues is a
+      // separate cache from allIssues, fed by loadPriBoard — the optimistic
+      // update to allIssues alone wasn't reflected on the Prioritise board.
+      if(typeof priIssues !== 'undefined' && currentView === 'prioritise'){
+        if(!priIssues.find(t => t.key === newKey)){
+          priIssues.unshift(optimisticIssue);
+          try { renderPriBoard(); } catch{}
+        }
+      }
       try { updateStats(); } catch{}
       try { renderMain(); } catch{}
       appLogMsg('info','create','Optimistically inserted '+newKey+' into local board');
@@ -3876,6 +3915,12 @@ async function submitCreate(){
     // Then run a proper fetch after a short delay so Jira's index catches up
     // and we replace the optimistic stub with the real, complete record.
     setTimeout(()=>doFetch(true), 1500);
+    // v97: also force-reload the Prioritise board if we're on that view, so
+    // the optimistic stub is replaced with the real Jira data (and any other
+    // tasks the user created in parallel show up too).
+    if(currentView === 'prioritise'){
+      setTimeout(()=>{ try { loadPriBoard(true); } catch{} }, 1800);
+    }
 
     // Show success toast
     const toast = document.createElement('div');
@@ -5051,6 +5096,13 @@ function renderGroupSearchResults(groupName, users){
 
 
 function priCardHtml(t, rank) {
+  // v98: apply local status/priority overrides via gm() so a status change in
+  // the side panel (which writes to locStat) shows up on the card immediately,
+  // even if priIssues still has the stale Jira value. Previously the card
+  // rendered `t.status` raw, so a Done transition wouldn't reflect on the
+  // board until a full re-fetch of priIssues — and the v92 cache-skip meant
+  // that re-fetch often never happened on minor status edits.
+  t = gm(t);
   const sc = SC[t.status] || SC.Backlog;
   const pc = PC[t.priority] || PC.Medium;
   const isUnassigned = t.assignee === 'Unassigned';
@@ -5388,19 +5440,39 @@ async function loadPriBoard(force) {
 
   try {
     const fields = 'summary,status,assignee,priority,issuetype,parent,customfield_10014';
-    // Fetch epics/milestones — only filter out Done epics if Show Done is off (saves a Jira round-trip)
     const showDone = getShowDone('prioritise');
     const epicDoneClause = showDone ? '' : ' AND statusCategory != Done';
-    const epicJql = `project=${projKey} AND issuetype in (Epic,Milestone,Initiative,Legend)${epicDoneClause} ORDER BY created ASC`;
-    const epicD = await jiraGet('/rest/api/3/search/jql?jql=' + encodeURIComponent(epicJql) + '&fields=' + fields + '&maxResults=100');
-    priEpics = (epicD.issues || []).map(parseIssue);
-
-    // Fetch all tasks — same Done handling
     const taskDoneClause = showDone ? '' : ' AND statusCategory != Done';
-    const taskJql = `project=${projKey} AND issuetype in (Task,"Sub-task")${taskDoneClause} ORDER BY rank ASC`;
-    const taskD = await jiraGet('/rest/api/3/search/jql?jql=' + encodeURIComponent(taskJql) + '&fields=' + fields + '&maxResults=200');
-    priIssues = (taskD.issues || []).map(parseIssue);
 
+    // v97: paginate both fetches. Previously the Tasks fetch was capped at
+    // 200 items; large projects like MKT have many more, so lower-ranked
+    // tasks (including freshly-created ones and older items under specific
+    // epics like MKT-521) were silently dropped from the board. We now use
+    // the same nextPageToken-loop pattern as fetchAllTeamIssues so every
+    // task is loaded into priIssues. Same for epics — cap raised by paging.
+    async function paginatedJql(jql, hardLimit){
+      let all = [], token = null, iter = 0;
+      // hardLimit guards against runaway loops on misconfigured projects.
+      while(iter < (hardLimit||20)){
+        let u = '/rest/api/3/search/jql?jql=' + encodeURIComponent(jql) + '&fields=' + fields + '&maxResults=100';
+        if(token) u += '&nextPageToken=' + encodeURIComponent(token);
+        const d = await jiraGet(u);
+        const issues = d.issues || [];
+        all = all.concat(issues.map(parseIssue));
+        if(d.isLast === true || !issues.length || !d.nextPageToken) break;
+        token = d.nextPageToken;
+        iter++;
+      }
+      return all;
+    }
+
+    const epicJql = `project=${projKey} AND issuetype in (Epic,Milestone,Initiative,Legend)${epicDoneClause} ORDER BY created ASC`;
+    priEpics = await paginatedJql(epicJql, 10); // up to 1000 epic-level items
+
+    const taskJql = `project=${projKey} AND issuetype in (Task,"Sub-task")${taskDoneClause} ORDER BY rank ASC`;
+    priIssues = await paginatedJql(taskJql, 30); // up to 3000 tasks/sub-tasks
+
+    appLogMsg('info','prioritise','Loaded '+projKey+' — '+priEpics.length+' epics, '+priIssues.length+' tasks');
     renderPriBoard();
     // v82: stats bar now follows the active board — refresh after priIssues populates
     try { updateStats(); } catch {}
@@ -5476,17 +5548,23 @@ function renderPriBoard() {
       (epicTasks.length > 0 && epicTasks.every(t => normStatus(t.status) === 'Done'));
     if(epicIsDone) col.classList.add('epic-done');
     col.innerHTML = `
-      <div class="pri-epic-hdr" style="${epicIsDone ? 'background:#F0FAEC' : ''}">
+      <!-- v97: header is fully clickable. Clicking anywhere on the header (other
+           than the inner anchors / + button which stopPropagation) opens the
+           Epic/Milestone in the detail card so the user can assign Legend +
+           Initiative parents via the v89 parent picker if they're missing. -->
+      <div class="pri-epic-hdr" onclick="openPane('${epic.key}')" title="Open ${epic.key} to edit hierarchy / parent" style="cursor:pointer;${epicIsDone ? 'background:#F0FAEC' : ''}">
         <div style="display:flex;align-items:center;gap:5px;margin-bottom:3px;flex-wrap:wrap">
           ${legend ? `<a href="${BASE()}${legend.key}" target="_blank" onclick="event.stopPropagation()"
             style="font-size:9px;font-weight:700;color:#9A4500;background:#FFF0E6;padding:1px 6px;border-radius:3px;text-decoration:none;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block"
-            title="${legend.summary||''}">${legend.key} · ${(legend.summary||'').slice(0,18)}${(legend.summary||'').length>18?'…':''}</a>` : ''}
+            title="${legend.summary||''}">${legend.key} · ${(legend.summary||'').slice(0,18)}${(legend.summary||'').length>18?'…':''}</a>` :
+            `<span onclick="event.stopPropagation();openPane('${epic.key}')" style="font-size:9px;font-weight:700;color:#9A4500;background:#FFF0E6;padding:1px 6px;border-radius:3px;cursor:pointer;border:1px dashed #E08000" title="No Legend linked — click to set">+ Set Legend</span>`}
           ${initiative ? `<a href="${BASE()}${initiative.key}" target="_blank" onclick="event.stopPropagation()"
             style="font-size:9px;font-weight:700;color:#6B3FA0;background:#F3EEFF;padding:1px 6px;border-radius:3px;text-decoration:none;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block"
-            title="${initiative.summary||''}">${initiative.key} · ${(initiative.summary||'').slice(0,18)}${(initiative.summary||'').length>18?'…':''}</a>` : ''}
+            title="${initiative.summary||''}">${initiative.key} · ${(initiative.summary||'').slice(0,18)}${(initiative.summary||'').length>18?'…':''}</a>` :
+            `<span onclick="event.stopPropagation();openPane('${epic.key}')" style="font-size:9px;font-weight:700;color:#6B3FA0;background:#F3EEFF;padding:1px 6px;border-radius:3px;cursor:pointer;border:1px dashed #8F6AC8" title="No Initiative linked — click to set">+ Set Initiative</span>`}
         </div>
         <div class="pri-epic-title">
-          <a href="${BASE()}${epic.key}" target="_blank" style="font-size:10px;font-family:monospace;color:#257AA5;font-weight:700">${epic.key}</a>
+          <a href="${BASE()}${epic.key}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;font-family:monospace;color:#257AA5;font-weight:700">${epic.key}</a>
           ${epic.summary}
         </div>
         <div class="pri-epic-meta">
@@ -5668,6 +5746,8 @@ function priCardDragLeaveH(e) {
 
 // Horizontal task card HTML — narrower, optimised for left-to-right flow
 function priCardHtmlH(t, rank) {
+  // v98: same gm() override as priCardHtml — see comment there.
+  t = gm(t);
   const sc = SC[t.status] || SC.Backlog;
   const pc = PC[t.priority] || PC.Medium;
   const isUnassigned = t.assignee === 'Unassigned';
@@ -5857,20 +5937,25 @@ function renderPriBoardHorizontal() {
       const epicOpacity = epicIsDoneH ? ';opacity:0.85' : '';
       const epicSumStyle = epicIsDoneH ? 'font-size:12px;font-weight:700;color:#2D7A2D;line-height:1.3;cursor:pointer;text-decoration:line-through' : 'font-size:12px;font-weight:700;color:#125462;line-height:1.3;cursor:pointer';
       // Epic card (sticky-left within its row — stays in view as tasks scroll horizontally)
+      // v97: whole epic card is clickable (was just the summary line). Lets the
+      // user click any blank part of the card to open the detail panel and
+      // edit the hierarchy. Missing Legend/Initiative show "+ Set …" pills.
       const epicCardHtml = `
-        <div style="width:280px;min-width:280px;flex-shrink:0;background:${epicCardBg};border:1px solid #C8E6F7;border-left:3px solid ${epicCardBorder};border-radius:8px;padding:8px 10px;margin-right:10px;display:flex;flex-direction:column;gap:4px;position:sticky;left:0;z-index:2;box-shadow:2px 0 6px -2px rgba(0,0,0,0.12)${epicOpacity}">
+        <div onclick="openPane('${epic.key}')" title="Open ${epic.key} to edit hierarchy / parent" style="width:280px;min-width:280px;flex-shrink:0;background:${epicCardBg};border:1px solid #C8E6F7;border-left:3px solid ${epicCardBorder};border-radius:8px;padding:8px 10px;margin-right:10px;display:flex;flex-direction:column;gap:4px;position:sticky;left:0;z-index:2;box-shadow:2px 0 6px -2px rgba(0,0,0,0.12);cursor:pointer${epicOpacity}">
           <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
             ${legend ? `<a href="${BASE()}${legend.key}" target="_blank" onclick="event.stopPropagation()"
               style="font-size:9px;font-weight:700;color:#9A4500;background:#FFF0E6;padding:1px 5px;border-radius:3px;text-decoration:none;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block"
-              title="${(legend.summary||'').replace(/"/g,'&quot;')}">${legend.key} · ${(legend.summary||'').slice(0,14)}${(legend.summary||'').length>14?'…':''}</a>` : ''}
+              title="${(legend.summary||'').replace(/"/g,'&quot;')}">${legend.key} · ${(legend.summary||'').slice(0,14)}${(legend.summary||'').length>14?'…':''}</a>` :
+              `<span onclick="event.stopPropagation();openPane('${epic.key}')" style="font-size:9px;font-weight:700;color:#9A4500;background:#FFF0E6;padding:1px 5px;border-radius:3px;cursor:pointer;border:1px dashed #E08000" title="No Legend linked — click to set">+ Set Legend</span>`}
             ${initiative ? `<a href="${BASE()}${initiative.key}" target="_blank" onclick="event.stopPropagation()"
               style="font-size:9px;font-weight:700;color:#6B3FA0;background:#F3EEFF;padding:1px 5px;border-radius:3px;text-decoration:none;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block"
-              title="${(initiative.summary||'').replace(/"/g,'&quot;')}">${initiative.key} · ${(initiative.summary||'').slice(0,14)}${(initiative.summary||'').length>14?'…':''}</a>` : ''}
+              title="${(initiative.summary||'').replace(/"/g,'&quot;')}">${initiative.key} · ${(initiative.summary||'').slice(0,14)}${(initiative.summary||'').length>14?'…':''}</a>` :
+              `<span onclick="event.stopPropagation();openPane('${epic.key}')" style="font-size:9px;font-weight:700;color:#6B3FA0;background:#F3EEFF;padding:1px 5px;border-radius:3px;cursor:pointer;border:1px dashed #8F6AC8" title="No Initiative linked — click to set">+ Set Initiative</span>`}
           </div>
           <div style="display:flex;align-items:baseline;gap:4px">
             <a href="${BASE()}${epic.key}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;font-family:monospace;color:#257AA5;font-weight:700;text-decoration:none">${epic.key}</a>
           </div>
-          <div onclick="openPane('${epic.key}')" style="${epicSumStyle}">${epic.summary}</div>
+          <div style="${epicSumStyle}">${epic.summary}</div>
           <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:auto">
             <span class="badge" style="background:${sc.bg};color:${sc.c};font-size:9px;padding:1px 5px">${epic.status}</span>
             ${pbadge(epic.priority)}
