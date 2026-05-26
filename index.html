@@ -396,7 +396,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v81</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v82</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -1405,7 +1405,110 @@ function populateGroupSelector(){
 function updateManagerVisibility(){document.getElementById("btn-manager").style.display="inline-block";}
 
 /* ══ STATS ══ */
-function updateStats(){const m=allIssues.map(gm);const ns=i=>normStatus(i.status);document.getElementById("cnt-ip").textContent=m.filter(i=>ns(i)==="In Progress").length;document.getElementById("cnt-sel").textContent=m.filter(i=>ns(i)==="Selected").length;document.getElementById("cnt-back").textContent=m.filter(i=>ns(i)==="Backlog").length;document.getElementById("cnt-done").textContent=m.filter(i=>ns(i)==="Done").length;updateAnomalyCounters();}
+// v82: stats bar is now scoped by current view. Previously the four status
+// counters (In Progress / Selected / Backlog / Done) were always computed from
+// the full team data set regardless of which tab the user was looking at,
+// which made the numbers feel disconnected from what was on screen. Comments
+// view keeps the global counters because its scope (mentions / my-task
+// comments) isn't status-driven anyway.
+function updateStats(){
+  const ns=i=>normStatus(i.status);
+  const hierTypes=['Epic','Milestone','Initiative','Legend'];
+  const ctrlProj = (typeof ctrlProjFilter !== 'undefined' && ctrlProjFilter) ? ctrlProjFilter : '';
+  let scope;
+  let label = '';
+  switch(currentView){
+    case 'mytasks': {
+      // Just my tasks (assignee === currentIam), excluding hierarchy types.
+      // Respect the shared project filter in the top bar.
+      scope = (allIssues||[]).map(gm).filter(i =>
+        !hierTypes.includes(i.type) &&
+        i.assignee === currentIam &&
+        (!ctrlProj || i.project === ctrlProj)
+      );
+      label = 'My tasks';
+      break;
+    }
+    case 'myepics': {
+      // Tasks under my epics (already loaded into myEpicsTasks). Fall back
+      // to allIssues if the dedicated fetch hasn't run yet.
+      const src = (typeof myEpicsTasks !== 'undefined' && (myEpicsTasks||[]).length)
+        ? myEpicsTasks
+        : (allIssues||[]).filter(i => !hierTypes.includes(i.type));
+      scope = src.map(gm).filter(i =>
+        !hierTypes.includes(i.type) &&
+        (!ctrlProj || i.project === ctrlProj)
+      );
+      label = 'My epics';
+      break;
+    }
+    case 'prioritise': {
+      // priIssues is scoped to the Prioritise board's project picker, which
+      // is independent of the top-bar one. Treat it as the source of truth.
+      const src = (typeof priIssues !== 'undefined' && (priIssues||[]).length)
+        ? priIssues
+        : (allIssues||[]);
+      scope = src.map(gm).filter(i => !hierTypes.includes(i.type));
+      label = 'Prioritise';
+      break;
+    }
+    case 'manager':
+    case 'people': {
+      // Visible team — same scope rule the boards on these views use.
+      const vt = (typeof getVisibleTeam === 'function') ? (getVisibleTeam()||[]) : [];
+      scope = (allIssues||[]).map(gm).filter(i =>
+        !hierTypes.includes(i.type) &&
+        (vt.length ? vt.includes(i.assignee) : true) &&
+        (!ctrlProj || i.project === ctrlProj)
+      );
+      label = currentView === 'manager' ? 'Team' : 'People';
+      break;
+    }
+    case 'done': {
+      // Done view spans everything done in the configured period — leave the
+      // counters reflecting the same broad scope so they line up with the
+      // big "Done" list on screen.
+      scope = (allIssues||[]).map(gm).filter(i =>
+        !hierTypes.includes(i.type) &&
+        (!ctrlProj || i.project === ctrlProj)
+      );
+      label = 'Done period';
+      break;
+    }
+    case 'activity':
+    default: {
+      // Comments / unknown — keep the original team-wide counts.
+      scope = (allIssues||[]).map(gm);
+      label = 'Team';
+    }
+  }
+  const elIP = document.getElementById('cnt-ip');
+  const elSel = document.getElementById('cnt-sel');
+  const elBack = document.getElementById('cnt-back');
+  const elDone = document.getElementById('cnt-done');
+  if(elIP) elIP.textContent = scope.filter(i=>ns(i)==='In Progress').length;
+  if(elSel) elSel.textContent = scope.filter(i=>ns(i)==='Selected').length;
+  if(elBack) elBack.textContent = scope.filter(i=>ns(i)==='Backlog').length;
+  if(elDone) elDone.textContent = scope.filter(i=>ns(i)==='Done').length;
+  // Stamp the scope label on each card title so users see "In Progress · My tasks" etc.
+  // We append a small subtitle div below the existing label if missing.
+  try {
+    const cards = [
+      {id:'cnt-ip', base:'In Progress'},
+      {id:'cnt-sel', base:'Selected'},
+      {id:'cnt-back', base:'Backlog'},
+      {id:'cnt-done', base:'Done'}
+    ];
+    for(const c of cards) {
+      const cnt = document.getElementById(c.id);
+      if(!cnt) continue;
+      const card = cnt.parentElement; if(!card) continue;
+      const labelEl = card.querySelector('div:nth-child(2)');
+      if(labelEl) labelEl.textContent = c.base + ' · ' + label;
+    }
+  } catch {}
+  updateAnomalyCounters();
+}
 
 /* ══ v75: ANOMALY COUNTERS ═════════════════════════════════════════ */
 // Computes 4 quality-check buckets from allIssues. Counters appear in Row 2's
@@ -3651,6 +3754,9 @@ async function renderMyEpics() {
 
     window._myEpics = myEpics;
     renderMyEpicsBoard();
+    // v82: refresh stats once myEpicsTasks is populated, so the view-scoped
+    // counters reflect what's on the My Epics board (not a stale all-team set).
+    try { updateStats(); } catch {}
   } catch(e) {
     document.getElementById('page-myepics').innerHTML=`<div style="padding:24px;color:#D6202B">Failed: ${e.message}</div>`;
   }
@@ -3812,6 +3918,8 @@ async function loadPriBoard() {
     priIssues = (taskD.issues || []).map(parseIssue);
 
     renderPriBoard();
+    // v82: stats bar now follows the active board — refresh after priIssues populates
+    try { updateStats(); } catch {}
   } catch(e) {
     document.getElementById('pri-board').innerHTML = `<div style="padding:24px;color:#D6202B">Failed to load: ${e.message}</div>`;
   }
