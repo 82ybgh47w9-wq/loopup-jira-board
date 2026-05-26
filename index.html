@@ -436,7 +436,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v95</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v96</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -4397,10 +4397,29 @@ const SEARCH_TYPE_ORDER = {
   'Legend':6
 };
 function searchTypeRank(t){ return SEARCH_TYPE_ORDER[t] || 99; }
-function sortByTypeThenUpdated(arr){
+
+// v96: result-relevance buckets. summary-match beats text-only match; within
+// each bucket we then fall back to type rank then recency. This is what gets
+// older-but-relevant items like COPS-32 ("Mini Project - LoopUp One - Coverage")
+// surfaced to the top of a "coverage" search instead of buried under recently-
+// updated tasks that happen to mention the word in a comment.
+function searchRelevanceRank(it, q){
+  if(!q) return 2;
+  const ql = q.toLowerCase();
+  const sum = (it.summary||'').toLowerCase();
+  // 0 = summary contains the whole query (e.g. "coverage" in "...Coverage")
+  // 1 = source marked summary-match by the server-side query (Jira's summary~)
+  // 2 = text-only match
+  if(sum.includes(ql)) return 0;
+  if(it._relevance === 'summary') return 1;
+  return 2;
+}
+function sortByTypeThenUpdated(arr, q){
   return [...arr].sort((a,b)=>{
-    const ra = searchTypeRank(a.type), rb = searchTypeRank(b.type);
+    const ra = searchRelevanceRank(a, q), rb = searchRelevanceRank(b, q);
     if(ra !== rb) return ra - rb;
+    const ta = searchTypeRank(a.type), tb = searchTypeRank(b.type);
+    if(ta !== tb) return ta - tb;
     return (b.updated||'').localeCompare(a.updated||'');
   });
 }
@@ -4415,17 +4434,51 @@ async function runSearch(q){
   showSearchHint(spinHtml(14)+' Searching Jira…');
   appLogMsg('info','search','Running Jira search for: '+q);
   try {
-    // Build JQL. Use text~ for fuzzy summary/description match. Also OR a
-    // key-exact match so typing "MKT-528" lands the exact issue at the top.
+    // v96: two parallel queries instead of one combined.
+    //   1. Summary-specific match (`summary ~ "q"`) — highest-relevance hits,
+    //      the ones the user is most likely actually looking for.
+    //   2. Broader text scan (`text ~ "q*"`) — catches matches in description,
+    //      comments, custom text fields. Includes wildcard for partial words.
+    // We dedupe by key, tag each result's source as 'summary' or 'text', and
+    // hand off to sortByTypeThenUpdated which surfaces summary matches first.
+    // Solves the COPS-32 problem: an old Milestone literally titled "...Coverage"
+    // gets buried under recent tasks when sorting by updated DESC, but should
+    // be the top hit when the user searches for "coverage".
     const esc = q.replace(/"/g, '\\"');
     const isKey = /^[A-Za-z]+-\d+$/.test(q);
-    const clauses = ['text ~ "'+esc+'*"'];
-    if(isKey) clauses.unshift('key = ' + q.toUpperCase());
-    const jql = '(' + clauses.join(' OR ') + ') ORDER BY updated DESC';
-    // v89: bumped to 80 results so deeper expansions don't truncate prematurely.
-    const url = '/rest/api/3/search/jql?jql=' + encodeURIComponent(jql) + '&fields=summary,issuetype,project,status,assignee,parent,priority,updated&maxResults=80';
-    const d = await jiraGet(url);
-    const items = (d.issues||[]).map(parseIssue);
+
+    const summaryClauses = ['summary ~ "'+esc+'"'];
+    if(isKey) summaryClauses.unshift('key = ' + q.toUpperCase());
+    const textClauses = ['text ~ "'+esc+'*"'];
+
+    const fields = 'summary,issuetype,project,status,assignee,parent,priority,updated';
+    const buildUrl = (jql) => '/rest/api/3/search/jql?jql=' + encodeURIComponent(jql) + '&fields=' + fields + '&maxResults=100';
+    const summaryJql = '(' + summaryClauses.join(' OR ') + ') ORDER BY updated DESC';
+    const textJql    = '(' + textClauses.join(' OR ')    + ') ORDER BY updated DESC';
+
+    const [summaryRes, textRes] = await Promise.all([
+      jiraGet(buildUrl(summaryJql)).catch(e=>{ appLogMsg('warn','search','summary query failed: '+(e.message||e)); return {issues:[]}; }),
+      jiraGet(buildUrl(textJql)).catch(e=>{ appLogMsg('warn','search','text query failed: '+(e.message||e)); return {issues:[]}; })
+    ]);
+
+    const seen = new Set();
+    const items = [];
+    for(const issue of (summaryRes.issues||[])){
+      if(seen.has(issue.key)) continue;
+      seen.add(issue.key);
+      const parsed = parseIssue(issue);
+      parsed._relevance = 'summary';
+      items.push(parsed);
+    }
+    for(const issue of (textRes.issues||[])){
+      if(seen.has(issue.key)) continue;
+      seen.add(issue.key);
+      const parsed = parseIssue(issue);
+      parsed._relevance = 'text';
+      items.push(parsed);
+    }
+    appLogMsg('info','search','Search "'+q+'": '+items.length+' merged results (summary='+(summaryRes.issues||[]).length+', text='+(textRes.issues||[]).length+')');
+
     const inProjGroupKeys = (currentProjectGroup && projectGroups[currentProjectGroup]) ? new Set(projectGroups[currentProjectGroup]) : null;
     const teamSet = (currentGroup && groups[currentGroup]) ? new Set(groups[currentGroup]) : null;
     const inScope = [];
@@ -4435,15 +4488,16 @@ async function runSearch(q){
       const teamOk = !teamSet || teamSet.has(it.assignee);
       if(projOk && teamOk) inScope.push(it); else other.push(it);
     }
-    // Sort each group low → high by type rank, then by recency
-    const sortedScope = sortByTypeThenUpdated(inScope);
-    const sortedOther = sortByTypeThenUpdated(other);
-    // Reset expansion state on each fresh query
+    // Sort: summary-match → type rank → recency. Pass the query string so the
+    // sorter can recompute summary-contains-query for items even if Jira's
+    // summary~ JQL didn't include them.
+    const sortedScope = sortByTypeThenUpdated(inScope, q);
+    const sortedOther = sortByTypeThenUpdated(other, q);
     _searchExpandScope = false;
     _searchExpandOther = false;
     _searchRows = [...sortedScope.map(i=>({...i, _group:'scope'})), ...sortedOther.map(i=>({...i, _group:'other'}))];
     _searchActiveIndex = _searchRows.length ? 0 : -1;
-    renderSearchDropdown(_searchRows, {inScope: sortedScope, other: sortedOther});
+    renderSearchDropdown(_searchRows, {inScope: sortedScope, other: sortedOther, query: q});
   } catch(e){
     appLogMsg('error','search','Search failed: '+(e.message||e));
     showSearchHint('Search failed: '+(e.message||'unknown'));
@@ -4468,6 +4522,10 @@ function renderSearchDropdown(rows, grouped){
   let scope, other;
   if(grouped){ scope = grouped.inScope; other = grouped.other; }
   else { scope = rows.filter(r=>r._group==='scope'); other = rows.filter(r=>r._group==='other'); }
+  // v96: pass the query through so each row knows whether its summary
+  // literally contains the search term — used to render a "Summary match"
+  // pill on relevance-1 rows.
+  const query = (grouped && grouped.query) ? grouped.query : '';
   const scopeLabel = (() => {
     const parts = [];
     if(currentGroup && groups[currentGroup]) parts.push('Team: '+currentGroup);
@@ -4480,7 +4538,7 @@ function renderSearchDropdown(rows, grouped){
     const cap = _searchExpandScope ? scope.length : Math.min(SEARCH_DEFAULT_CAP, scope.length);
     const visible = scope.slice(0, cap);
     html += '<div class="sr-group-hdr"><span style="color:#5E8E38">●</span> In your scope <span style="color:#C9CACC;font-weight:400;text-transform:none;letter-spacing:0">— '+scopeLabel+' · showing '+visible.length+' of '+scope.length+'</span></div>';
-    html += visible.map((it)=>renderSearchRow(it, rowIdx++, true)).join('');
+    html += visible.map((it)=>renderSearchRow(it, rowIdx++, true, query)).join('');
     if(scope.length > SEARCH_DEFAULT_CAP){
       html += `<div class="sr-row" onclick="toggleSearchExpand('scope')" style="justify-content:center;color:#2E99CE;font-weight:700;font-size:11px;background:#F7F8F9;cursor:pointer">${_searchExpandScope ? 'Show fewer ▲' : 'Show all '+scope.length+' in scope ▼'}</div>`;
     }
@@ -4489,7 +4547,7 @@ function renderSearchDropdown(rows, grouped){
     const cap = _searchExpandOther ? other.length : Math.min(SEARCH_DEFAULT_CAP, other.length);
     const visible = other.slice(0, cap);
     html += '<div class="sr-group-hdr"><span style="color:#C9CACC">●</span> Other workspace items <span style="color:#C9CACC;font-weight:400;text-transform:none;letter-spacing:0">— showing '+visible.length+' of '+other.length+'</span></div>';
-    html += visible.map((it)=>renderSearchRow(it, rowIdx++, false)).join('');
+    html += visible.map((it)=>renderSearchRow(it, rowIdx++, false, query)).join('');
     if(other.length > SEARCH_DEFAULT_CAP){
       html += `<div class="sr-row" onclick="toggleSearchExpand('other')" style="justify-content:center;color:#2E99CE;font-weight:700;font-size:11px;background:#F7F8F9;cursor:pointer">${_searchExpandOther ? 'Show fewer ▲' : 'Show all '+other.length+' other ▼'}</div>`;
     }
@@ -4497,7 +4555,7 @@ function renderSearchDropdown(rows, grouped){
   dd.innerHTML = html;
   dd.classList.add('open');
 }
-function renderSearchRow(it, idx, isScope){
+function renderSearchRow(it, idx, isScope, query){
   const t = it.type || 'Task';
   const tc = TC[t] || TC.Task;
   const active = idx === _searchActiveIndex;
@@ -4508,11 +4566,26 @@ function renderSearchRow(it, idx, isScope){
   const prBadge = (it.priority && isScope) ? pbadge(it.priority) : '';
   const parentInfo = (isScope && it.parent_key) ? '<span style="font-size:10px;color:#9EA0A4">↑ <span style="font-family:monospace">'+it.parent_key+'</span></span>' : '';
   const assignee = it.assignee && it.assignee !== 'Unassigned' ? it.assignee : '';
+  // v96: build summary HTML with the query term highlighted, plus a small
+  // "Summary match" pill on rows whose title contains the query — gives
+  // the user a clear signal of why a result is ranked where it is.
+  const rawSum = (it.summary||'');
+  let sumHtml = rawSum.replace(/</g,'&lt;');
+  let titleMatch = false;
+  if(query){
+    const q = query.trim();
+    if(q && rawSum.toLowerCase().includes(q.toLowerCase())){
+      titleMatch = true;
+      const escQ = q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+      sumHtml = rawSum.replace(/</g,'&lt;').replace(new RegExp('('+escQ+')', 'ig'), '<mark style="background:#FFF4A3;color:inherit;padding:0 2px;border-radius:2px">$1</mark>');
+    }
+  }
+  const matchPill = titleMatch ? '<span style="font-size:9px;background:#5E8E38;color:#fff;padding:1px 6px;border-radius:6px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;flex-shrink:0">Title match</span>' : '';
   return `<div class="sr-row" style="${active?'background:#E0F0F8':''}${isScope?';align-items:flex-start':''}" onclick="pickSearchResult('${safeKey}')" data-idx="${idx}">
     <span class="sr-type" style="background:${tc.bg};color:${tc.c};flex-shrink:0">${t}</span>
     <span class="sr-key">${it.key}</span>
     <div style="flex:1;display:flex;flex-direction:column;gap:3px;min-width:0">
-      <span class="sr-sum">${(it.summary||'').replace(/</g,'&lt;')}</span>
+      <span class="sr-sum" style="display:flex;align-items:center;gap:6px">${matchPill}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${sumHtml}</span></span>
       ${isScope ? `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:10px">
         ${statusBadge}${prBadge}${parentInfo}
         <span style="color:#9EA0A4">${it.project||''}${assignee?' · '+assignee:''}</span>
