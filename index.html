@@ -436,7 +436,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v91</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v92</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -512,8 +512,14 @@ button,select,textarea,input{font-family:inherit}
   <label id="unassigned-filter-wrap" style="display:none;align-items:center;gap:5px;font-size:12px;cursor:pointer">
     <input type="checkbox" id="unassigned-filter" onchange="renderMain()"> Unassigned only
   </label>
-  <!-- Matrix priority-cols toggle — only visible on My Tasks -->
-  <label id="matrix-toggle-wrap" style="display:none;align-items:center;gap:5px;font-size:12px;cursor:pointer">
+  <!-- v92: Priority-cols toggle hidden by default. Earlier behaviour: when
+       unchecked, the non-matrix render path used `PO[priority]` to sort,
+       which referenced an undefined variable and broke My Tasks with
+       "can't find variable: PO". The matrix-on layout is the only one
+       worth offering anyway, so we hide the control. The DOM node stays
+       in place (with the checkbox `checked` by default) because renderMyTasks
+       reads document.getElementById('matrix-toggle')?.checked. -->
+  <label id="matrix-toggle-wrap" style="display:none !important;align-items:center;gap:5px;font-size:12px;cursor:pointer">
     <input type="checkbox" id="matrix-toggle" checked onchange="renderMain()"> Priority cols
   </label>
   <!-- v75: Anomaly counters (right-aligned). Always visible, greyed when count is 0. -->
@@ -619,7 +625,7 @@ button,select,textarea,input{font-family:inherit}
   </div>
   <div id="page-prioritise" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden">
     <div id="pri-controls" style="display:flex;align-items:center;gap:8px;padding:8px 15px;background:#fff;border-bottom:1px solid #E4E6E8;flex-shrink:0;flex-wrap:wrap">
-      <select class="proj-select" id="pri-proj" onchange="loadPriBoard()" style="max-width:200px"><option value="">— select project —</option></select>
+      <select class="proj-select" id="pri-proj" onchange="priProjKey=this.value;saveAll();loadPriBoard(true)" style="max-width:200px"><option value="">— select project —</option></select>
       <div id="pri-status-filter-wrap" style="display:flex;gap:3px;flex-wrap:wrap">
         <button class="pri-stat-btn active" data-status="" onclick="togglePriStatus(this)" style="padding:3px 10px;border-radius:12px;font-size:10px;font-weight:700;cursor:pointer;border:1px solid #125462;background:#125462;color:#fff">All</button>
         <button class="pri-stat-btn" data-status="In Progress" onclick="togglePriStatus(this)" style="padding:3px 10px;border-radius:12px;font-size:10px;font-weight:700;cursor:pointer;border:1px solid #E4E6E8;background:#fff;color:#73777C">In Progress</button>
@@ -716,6 +722,14 @@ let newCommentCount=0;
 let doneDays=7;
 let myEpicsTasks = [];
 let priIssues = [];
+// v92: persist the Prioritise board's project picker across re-renders and
+// page reloads. Was previously held only in the DOM, so any renderMain pass
+// (triggered by edits in the side panel) rebuilt the dropdown and dropped the
+// selection — forcing the user to re-pick and re-load.
+let priProjKey = '';
+// Which project priIssues was last loaded for. Used to skip a redundant
+// re-fetch when renderMain runs after an edit on the same project.
+let priLoadedFor = '';
 let priEpics = [];
 let priDragKey = null;
 let priDragEpic = null;
@@ -725,7 +739,7 @@ let priBandCollapsed = {Highest:false, High:false, Medium:false, Low:false, 'No 
 let showDoneByView = {mytasks:false, myepics:false, team:false, prioritise:false, manager:false};
 
 /* ══ PERSISTENCE ══ */
-function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,groupProjectAssignment,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed,doneDays,commentReadState,priViewMode,priBandCollapsed,showDoneByView,sharedTeams:[...sharedTeams]}));}catch{}}
+function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,groupProjectAssignment,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed,doneDays,commentReadState,priViewMode,priBandCollapsed,showDoneByView,sharedTeams:[...sharedTeams],priProjKey}));}catch{}}
 function loadAll(){try{const d=JSON.parse(localStorage.getItem(STOR)||"{}");if(d.cfg)cfg=d.cfg;if(d.locStat)locStat=d.locStat;if(d.locPri)locPri=d.locPri;if(d.currentIam)currentIam=d.currentIam;if(d.currentProjFilter)currentProjFilter=d.currentProjFilter;
 if(d.currentProjectGroup)currentProjectGroup=d.currentProjectGroup;if(d.currentGroup)currentGroup=d.currentGroup;if(d.teamMembers)teamMembers=d.teamMembers;if(d.adminUsers)adminUsers=d.adminUsers;if(d.groups)groups=d.groups;
 if(d.groupProjectAssignment)groupProjectAssignment=d.groupProjectAssignment;if(d.excludedProjects)excludedProjects=d.excludedProjects;if(d.currentView)currentView=d.currentView;if(d.currentLevel)currentLevel=d.currentLevel;if(d.rowCollapsed)rowCollapsed={...rowCollapsed,...d.rowCollapsed};if(d.swimCollapsed)swimCollapsed={...swimCollapsed,...d.swimCollapsed};
@@ -735,6 +749,7 @@ if(d.priViewMode)priViewMode=d.priViewMode;
 if(d.priBandCollapsed)priBandCollapsed={...priBandCollapsed,...d.priBandCollapsed};
 if(d.showDoneByView)showDoneByView={...showDoneByView,...d.showDoneByView};
 if(Array.isArray(d.sharedTeams)) sharedTeams = new Set(d.sharedTeams);
+if(typeof d.priProjKey === 'string') priProjKey = d.priProjKey;
 }catch{}}
 
 /* ══ KV (active flags) ══ */
@@ -1330,6 +1345,18 @@ function emptyStateMessage(icon, title, subtitle) {
     ${subtitle ? `<div style="font-size:12px;color:#9EA0A4;max-width:380px;line-height:1.5">${subtitle}</div>` : ''}
   </div>`;
 }
+// v92: prominent loading state in the main content area — same layout as the
+// empty-state helper but with a large spinner instead of an icon. Used by
+// loadPriBoard / renderMyEpics / renderActivity / renderDone so a "Loading…"
+// state is obvious in the centre of the screen rather than a small inline
+// spinner that's easy to miss.
+function loadingStateMessage(title, subtitle) {
+  return `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;min-height:200px;padding:48px 20px;text-align:center;color:#9EA0A4">
+    <div style="margin-bottom:16px">${spinHtml(32, '#2E99CE')}</div>
+    <div style="font-size:14px;font-weight:700;color:#73777C;margin-bottom:6px">${title||'Loading…'}</div>
+    ${subtitle ? `<div style="font-size:12px;color:#9EA0A4;max-width:380px;line-height:1.5">${subtitle}</div>` : ''}
+  </div>`;
+}
 
 function getFiltered(forPerson){
   const search=(document.getElementById("search-input")?.value||"").toLowerCase();
@@ -1818,9 +1845,9 @@ function setView(v){
     sd.style.display = hideOnViews.includes(v) ? 'none' : 'flex';
     if(!hideOnViews.includes(v)) syncGlobalShowDoneCheckbox();
   }
-  // Matrix toggle: My Tasks only
-  const mt=document.getElementById("matrix-toggle-wrap");
-  if(mt) mt.style.display=isMT?"flex":"none";
+  // v92: Matrix toggle stays hidden everywhere — see comment on the markup.
+  // (Previously it was shown on My Tasks; the underlying non-matrix code path
+  // had a PO variable bug, and the matrix layout is the only useful one.)
   // Shared filter bar Project/Priority/Status: 
   //   - hidden on Activity (no concept of project/status/priority for comments)
   //   - hidden on Prioritise (has its own Project picker + status pills below the tabs)
@@ -1894,7 +1921,7 @@ function renderMyTasks(){
           </div></td>`;
         });
       } else {
-        const sorted=rowIssues.sort((a,b)=>PO[a.priority]-PO[b.priority]);
+        const sorted=rowIssues.sort((a,b)=>(PRI_ORD[a.priority]||99)-(PRI_ORD[b.priority]||99));
         html+=`<td class="matrix-cell" colspan="1"><div class="matrix-cell-inner lane-drop-zone" ondragover="onDragOver(event,'${rowStatus}')" ondragleave="onDragLeave(event)" ondrop="onDrop(event,'${rowStatus}')">
           ${sorted.length?sorted.map(i=>cardHtml(i,showActive,true,true)).join(""):'<div style="font-size:11px;color:#E4E6E8;padding:4px">—</div>'}
         </div></td>`;
@@ -2457,6 +2484,18 @@ async function renderPaneMain(){
       <div class="pane-section-title">Description</div>
       ${i.description?`<div class="desc-box">${i.description}</div>`:`<div style="font-size:13px;color:#9EA0A4;font-style:italic">No description.</div>`}
     </div>
+    <!-- v92: Attachments section. We lazy-load the attachment field rather
+         than including it in the bulk fetch, because attachments aren't on
+         every issue and the metadata can be chatty (URLs, author objects).
+         Clicking a row opens the issue's page in Jira where the file can
+         actually be downloaded (attachment-content URLs require Atlassian
+         auth that we can't proxy through here in the browser). -->
+    <div class="pane-section" id="attachments-section">
+      <div class="pane-section-title">Attachments <span id="att-count" style="font-size:11px;color:#9EA0A4;font-weight:600"></span></div>
+      <div id="att-list" style="display:flex;flex-direction:column;gap:4px">
+        <div style="font-size:12px;color:#9EA0A4;display:flex;align-items:center;gap:6px">${spinHtml(13)} Checking attachments…</div>
+      </div>
+    </div>
     <div class="pane-section" id="comments-section">
       <div class="pane-section-title">Comments <span id="cmt-count"></span></div>
       <div style="margin-bottom:12px">
@@ -2472,6 +2511,9 @@ async function renderPaneMain(){
     // Attach @mention typeahead now that cmt-text textarea exists
     attachMentionTypeahead('cmt-text');
     loadPaneComments(i.key);
+    // v92: also fire attachment lookup (independent of comments — they can
+    // both load in parallel, neither blocks the rest of the pane)
+    loadPaneAttachments(i.key);
   }).catch(err=>{
     document.getElementById("pane-body").innerHTML=`<div class="pane-section"><div style="color:#D6202B;font-size:13px">Failed to load details: ${err.message}</div></div>`;
   });
@@ -2481,6 +2523,58 @@ async function renderPaneMain(){
 async function loadPaneComments(key){
   if(!commentsCache[key]){try{commentsCache[key]=await fetchComments(key);}catch{commentsCache[key]=[];}}
   renderPaneCommentList(key);
+}
+
+// v92: per-session cache of attachments per issue
+const attachmentsCache = {};
+
+// v92: lazily fetch the attachment list for the open issue and render it
+// inside the Attachments section. Each row links to the issue's Jira page
+// (where the file can actually be downloaded — attachment-content URLs
+// require Atlassian session auth that the browser must follow directly).
+async function loadPaneAttachments(key){
+  const listEl = document.getElementById('att-list');
+  const countEl = document.getElementById('att-count');
+  if(!listEl) return;
+  try {
+    if(!attachmentsCache[key]){
+      const d = await jiraGet('/rest/api/3/issue/' + key + '?fields=attachment');
+      attachmentsCache[key] = (d.fields?.attachment) || [];
+    }
+    const atts = attachmentsCache[key];
+    if(countEl) countEl.textContent = atts.length ? '('+atts.length+')' : '';
+    if(!atts.length){
+      listEl.innerHTML = '<div style="font-size:12px;color:#9EA0A4;font-style:italic">No attachments on this issue.</div>';
+      return;
+    }
+    listEl.innerHTML = atts.map(a => {
+      const sz = a.size || 0;
+      const sizeStr = sz < 1024 ? sz+' B' : sz < 1024*1024 ? Math.round(sz/1024)+' KB' : (sz/(1024*1024)).toFixed(1)+' MB';
+      const mime = a.mimeType || '';
+      const isImage = mime.startsWith('image/');
+      const isPdf = mime === 'application/pdf';
+      const isDoc = mime.includes('word') || mime.includes('document');
+      const isSheet = mime.includes('sheet') || mime.includes('excel') || mime.includes('csv');
+      const isSlide = mime.includes('presentation') || mime.includes('powerpoint');
+      const isArchive = mime.includes('zip') || mime.includes('rar') || mime.includes('tar');
+      const icon = isImage?'🖼️':isPdf?'📕':isDoc?'📄':isSheet?'📊':isSlide?'📺':isArchive?'🗜️':'📎';
+      const created = (a.created||'').slice(0,10);
+      const author = a.author?.displayName || '';
+      const safeName = (a.filename||'Unnamed').replace(/</g,'&lt;');
+      const ext = (a.filename||'').split('.').pop().toUpperCase();
+      return `<a href="${BASE()}${key}" target="_blank" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;background:#F7F8F9;border:1px solid #EEF1F3;text-decoration:none;color:inherit;cursor:pointer" title="Open ${a.filename||''} in Jira">
+        <span style="font-size:22px;line-height:1;flex-shrink:0">${icon}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:600;color:#292E37;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${safeName}</div>
+          <div style="font-size:10px;color:#9EA0A4">${ext||mime.split('/').pop()||''} · ${sizeStr}${author?' · '+author:''}${created?' · '+created:''}</div>
+        </div>
+        <span style="font-size:11px;color:#2E99CE;font-weight:700;white-space:nowrap;flex-shrink:0">Open in Jira ↗</span>
+      </a>`;
+    }).join('');
+  } catch(e) {
+    listEl.innerHTML = '<div style="font-size:12px;color:#D6202B">Could not load attachments: '+((e.message||e)+'').slice(0,160)+'</div>';
+    appLogMsg('warn','attachments','loadPaneAttachments failed for '+key+': '+(e.message||e));
+  }
 }
 
 function renderPaneCommentList(key){
@@ -4775,7 +4869,7 @@ async function renderMyEpics() {
     return;
   }
   const el = document.getElementById('myepics-board');
-  el.innerHTML = `<div style="padding:24px;display:flex;align-items:center;gap:8px;color:#9EA0A4">${spinHtml()} Loading your epics…</div>`;
+  el.innerHTML = loadingStateMessage('Loading your epics…', 'Pulling Epics and Milestones assigned to ' + (person || 'you') + ' and their child Tasks.');
 
   try {
     // Columns = only Epics and Milestones (same level in hierarchy)
@@ -4965,6 +5059,10 @@ function renderMyEpicsBoard() {
 async function populatePriProjects() {
   const sel = document.getElementById('pri-proj');
   if (!sel) return;
+  // v92: capture the user's current Prioritise project BEFORE wiping innerHTML
+  // and restore it afterwards. Otherwise every renderMain pass (which happens
+  // after every side-panel edit) reset the dropdown to "— select project —".
+  const previousValue = sel.value || priProjKey || '';
   const userProjects = [...new Set(allIssues.filter(i=>i.assignee===currentIam).map(i=>i.project))];
   const otherProjects = allProjects.filter(p=>!excludedProjects.includes(p.key)&&!userProjects.includes(p.key));
   sel.innerHTML = '<option value="">— select project —</option>' +
@@ -4974,26 +5072,46 @@ async function populatePriProjects() {
     '<optgroup label="All projects">' +
       otherProjects.map(p=>`<option value="${p.key}">${p.key} — ${p.name}</option>`).join('') +
     '</optgroup>';
-  if (currentProjFilter) sel.value = currentProjFilter;
+  // Restoration priority: explicit Prioritise pick > saved priProjKey > top-bar filter.
+  if (previousValue) sel.value = previousValue;
+  else if (priProjKey) sel.value = priProjKey;
+  else if (currentProjFilter) sel.value = currentProjFilter;
 }
 
-async function loadPriBoard() {
+async function loadPriBoard(force) {
   const projKey = document.getElementById('pri-proj').value;
-  // Sync toggle button visual state with current view mode (also when no project)
   syncPriViewToggleVisuals();
   syncPerViewShowDoneCheckboxes();
   if (!projKey) {
-    // No project: show empty-state message in the board area
     const board = document.getElementById('pri-board');
     if(board) {
       board.style.flexDirection = 'row';
       board.style.overflow = 'auto';
       board.innerHTML = emptyStateMessage('◎','No project selected','Pick a project above to load the prioritisation board.');
     }
+    priLoadedFor = '';
     return;
   }
+  // v92: skip the re-fetch if we already have this project loaded and the
+  // caller didn't explicitly ask for a reload. renderMain triggers a Prioritise
+  // refresh after every side-panel edit; without this guard each tiny status
+  // change spun up a fresh JQL fetch and the user saw a flash of loading state
+  // while the project picker also visibly cleared. With this guard we just
+  // re-render the existing priIssues against the locStat/locPri overrides.
+  if(!force && projKey === priLoadedFor && (priIssues||[]).length) {
+    try { renderPriBoard(); } catch{}
+    try { updateStats(); } catch{}
+    return;
+  }
+  priLoadedFor = projKey;
+  priProjKey = projKey;
   const loadEl = document.getElementById('pri-loading');
   loadEl.textContent = 'Loading…'; loadEl.style.display = 'inline';
+  // v92: also show a prominent loading state in the main board area while we
+  // fetch — the small "Loading…" indicator next to the project picker is easy
+  // to miss when the board flashes blank during the round-trip.
+  const board = document.getElementById('pri-board');
+  if(board) board.innerHTML = loadingStateMessage('Loading ' + projKey + '…', 'Fetching Epics, Milestones and Tasks from Jira.');
 
   try {
     const fields = 'summary,status,assignee,priority,issuetype,parent,customfield_10014';
@@ -5597,7 +5715,7 @@ function fmtCommentTime(iso) {
 async function loadActivity() {
   const el = document.getElementById('activity-content');
   if(!el) return;
-  el.innerHTML = `<div style="padding:24px;display:flex;align-items:center;gap:8px;color:#9EA0A4">${spinHtml()} Loading activity…</div>`;
+  el.innerHTML = loadingStateMessage('Loading comments…', 'Finding tasks where you\'re assigned or @mentioned across all projects.');
   appLogMsg('info','activity','Loading activity stream for '+currentIam);
 
   try {
