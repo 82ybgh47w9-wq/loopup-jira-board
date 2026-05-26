@@ -396,7 +396,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v83</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v84</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -1166,7 +1166,11 @@ async function createIssue(payload){
 /* ══ AI EPIC SEARCH ══ */
 async function searchEpicsWithAI(taskName,projectKey){
   try{
-    const jql='issuetype in (Epic,Initiative,Legend,Milestone)'+( projectKey?' AND project='+projectKey:'')+ ' ORDER BY updated DESC';
+    // v84: restrict AI suggestions to actual Epics. Previously this included
+    // Legend / Initiative / Milestone, so clicking a "suggestion" could silently
+    // set selEpic to a Legend key — meaning the task got created under that
+    // Legend's project root rather than under a real Epic.
+    const jql='issuetype = Epic'+( projectKey?' AND project='+projectKey:'')+ ' ORDER BY updated DESC';
     const d=await jiraGet("/rest/api/3/search/jql?jql="+encodeURIComponent(jql)+"&fields=summary,issuetype,project,status&maxResults=50");
     const epics=(d.issues||[]).map(i=>({key:i.key,summary:i.fields.summary,type:i.fields.issuetype?.name,project:i.fields.project?.name,status:i.fields.status?.name}));
     const r=await fetch(PROXY+"/ai",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({task:taskName,epics})});
@@ -1528,17 +1532,38 @@ function updateStats(){
 // filter bar; clicking one opens a modal listing the matching issues, and
 // Stories get a "Convert to Task" inline action that PUTs to /rest/api/3/issue.
 function computeAnomalies(){
+  // v84: scope anomalies by the active Team and Project Group.
+  // - Project Group: fetchAllTeamIssues already pre-filters allIssues by
+  //   getActiveProjectsJQL, so project scope is implicit. We still respect
+  //   the top-bar Project picker (ctrlProjFilter) when set, so the counters
+  //   line up with what's visible in the active board.
+  // - Team: when currentGroup is set, only count issues whose assignee is in
+  //   the visible team. Unassigned issues are always considered (the whole
+  //   point of the Unowned WIP counter), but for Stories / Orphan Tasks /
+  //   Orphan Epics they're included only when no team filter is active.
   const stories=[],orphanTasks=[],orphanEpics=[],unownedWip=[];
+  const vt = (typeof getVisibleTeam === 'function') ? (getVisibleTeam()||[]) : [];
+  const teamScoped = !!(currentGroup && groups[currentGroup] && vt.length);
+  const projScope = (typeof ctrlProjFilter !== 'undefined' && ctrlProjFilter) ? ctrlProjFilter : '';
   for(const i of (allIssues||[])){
     const type=i.type||'';
     const status=normStatus(i.status||'');
     const assignee=i.assignee||'';
     const parentType=i.parent_type||'';
-    if(type==='Story') stories.push(i);
-    if((type==='Task'||type==='Sub-task'||type==='Subtask') && parentType!=='Epic') orphanTasks.push(i);
-    if(type==='Epic' && parentType!=='Initiative') orphanEpics.push(i);
+    // Project filter
+    if(projScope && i.project !== projScope) continue;
+    // Team filter — anomalies that depend on an assignee should respect it.
+    // Unowned WIP cares about *missing* assignees so it must NOT be team-filtered
+    // (the team filter would hide every unassigned issue). For the other three
+    // we apply the team scope, but still include unassigned because they're
+    // process anomalies that the active team owns regardless.
+    const isUnassigned = !assignee || assignee === 'Unassigned';
+    const inTeam = teamScoped ? (vt.includes(assignee) || isUnassigned) : true;
+    if(type==='Story' && inTeam) stories.push(i);
+    if((type==='Task'||type==='Sub-task'||type==='Subtask') && parentType!=='Epic' && inTeam) orphanTasks.push(i);
+    if(type==='Epic' && parentType!=='Initiative' && inTeam) orphanEpics.push(i);
     const isWip=(status==='In Progress'||status==='Selected');
-    if(isWip && (!assignee||assignee==='Unassigned')) unownedWip.push(i);
+    if(isWip && isUnassigned) unownedWip.push(i);
   }
   return {stories,orphanTasks,orphanEpics,unownedWip};
 }
@@ -2727,7 +2752,7 @@ async function renderHierarchyRows(){
   el.innerHTML=rows.map(h=>{const sel=s[h.key]||'';return`<div style="margin-bottom:8px">
     <div style="font-size:10px;font-weight:700;color:${h.color};margin-bottom:3px">${h.label}</div>
     <div style="display:flex;gap:6px;align-items:center">
-      <select onchange="createState['${h.key}']=this.value;refreshHierarchyRows()" style="flex:1;padding:6px 8px;border:1px solid #E4E6E8;border-radius:6px;font-size:12px;background:#fff">
+      <select onchange="onHierarchyChange('${h.key}', this.value)" style="flex:1;padding:6px 8px;border:1px solid #E4E6E8;border-radius:6px;font-size:12px;background:#fff">
         <option value="">— Select or create new —</option>
         ${h.list.map(i=>`<option value="${i.key}" ${i.key===sel?'selected':''}>${i.key} — ${i.summary}</option>`).join('')}
       </select>
@@ -2752,10 +2777,42 @@ async function renderHierarchyRows(){
 }
 
 function refreshHierarchyRows(){
-  const s=createState;
-  if(s.selLegend) loadCreateHierarchy(s.projectKey, 'initiatives', s.selLegend);
-  if(s.selInit) loadCreateHierarchy(s.projectKey, 'epics', s.selInit);
+  // v84: previously this re-fetched the entire hierarchy on every dropdown
+  // change, triggering an infinite loop (loadCreateHierarchy → refreshHierarchyRows
+  // → loadCreateHierarchy …). Data is loaded once on project select; filtering
+  // is now done client-side in renderHierarchyRows via parent_key.
   renderHierarchyRows();
+}
+
+// v84: enforce top-down hierarchy selection. Changing a parent (Legend or
+// Initiative) clears the children so the user has to re-pick within the new
+// branch. Without this reset, a stale child selection (e.g. an Epic auto-set
+// from a prior AI suggestion) would silently win on submit — which is why
+// every task was ending up under MKT-137 regardless of the chosen Legend.
+function onHierarchyChange(key, value){
+  const s = createState;
+  if(key === 'selLegend'){
+    s.selLegend = value;
+    s.selInit = '';
+    s.selEpic = '';
+  } else if(key === 'selInit'){
+    s.selInit = value;
+    s.selEpic = '';
+  } else if(key === 'selEpic'){
+    s.selEpic = value;
+    // If picking an Epic, walk up to pre-fill Initiative + Legend when blank
+    // (only fills blanks — never overwrites an existing choice).
+    if(value){
+      const ep = (s.epics||[]).find(e=>e.key===value);
+      if(ep && ep.parent_key){
+        if(!s.selInit) s.selInit = ep.parent_key;
+        const init = (s.initiatives||[]).find(i=>i.key===ep.parent_key);
+        if(init && init.parent_key && !s.selLegend) s.selLegend = init.parent_key;
+      }
+    }
+  }
+  renderHierarchyRows();
+  try { updateCreateButtonState(); } catch {}
 }
 
 function toggleInlineCreate(level){
