@@ -436,7 +436,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v99</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v100</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -678,7 +678,36 @@ const PRI_COLS = ["Highest","High","Medium","Low"];
 const PRI_ORD = {Highest:0,High:1,Medium:2,Low:3};
 const SC = {"In Progress":{c:"#2E99CE",bg:"#E0F0F8"},"Selected":{c:"#5E8E38",bg:"#F1F7EC"},"Selected for Development":{c:"#5E8E38",bg:"#F1F7EC"},"Backlog":{c:"#9EA0A4",bg:"#EEF1F3"},"Done":{c:"#2D7A2D",bg:"#E8F5E0"}};
 const PC = {Highest:{bg:"#FCEBEB",c:"#A32D2D",d:"#D6202B"},High:{bg:"#FAEEDA",c:"#854F0B",d:"#E08000"},Medium:{bg:"#E0F0F8",c:"#185FA5",d:"#8FC7E4"},Low:{bg:"#EAF3DE",c:"#3B6D11",d:"#B3D599"}};
-const TC = {Initiative:{bg:"#F3EEFF",c:"#6B3FA0"},Legend:{bg:"#FFF0E6",c:"#9A4500"},Epic:{bg:"#E0F0F8",c:"#125462"},Milestone:{bg:"#E0F0F8",c:"#125462"},Task:{bg:"#F1F7EC",c:"#3D6B1E"},"Sub-task":{bg:"#F7F8F9",c:"#73777C"}};
+// v100: Jira-standard type palette. Epic and Milestone share purple (same
+// hierarchy tier in LoopUp). Initiative is amber/yellow (lightbulb icon),
+// Legend is orange (crown), Task is blue (checkbox), Story is green
+// (bookmark), Bug is red, Sub-task is lighter blue stacked.
+const TC = {
+  Initiative: {bg:"#FFF8E0", c:"#B07A00"},
+  Legend:     {bg:"#FFF0E6", c:"#9A4500"},
+  Epic:       {bg:"#F3EEFF", c:"#6B3FA0"},
+  Milestone:  {bg:"#F3EEFF", c:"#6B3FA0"},
+  Task:       {bg:"#E0F0F8", c:"#2E99CE"},
+  Story:      {bg:"#F1F7EC", c:"#5E8E38"},
+  Bug:        {bg:"#FCEBEB", c:"#D6202B"},
+  "Sub-task": {bg:"#EAF3F8", c:"#5BBADC"},
+  Subtask:    {bg:"#EAF3F8", c:"#5BBADC"}
+};
+// v100: Jira-inspired SVG icons per type. Used by tbadge() and the prominent
+// type label in the pane header. currentColor inherits from the badge text
+// colour so icon and label match automatically.
+const TYPE_ICONS = {
+  Epic:       '<svg viewBox="0 0 16 16" width="11" height="11" style="vertical-align:-1px;flex-shrink:0"><path fill="currentColor" d="M10 1L3 9h3l-1 6 7-9H8.5z"/></svg>',
+  Milestone:  '<svg viewBox="0 0 16 16" width="11" height="11" style="vertical-align:-1px;flex-shrink:0"><path fill="currentColor" d="M10 1L3 9h3l-1 6 7-9H8.5z"/></svg>',
+  Initiative: '<svg viewBox="0 0 16 16" width="11" height="11" style="vertical-align:-1px;flex-shrink:0"><path fill="currentColor" d="M8 1.5a4 4 0 0 1 2.7 6.9l-.7.6V11H6V9l-.7-.6A4 4 0 0 1 8 1.5zM6 12.2h4M6.6 14h2.8"/></svg>',
+  Legend:     '<svg viewBox="0 0 16 16" width="11" height="11" style="vertical-align:-1px;flex-shrink:0"><path fill="currentColor" d="M2 5l2.5 1.7L8 1.5l3.5 5.2L14 5v7H2z"/></svg>',
+  Task:       '<svg viewBox="0 0 16 16" width="11" height="11" style="vertical-align:-1px;flex-shrink:0"><rect x="2" y="2" width="12" height="12" rx="2" fill="currentColor"/><path d="M5 8l2 2 4-4.5" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  Story:      '<svg viewBox="0 0 16 16" width="11" height="11" style="vertical-align:-1px;flex-shrink:0"><path fill="currentColor" d="M3 1v14l5-3 5 3V1z"/></svg>',
+  Bug:        '<svg viewBox="0 0 16 16" width="11" height="11" style="vertical-align:-1px;flex-shrink:0"><ellipse cx="8" cy="9" rx="4" ry="5" fill="currentColor"/><path stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none" d="M5 5l1.2 1.2M9.8 6.2L11 5M5 9H3M13 9h-2M5.5 12.5L4 14M10.5 12.5L12 14"/></svg>',
+  'Sub-task': '<svg viewBox="0 0 16 16" width="11" height="11" style="vertical-align:-1px;flex-shrink:0"><rect x="2" y="2" width="9" height="9" rx="1.5" fill="#8FC7E4"/><rect x="5" y="5" width="9" height="9" rx="1.5" fill="currentColor"/><path d="M8 10.5l1.5 1.5 3-3" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  Subtask:    '<svg viewBox="0 0 16 16" width="11" height="11" style="vertical-align:-1px;flex-shrink:0"><rect x="2" y="2" width="9" height="9" rx="1.5" fill="#8FC7E4"/><rect x="5" y="5" width="9" height="9" rx="1.5" fill="currentColor"/><path d="M8 10.5l1.5 1.5 3-3" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+};
+function typeIcon(t){ return TYPE_ICONS[t] || TYPE_ICONS.Task; }
 const ISSUE_TYPES = ["Initiative","Legend","Epic","Milestone","Task","Sub-task"];
 // v87: Epic and Milestone are at the same level in LoopUp's hierarchy and are
 // interchangeable as the direct parent of a Task. Some projects (e.g. MKT)
@@ -1252,7 +1281,7 @@ const BASE=()=>cfg.url+"/browse/";
 const ava=(n,sz=24)=>!n||n==="Unassigned"?`<div class="ava" style="width:${sz}px;height:${sz}px;font-size:${sz*.36}px;background:#EEF1F3;color:#9EA0A4">?</div>`:`<div class="ava" title="${n}" style="width:${sz}px;height:${sz}px;font-size:${sz*.36}px;background:${avCol(n)}">${ini(n)}</div>`;
 const spill=s=>{const c=SC[s]||SC.Backlog;return`<span class="badge" style="background:${c.bg};color:${c.c}">${s}</span>`;};
 const pbadge=p=>{const c=PC[p]||PC.Medium;return`<span class="badge" style="background:${c.bg};color:${c.c}"><span class="pri-dot" style="background:${c.d}"></span>${p}</span>`;};
-const tbadge=t=>{const c=TC[t]||TC.Task;return`<span class="badge" style="background:${c.bg};color:${c.c}">${t}</span>`;};
+const tbadge=t=>{const c=TC[t]||TC.Task;return`<span class="badge" style="background:${c.bg};color:${c.c};display:inline-flex;align-items:center;gap:4px">${typeIcon(t)}<span>${t}</span></span>`;};
 const klink=k=>`<a href="${BASE()}${k}" target="_blank" onclick="event.stopPropagation()" class="card-key">${k}</a>`;
 const spinHtml=(sz=16,col="#2E99CE")=>`<svg class="spinner" width="${sz}" height="${sz}" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="${col}" stroke-width="3" stroke-dasharray="42 20"/></svg>`;
 
@@ -2283,7 +2312,7 @@ function renderPaneHdr(i){
                now redundant and has been removed. The parent-key link that
                was here is also gone — it duplicates the Hierarchy section
                below the title bar. -->
-          <span style="font-size:10px;font-weight:700;color:#fff;background:rgba(255,255,255,.18);padding:3px 9px;border-radius:10px;text-transform:uppercase;letter-spacing:.06em">${(i.type||'Task')}</span>
+          <span style="font-size:10px;font-weight:700;color:#fff;background:rgba(255,255,255,.18);padding:3px 9px;border-radius:10px;text-transform:uppercase;letter-spacing:.06em;display:inline-flex;align-items:center;gap:4px">${typeIcon(i.type||'Task')}<span>${(i.type||'Task')}</span></span>
           <a href="${BASE()}${i.key}" target="_blank" style="font-size:15px;font-weight:700;color:#fff;font-family:monospace">${i.key} ↗</a>
         </div>
         <div style="font-size:14px;font-weight:700;color:#fff;line-height:1.35;margin-bottom:7px">${i.summary}</div>
@@ -2775,8 +2804,54 @@ async function renderPaneSubtasks(){
     </div>`;
 }
 
-async function doPaneStatus(val){locStat[openIssue.key]=val;openIssue={...openIssue,status:val};saveAll();renderPaneHdr(openIssue);renderPaneMain();updateStats();renderMain();await transitionIssue(openIssue.key,val);setTimeout(()=>doFetch(true),1500);}
-async function doPanePriority(val){locPri[openIssue.key]=val;openIssue={...openIssue,priority:val};saveAll();renderPaneHdr(openIssue);renderPaneMain();renderMain();await updatePriority(openIssue.key,val);setTimeout(()=>doFetch(true),1500);}
+// v100: also propagate the local override into priIssues / priEpics so the
+// Prioritise board re-renders correctly on the next renderMain pass — and
+// force-reload the Prioritise board after Jira confirms, so done epics drop
+// off and priority changes move epics to the correct band.
+function _syncPriCachesFromOpenIssue(){
+  const k = openIssue && openIssue.key;
+  if(!k) return;
+  if(typeof priIssues !== 'undefined'){
+    for(let i=0;i<priIssues.length;i++){
+      if(priIssues[i].key === k){
+        priIssues[i].status = openIssue.status;
+        priIssues[i].priority = openIssue.priority;
+      }
+    }
+  }
+  if(typeof priEpics !== 'undefined'){
+    for(let i=0;i<priEpics.length;i++){
+      if(priEpics[i].key === k){
+        priEpics[i].status = openIssue.status;
+        priEpics[i].priority = openIssue.priority;
+      }
+    }
+  }
+}
+async function doPaneStatus(val){
+  locStat[openIssue.key]=val;
+  openIssue={...openIssue,status:val};
+  saveAll();
+  _syncPriCachesFromOpenIssue();
+  renderPaneHdr(openIssue);renderPaneMain();updateStats();renderMain();
+  await transitionIssue(openIssue.key,val);
+  setTimeout(()=>doFetch(true),1500);
+  if(currentView === 'prioritise'){
+    setTimeout(()=>{ try { loadPriBoard(true); } catch{} }, 1800);
+  }
+}
+async function doPanePriority(val){
+  locPri[openIssue.key]=val;
+  openIssue={...openIssue,priority:val};
+  saveAll();
+  _syncPriCachesFromOpenIssue();
+  renderPaneHdr(openIssue);renderPaneMain();renderMain();
+  await updatePriority(openIssue.key,val);
+  setTimeout(()=>doFetch(true),1500);
+  if(currentView === 'prioritise'){
+    setTimeout(()=>{ try { loadPriBoard(true); } catch{} }, 1800);
+  }
+}
 
 /* ══ v80: ASSIGNEE PICKER ════════════════════════════════════════════
    Opens from the issue panel's Assignee cell. Surfaces team members up front
@@ -5535,8 +5610,16 @@ function renderPriBoard() {
     }
   });
 
-  // Filter epics
-  let epics = [...priEpics].filter(e => ['Epic','Milestone'].includes(e.type));
+  // v100: apply gm() to priEpics so locStat / locPri overrides are reflected
+  // immediately when the user changes status or priority via the side panel.
+  // Was: epic.status / epic.priority read raw from priEpics, so Done epics
+  // stayed visible until the next full Jira refetch, and priority changes
+  // didn't reorder epics into their new band.
+  // Also filter out locally-Done epics when Show Done is off — Jira's fetch
+  // excluded them server-side, but a locally-set Done wasn't being filtered.
+  const showDonePri = getShowDone('prioritise');
+  let epics = [...priEpics].map(gm).filter(e => ['Epic','Milestone'].includes(e.type));
+  if(!showDonePri) epics = epics.filter(e => normStatus(e.status) !== 'Done');
   if (unassignedOnly) epics = epics.filter(e => e.assignee === 'Unassigned' || (byEpic[e.key]||[]).length > 0);
 
   const board = document.getElementById('pri-board');
@@ -5886,7 +5969,12 @@ function renderPriBoardHorizontal() {
   });
 
   // Filter epics — only Epics and Milestones (same as vertical)
-  let epics = [...priEpics].filter(e => ['Epic','Milestone'].includes(e.type));
+  // v100: apply gm() + drop locally-Done epics when Show Done is off, same
+  // as the vertical-mode renderer. Without this, priority changes don't move
+  // an epic to the right band and Done epics linger until next manual refresh.
+  const showDonePriH = getShowDone('prioritise');
+  let epics = [...priEpics].map(gm).filter(e => ['Epic','Milestone'].includes(e.type));
+  if(!showDonePriH) epics = epics.filter(e => normStatus(e.status) !== 'Done');
   if(unassignedOnly) epics = epics.filter(e => e.assignee === 'Unassigned' || (byEpic[e.key]||[]).length > 0);
 
   // Group epics by their PRIORITY (Epic's priority determines band)
