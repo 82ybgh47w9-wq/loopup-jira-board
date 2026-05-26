@@ -436,7 +436,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v98</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v99</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -2238,15 +2238,18 @@ function openPane(key){
 }
 function closePaneOverlay(){document.getElementById("pane-overlay").classList.remove("open");openIssue=null;}
 
-// v98: pane-header colour palette per issue type. Mirrors Jira's own typing —
-// purple Epic, teal Milestone, green Task/Story, grey Sub-task, orange Legend,
-// deeper purple Initiative — so the user can tell at a glance what level of
-// the hierarchy they're looking at. Each entry is [gradient-from, gradient-to,
-// active-text-color] so the contained badges/buttons match.
+// v99: pane-header colour palette per issue type. Aligned with LoopUp's
+// hierarchy where Epic and Milestone occupy the SAME tier (treated as
+// interchangeable across the app since v87), so they share a purple
+// gradient. Initiative shifts to blue/cyan to stay visually distinct
+// from Epic at the next tier up. Legend = orange (top of chain), Task
+// and Story = green, Bug = red, Sub-task = grey. Each entry is
+// [gradient-from, gradient-to, active-text-color] so the contained
+// badges/buttons match.
 const PANE_HDR_PALETTE = {
   'Epic':       ['#6B3FA0', '#8F6AC8', '#6B3FA0'],
-  'Milestone':  ['#125462', '#257AA5', '#125462'],
-  'Initiative': ['#5A2D8F', '#8F6AC8', '#6B3FA0'],
+  'Milestone':  ['#6B3FA0', '#8F6AC8', '#6B3FA0'],
+  'Initiative': ['#125462', '#2E99CE', '#125462'],
   'Legend':     ['#9A4500', '#C47A3A', '#9A4500'],
   'Task':       ['#3D6B1E', '#5E8E38', '#3D6B1E'],
   'Story':      ['#3D6B1E', '#5E8E38', '#3D6B1E'],
@@ -2273,11 +2276,18 @@ function renderPaneHdr(i){
     <div style="display:flex;justify-content:space-between;align-items:flex-start">
       <div style="flex:1;margin-right:10px">
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:5px;flex-wrap:wrap">
-          <a href="${BASE()}${i.key}" target="_blank" style="font-size:15px;font-weight:700;color:#8FC7E4;font-family:monospace">${i.key} ↗</a>
-          ${i.parent_key?`<span style="font-size:11px;color:rgba(255,255,255,.5)">↑ <a href="${BASE()}${i.parent_key}" target="_blank" style="color:#8FC7E4;font-family:monospace;font-size:12px">${i.parent_key}</a></span>`:""}
+          <!-- v99: prominent type label before the key so the user can tell
+               at a glance what hierarchy level they're looking at. Tinted
+               translucent-white pill so it sits naturally on the coloured
+               gradient background. The tbadge in the status row below is
+               now redundant and has been removed. The parent-key link that
+               was here is also gone — it duplicates the Hierarchy section
+               below the title bar. -->
+          <span style="font-size:10px;font-weight:700;color:#fff;background:rgba(255,255,255,.18);padding:3px 9px;border-radius:10px;text-transform:uppercase;letter-spacing:.06em">${(i.type||'Task')}</span>
+          <a href="${BASE()}${i.key}" target="_blank" style="font-size:15px;font-weight:700;color:#fff;font-family:monospace">${i.key} ↗</a>
         </div>
         <div style="font-size:14px;font-weight:700;color:#fff;line-height:1.35;margin-bottom:7px">${i.summary}</div>
-        <div style="display:flex;gap:5px;flex-wrap:wrap">${tbadge(i.type)}${spill(i.status)}${pbadge(i.priority)}</div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap">${spill(i.status)}${pbadge(i.priority)}</div>
       </div>
       <button onclick="closePaneOverlay()" style="background:rgba(255,255,255,.15);border:none;color:#fff;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:16px">✕</button>
     </div>
@@ -2515,27 +2525,28 @@ async function renderPaneMain(){
           <span style="font-size:11px;color:#E08000;font-weight:700">+ Set ${topExpectedParents.join(' / ')}</span>
         </div>`
       : '';
+    // v99: every editable hierarchy row gets a small grey pencil icon that
+    // opens the parent picker for THAT row's parent. Replaces the wordy
+    // "change" / "change parent" text links. The icon is tucked to the
+    // far right of the row so it doesn't interrupt the summary.
+    const pencilIcon = (nodeKey) => ` <a href="#" onclick="event.preventDefault();event.stopPropagation();openParentPicker('${nodeKey}')" title="Change parent" style="color:#9EA0A4;text-decoration:none;margin-left:auto;padding:2px 6px;border-radius:4px;font-size:13px;line-height:1;cursor:pointer;display:inline-flex;align-items:center" onmouseover="this.style.color='#2E99CE';this.style.background='#E0F0F8'" onmouseout="this.style.color='#9EA0A4';this.style.background='transparent'">✎</a>`;
     const chainRows=chain.map((node,idx)=>{
       const isCurrent=node.key===i.key;
       const nodeExpected = expectedParentTypesFor(node.type);
       const canChangeParent = nodeExpected.length > 0; // anything except Legend
-      const changeLink = canChangeParent && !isCurrent
-        ? ` <a href="#" onclick="event.preventDefault();event.stopPropagation();openParentPicker('${node.key}')" style="font-size:10px;color:#2E99CE;margin-left:6px;text-decoration:underline">change</a>`
-        : '';
       if(isCurrent){
-        const myChangeLink = canChangeParent
-          ? ` <a href="#" onclick="event.preventDefault();event.stopPropagation();openParentPicker('${node.key}')" style="font-size:11px;color:#2E99CE;margin-left:6px;text-decoration:underline">change parent</a>`
-          : '';
-        return`<div class="hierarchy-row" style="background:#F0F9FF;border-radius:6px;padding:5px 8px;border-left:3px solid #2E99CE">
+        return`<div class="hierarchy-row" style="background:#F0F9FF;border-radius:6px;padding:5px 8px;border-left:3px solid #2E99CE;display:flex;align-items:center">
           <span class="hierarchy-label" style="font-weight:700;color:#125462">${node.type}</span>
           <span class="hierarchy-key"><a href="${BASE()}${node.key}" target="_blank" style="color:#125462;font-family:monospace;font-size:13px;font-weight:700">${node.key}</a></span>
-          <span class="hierarchy-val" style="font-size:13px;font-weight:700;color:#292E37">${node.summary}${myChangeLink}</span>
+          <span class="hierarchy-val" style="font-size:13px;font-weight:700;color:#292E37;flex:1">${node.summary}</span>
+          ${canChangeParent ? pencilIcon(node.key) : ''}
         </div>`;
       }
-      return `<div class="hierarchy-row">
+      return `<div class="hierarchy-row" style="display:flex;align-items:center">
         <span class="hierarchy-label">${node.type}</span>
         <span class="hierarchy-key"><a href="${BASE()}${node.key}" target="_blank" style="color:#257AA5;font-family:monospace;font-size:10px">${node.key}</a></span>
-        <span class="hierarchy-val">${tbadge(node.type||"")} <span style="font-size:12px">${node.summary||""}</span>${changeLink}</span>
+        <span class="hierarchy-val" style="flex:1">${tbadge(node.type||"")} <span style="font-size:12px">${node.summary||""}</span></span>
+        ${canChangeParent ? pencilIcon(node.key) : ''}
       </div>`;
     }).join("");
 
