@@ -80,8 +80,19 @@ button,select,textarea,input{font-family:inherit}
   color: #9EA0A4;
   text-align: center;
 }
-.search-box{display:flex;align-items:center;gap:5px;border:1px solid #C9CACC;border-radius:6px;padding:3px 9px;background:#fff}
+.search-box{display:flex;align-items:center;gap:5px;border:1px solid #C9CACC;border-radius:6px;padding:3px 9px;background:#fff;position:relative}
 .search-box input{border:none;background:transparent;font-size:12px;color:#292E37;outline:none;width:120px}
+/* v88: global search dropdown */
+#search-results-dropdown{position:absolute;top:calc(100% + 4px);left:0;right:0;background:#fff;border:1px solid #C9CACC;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:600;max-height:480px;overflow-y:auto;display:none}
+#search-results-dropdown.open{display:block}
+.sr-group-hdr{font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;padding:8px 12px 4px;background:#F7F8F9;border-bottom:1px solid #EEF1F3;position:sticky;top:0;display:flex;align-items:center;gap:6px}
+.sr-row{display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;border-bottom:1px solid #F7F8F9}
+.sr-row:hover{background:#E0F0F8}
+.sr-type{font-size:9px;font-weight:700;padding:2px 6px;border-radius:8px;text-transform:uppercase;letter-spacing:.04em;flex-shrink:0}
+.sr-key{font-size:11px;font-weight:700;color:#257AA5;font-family:monospace;flex-shrink:0}
+.sr-sum{font-size:12px;color:#292E37;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sr-meta{font-size:10px;color:#9EA0A4;flex-shrink:0}
+.sr-empty{padding:16px;text-align:center;color:#9EA0A4;font-size:12px}
 
 /* Main */
 #main{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden}
@@ -389,14 +400,15 @@ button,select,textarea,input{font-family:inherit}
   <!-- Centered search box -->
   <div class="search-box" style="flex:1;max-width:560px;margin:0 auto">
     <span style="color:#C9CACC">⌕</span>
-    <input id="search-input" placeholder="Search tasks…" oninput="renderMain()" style="width:100%;font-size:13px;border:none;outline:none;background:transparent">
+    <input id="search-input" placeholder="Search across all projects…" oninput="onSearchInput(this.value)" onfocus="onSearchFocus()" onblur="onSearchBlur()" onkeydown="onSearchKeydown(event)" autocomplete="off" style="width:100%;font-size:13px;border:none;outline:none;background:transparent">
+    <div id="search-results-dropdown" onmousedown="event.preventDefault()"></div>
   </div>
   <!-- Right-aligned actions: v76 — added margin-left:auto so they stay right even when the
        search box is hidden (which happens on Comments view via setView). Without this the
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v86</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v88</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -482,11 +494,11 @@ button,select,textarea,input{font-family:inherit}
       <span class="anom-count">0</span>
       <span class="anom-label">Stories</span>
     </button>
-    <button class="anomaly-pill" id="anom-orphan-tasks" data-kind="orphan-tasks" onclick="openAnomalyModal('orphan-tasks')" title="Tasks / Sub-tasks without an Epic parent">
+    <button class="anomaly-pill" id="anom-orphan-tasks" data-kind="orphan-tasks" onclick="openAnomalyModal('orphan-tasks')" title="Tasks / Sub-tasks without an Epic or Milestone parent">
       <span class="anom-count">0</span>
       <span class="anom-label">Orphan Tasks</span>
     </button>
-    <button class="anomaly-pill" id="anom-orphan-epics" data-kind="orphan-epics" onclick="openAnomalyModal('orphan-epics')" title="Epics without an Initiative parent">
+    <button class="anomaly-pill" id="anom-orphan-epics" data-kind="orphan-epics" onclick="openAnomalyModal('orphan-epics')" title="Epics or Milestones without an Initiative parent">
       <span class="anom-count">0</span>
       <span class="anom-label">Orphan Epics</span>
     </button>
@@ -633,7 +645,14 @@ const PRI_ORD = {Highest:0,High:1,Medium:2,Low:3};
 const SC = {"In Progress":{c:"#2E99CE",bg:"#E0F0F8"},"Selected":{c:"#5E8E38",bg:"#F1F7EC"},"Selected for Development":{c:"#5E8E38",bg:"#F1F7EC"},"Backlog":{c:"#9EA0A4",bg:"#EEF1F3"},"Done":{c:"#2D7A2D",bg:"#E8F5E0"}};
 const PC = {Highest:{bg:"#FCEBEB",c:"#A32D2D",d:"#D6202B"},High:{bg:"#FAEEDA",c:"#854F0B",d:"#E08000"},Medium:{bg:"#E0F0F8",c:"#185FA5",d:"#8FC7E4"},Low:{bg:"#EAF3DE",c:"#3B6D11",d:"#B3D599"}};
 const TC = {Initiative:{bg:"#F3EEFF",c:"#6B3FA0"},Legend:{bg:"#FFF0E6",c:"#9A4500"},Epic:{bg:"#E0F0F8",c:"#125462"},Milestone:{bg:"#E0F0F8",c:"#125462"},Task:{bg:"#F1F7EC",c:"#3D6B1E"},"Sub-task":{bg:"#F7F8F9",c:"#73777C"}};
-const ISSUE_TYPES = ["Initiative","Legend","Epic","Task","Sub-task"];
+const ISSUE_TYPES = ["Initiative","Legend","Epic","Milestone","Task","Sub-task"];
+// v87: Epic and Milestone are at the same level in LoopUp's hierarchy and are
+// interchangeable as the direct parent of a Task. Some projects (e.g. MKT)
+// only use Milestone; others only Epic. Treat them as equivalent everywhere
+// that asks "is this an epic-level item?" or "does this Task have an
+// epic-level parent?" — anomaly checks, hierarchy filters, view columns, etc.
+const EPIC_LEVEL_TYPES = ["Epic","Milestone"];
+const isEpicLevel = (t) => t === 'Epic' || t === 'Milestone';
 
 /* ══ STATE ══ */
 let cfg = {url:"https://loopup.atlassian.net",email:"",token:""};
@@ -1562,8 +1581,13 @@ function computeAnomalies(){
     const isUnassigned = !assignee || assignee === 'Unassigned';
     const inTeam = teamScoped ? (vt.includes(assignee) || isUnassigned) : true;
     if(type==='Story' && inTeam) stories.push(i);
-    if((type==='Task'||type==='Sub-task'||type==='Subtask') && parentType!=='Epic' && inTeam) orphanTasks.push(i);
-    if(type==='Epic' && parentType!=='Initiative' && inTeam) orphanEpics.push(i);
+    // v87: Orphan Task = a Task / Sub-task whose parent is NOT an Epic-level
+    // item (Epic OR Milestone). Previously this only checked for Epic, so
+    // MKT-style projects (which use Milestone) had every parented task flagged
+    // as orphan. See MKT-528 → MKT-493 (Milestone) — that's a valid hierarchy.
+    if((type==='Task'||type==='Sub-task'||type==='Subtask') && !isEpicLevel(parentType) && inTeam) orphanTasks.push(i);
+    // v87: Orphan Epic-level = Epic OR Milestone without an Initiative parent.
+    if(isEpicLevel(type) && parentType!=='Initiative' && inTeam) orphanEpics.push(i);
     const isWip=(status==='In Progress'||status==='Selected');
     if(isWip && isUnassigned) unownedWip.push(i);
   }
@@ -1591,8 +1615,8 @@ function openAnomalyModal(kind){
   const a=computeAnomalies();
   const map={
     'stories':       {title:'Stories (should be Task)', items:a.stories, action:'convert-to-task'},
-    'orphan-tasks':  {title:'Tasks / Sub-tasks without an Epic parent', items:a.orphanTasks},
-    'orphan-epics':  {title:'Epics without an Initiative parent', items:a.orphanEpics},
+    'orphan-tasks':  {title:'Tasks / Sub-tasks without an Epic or Milestone parent', items:a.orphanTasks},
+    'orphan-epics':  {title:'Epics or Milestones without an Initiative parent', items:a.orphanEpics},
     'unowned-wip':   {title:'Unowned in-progress work', items:a.unownedWip},
   };
   const cfg=map[kind];
@@ -2780,7 +2804,10 @@ async function createHierarchyItem(level) {
       const newItem = {
         key: result.key, summary: name, type: finalType,
         parent_key: parentKey, status: 'Backlog', priority: 'Medium',
-        assignee: 'Unassigned', project: proj
+        assignee: 'Unassigned', project: proj,
+        // v88: flag so submitCreate can warn the user if the subsequent task
+        // create fails — they'll know the parent already exists in Jira.
+        _createdThisSession: true
       };
       // Add to local cache and auto-select it
       if(level === 'Legend') {
@@ -2995,8 +3022,29 @@ async function submitCreate(){
       } catch {}
     }
 
-    const result = await jiraPost('/rest/api/3/issue', {fields});
-    const newKey = result.key;
+    // v88 BUG FIX: this previously did `await jiraPost(...).key` — but jiraPost
+    // returns a fetch Response, not parsed JSON. So `newKey` was always
+    // undefined, transitions/comments to `/issue/undefined/*` silently failed,
+    // and worst of all: a non-2xx response wasn't checked at all, so a Jira
+    // 400 (e.g. required field missing for a specific project type) was
+    // swallowed — leaving the user with a freshly-created parent Epic/Milestone
+    // and NO task. We now check ok, parse JSON, and surface failures clearly.
+    appLogMsg('info','create','Posting new task to Jira', {project:s.projectKey, parent:s.selEpic, summary:s.summary.trim()});
+    const r = await jiraPost('/rest/api/3/issue', {fields});
+    if(!(r && (r.ok || r.status === 201))) {
+      let detail = '';
+      try { detail = await r.text(); } catch {}
+      const msg = 'Jira rejected the task (HTTP '+(r?r.status:'?')+')' + (detail?'\n\n'+detail.slice(0,400):'');
+      appLogMsg('error','create','Task POST failed', detail.slice(0,300));
+      throw new Error(msg);
+    }
+    const created = await r.json();
+    const newKey = created.key;
+    if(!newKey) {
+      appLogMsg('error','create','Task POST succeeded but no key returned', JSON.stringify(created).slice(0,200));
+      throw new Error('Jira returned no issue key for the new task. The task may not have been created.');
+    }
+    appLogMsg('info','create','Task created: '+newKey);
 
     // Transition to desired status if not default
     if(s.status && s.status !== 'Backlog') {
@@ -3004,7 +3052,7 @@ async function submitCreate(){
         const tr = await jiraGet('/rest/api/3/issue/'+newKey+'/transitions');
         const match = (tr.transitions||[]).find(t=>t.name===s.status||t.to?.name===s.status);
         if(match) await jiraPost('/rest/api/3/issue/'+newKey+'/transitions', {transition:{id:match.id}});
-      } catch {}
+      } catch(e) { appLogMsg('warn','create','Transition failed for '+newKey+': '+(e.message||e)); }
     }
 
     // Add comment if provided (with @mention support)
@@ -3015,7 +3063,7 @@ async function submitCreate(){
           ? buildADFFromTextarea('cr-comment')
           : {type:'doc',version:1,content:[{type:'paragraph',content:[{type:'text',text:s.comment.trim()}]}]};
         await jiraPost('/rest/api/3/issue/'+newKey+'/comment', {body: cmtBody});
-      } catch {}
+      } catch(e) { appLogMsg('warn','create','Comment failed for '+newKey+': '+(e.message||e)); }
     }
 
     closeCreate();
@@ -3028,7 +3076,16 @@ async function submitCreate(){
     document.body.appendChild(toast);
     setTimeout(()=>toast.remove(), 4000);
   } catch(e) {
-    alert('Failed to create: '+e.message);
+    // v88: keep the modal open with the user's data so they can fix and retry
+    // instead of losing everything. Also point out if the parent was already
+    // created so the user knows what state Jira is in.
+    const parentCreatedThisSession = s.selEpic && (s.epics||[]).find(ep => ep.key === s.selEpic && ep._createdThisSession);
+    let msg = 'Failed to create the task:\n\n' + (e.message || 'Unknown error');
+    if(parentCreatedThisSession) {
+      msg += '\n\nNote: the parent ' + s.selEpic + ' was created earlier in this session and still exists in Jira. You can either retry from this dialog (your inputs are preserved) or delete the parent manually if you want to start over.';
+    }
+    alert(msg);
+    appLogMsg('error','create','submitCreate failed: ' + (e.message || e));
   } finally {
     if(btn){btn.disabled=false;btn.textContent='Create in Jira';}
   }
@@ -3455,6 +3512,151 @@ function getActiveProjectsJQL() {
   if(!keys.length) return '';
   if(currentProjFilter) return 'project=' + currentProjFilter;
   return 'project in (' + keys.join(',') + ')';
+}
+
+/* ══ v88: GLOBAL SEARCH ═════════════════════════════════════════════
+   Live Jira-wide search. As the user types we debounce, hit JQL once,
+   and split results into two groups:
+     - "In your Team / Project Group" — issue matches the user's active
+       Team filter (assignee in visible team) AND active Project Group
+       (project is in the active group's project list). If neither
+       filter is set, this group holds everything (= scope is unbounded).
+     - "Other workspace items" — everything else.
+   Clicking a row opens the issue panel. Escape / blur closes.
+*/
+let _searchTimer = null;
+let _searchActiveIndex = -1;
+let _searchRows = [];
+
+function onSearchInput(v){
+  if(_searchTimer) clearTimeout(_searchTimer);
+  const q = (v||'').trim();
+  if(q.length < 2){
+    if(q.length === 0) closeSearchDropdown();
+    else showSearchHint('Keep typing — at least 2 characters');
+    return;
+  }
+  _searchTimer = setTimeout(()=>runSearch(q), 280);
+}
+function onSearchFocus(){
+  const input = document.getElementById('search-input');
+  if(input && input.value.trim().length >= 2) runSearch(input.value.trim());
+}
+function onSearchBlur(){
+  // Delay close so onclick can fire on a row
+  setTimeout(closeSearchDropdown, 180);
+}
+function onSearchKeydown(e){
+  const dd = document.getElementById('search-results-dropdown');
+  if(!dd || !dd.classList.contains('open')) return;
+  if(e.key === 'Escape'){ closeSearchDropdown(); return; }
+  if(e.key === 'ArrowDown'){ e.preventDefault(); moveSearchActive(1); return; }
+  if(e.key === 'ArrowUp'){ e.preventDefault(); moveSearchActive(-1); return; }
+  if(e.key === 'Enter'){
+    if(_searchActiveIndex >= 0 && _searchActiveIndex < _searchRows.length){
+      e.preventDefault();
+      pickSearchResult(_searchRows[_searchActiveIndex].key);
+    }
+  }
+}
+function moveSearchActive(dir){
+  if(!_searchRows.length) return;
+  _searchActiveIndex = Math.max(0, Math.min(_searchRows.length-1, _searchActiveIndex + dir));
+  renderSearchDropdown(_searchRows);
+}
+function closeSearchDropdown(){
+  const dd = document.getElementById('search-results-dropdown');
+  if(dd){ dd.classList.remove('open'); dd.innerHTML=''; }
+  _searchRows = []; _searchActiveIndex = -1;
+}
+function showSearchHint(msg){
+  const dd = document.getElementById('search-results-dropdown');
+  if(!dd) return;
+  dd.innerHTML = '<div class="sr-empty">'+msg+'</div>';
+  dd.classList.add('open');
+}
+async function runSearch(q){
+  showSearchHint(spinHtml(14)+' Searching Jira…');
+  appLogMsg('info','search','Running Jira search for: '+q);
+  try {
+    // Build JQL. Use text~ for fuzzy summary/description match. Also OR a
+    // key-exact match so typing "MKT-528" lands the exact issue at the top.
+    const esc = q.replace(/"/g, '\\"');
+    const isKey = /^[A-Za-z]+-\d+$/.test(q);
+    const clauses = ['text ~ "'+esc+'*"'];
+    if(isKey) clauses.unshift('key = ' + q.toUpperCase());
+    const jql = '(' + clauses.join(' OR ') + ') ORDER BY updated DESC';
+    const url = '/rest/api/3/search/jql?jql=' + encodeURIComponent(jql) + '&fields=summary,issuetype,project,status,assignee,parent&maxResults=40';
+    const d = await jiraGet(url);
+    const items = (d.issues||[]).map(parseIssue);
+    // Categorize
+    const inProjGroupKeys = (currentProjectGroup && projectGroups[currentProjectGroup]) ? new Set(projectGroups[currentProjectGroup]) : null;
+    const teamSet = (currentGroup && groups[currentGroup]) ? new Set(groups[currentGroup]) : null;
+    const inScope = [];
+    const other = [];
+    for(const it of items){
+      const projOk = !inProjGroupKeys || inProjGroupKeys.has(it.project);
+      const teamOk = !teamSet || teamSet.has(it.assignee);
+      if(projOk && teamOk) inScope.push(it); else other.push(it);
+    }
+    _searchRows = [...inScope.map(i=>({...i, _group:'scope'})), ...other.map(i=>({...i, _group:'other'}))];
+    _searchActiveIndex = _searchRows.length ? 0 : -1;
+    renderSearchDropdown(_searchRows, {inScope, other});
+  } catch(e){
+    appLogMsg('error','search','Search failed: '+(e.message||e));
+    showSearchHint('Search failed: '+(e.message||'unknown'));
+  }
+}
+function renderSearchDropdown(rows, grouped){
+  const dd = document.getElementById('search-results-dropdown');
+  if(!dd) return;
+  if(!rows || !rows.length){
+    dd.innerHTML = '<div class="sr-empty">No matches in Jira</div>';
+    dd.classList.add('open');
+    return;
+  }
+  // Split into scope / other if grouped wasn't passed
+  let scope, other;
+  if(grouped){ scope = grouped.inScope; other = grouped.other; }
+  else { scope = rows.filter(r=>r._group==='scope'); other = rows.filter(r=>r._group==='other'); }
+  const scopeLabel = (() => {
+    const parts = [];
+    if(currentGroup && groups[currentGroup]) parts.push('Team: '+currentGroup);
+    if(currentProjectGroup && projectGroups[currentProjectGroup]) parts.push('Project group: '+currentProjectGroup);
+    return parts.length ? parts.join(' · ') : 'Your active scope';
+  })();
+  let html = '';
+  if(scope && scope.length){
+    html += '<div class="sr-group-hdr"><span style="color:#5E8E38">●</span> In your scope <span style="color:#C9CACC;font-weight:400;text-transform:none;letter-spacing:0">— '+scopeLabel+' · '+scope.length+' result'+(scope.length===1?'':'s')+'</span></div>';
+    html += scope.map((it, idx)=>renderSearchRow(it, idx)).join('');
+  }
+  if(other && other.length){
+    const offset = scope ? scope.length : 0;
+    html += '<div class="sr-group-hdr"><span style="color:#C9CACC">●</span> Other workspace items <span style="color:#C9CACC;font-weight:400;text-transform:none;letter-spacing:0">— '+other.length+' result'+(other.length===1?'':'s')+'</span></div>';
+    html += other.map((it, idx)=>renderSearchRow(it, idx + offset)).join('');
+  }
+  dd.innerHTML = html;
+  dd.classList.add('open');
+}
+function renderSearchRow(it, idx){
+  const t = it.type || 'Task';
+  const tc = TC[t] || TC.Task;
+  const active = idx === _searchActiveIndex;
+  const safeKey = (it.key||'').replace(/'/g, "\\'");
+  return `<div class="sr-row" style="${active?'background:#E0F0F8':''}" onclick="pickSearchResult('${safeKey}')" data-idx="${idx}">
+    <span class="sr-type" style="background:${tc.bg};color:${tc.c}">${t}</span>
+    <span class="sr-key">${it.key}</span>
+    <span class="sr-sum">${(it.summary||'').replace(/</g,'&lt;')}</span>
+    <span class="sr-meta">${it.project||''}${it.assignee && it.assignee!=='Unassigned'?' · '+it.assignee:''}</span>
+  </div>`;
+}
+function pickSearchResult(key){
+  if(!key) return;
+  // Clear the search field and close the dropdown
+  const input = document.getElementById('search-input');
+  if(input) input.value = '';
+  closeSearchDropdown();
+  try { openPane(key); } catch(e){ appLogMsg('error','search','openPane failed: '+(e.message||e)); }
 }
 
 
@@ -4837,7 +5039,10 @@ async function loadActivity() {
     // so it reliably catches every comment on my own tasks even when index lags.
     const personEsc = person.replace(/"/g, '\\\\"');
     // v76: quote Sub-task in JQL — hyphenated values without quotes break parsing on some instances.
-    const typeFilter = 'issuetype in (Epic, Task, "Sub-task")';
+    // v87: include Milestone — in projects that use Milestone in place of Epic
+    //      (e.g. MKT), comments on the Milestone are exactly the same kind of
+    //      "comment on a parent of my task" surface and were being missed.
+    const typeFilter = 'issuetype in (Epic, Milestone, Task, "Sub-task")';
     const jqlA = '(assignee = "'+personEsc+'") AND '+typeFilter+' AND updated >= -'+doneDays+'d ORDER BY updated DESC';
     // v78: Use accountId, not just displayName, for Query B.
     // Why: commentAuthor's displayName lookup is flaky/laggy in Jira Cloud, and ADF mention nodes
