@@ -396,7 +396,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v80</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v81</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -2794,6 +2794,19 @@ async function showProjectGroupModal() {
   await loadProjectGroups();
   renderPGMGroups();
   renderPGMProjects();
+  // v81: hide the "create new group" form for non-admins. They should only
+  // be picking from existing groups; only admins can bootstrap new ones.
+  const canEdit = (typeof canEditProjectGroups === 'function') ? canEditProjectGroups() : false;
+  // The "create new group" block is the second flex item in the scroll area.
+  // Find it by looking up the input id and hiding its parent block.
+  const newInput = document.getElementById('pgm-new-name');
+  if(newInput && !canEdit) {
+    const block = newInput.closest('div[style*="border-top"]');
+    if(block) block.style.display = 'none';
+  } else if(newInput && canEdit) {
+    const block = newInput.closest('div[style*="border-top"]');
+    if(block) block.style.display = '';
+  }
 }
 
 function hideProjGroupModal() {
@@ -2927,6 +2940,13 @@ async function loadProjectGroups() {
 }
 
 async function saveProjectGroup(name, projectKeys) {
+  // v81: defense-in-depth — block non-admin writes at the KV layer so no
+  // code path (UI bug, devtools, future feature) can silently overwrite a
+  // shared group on a teammate's machine. UI already hides edit controls.
+  if(typeof canEditProjectGroups === 'function' && !canEditProjectGroups()){
+    appLogMsg('warn','settings','saveProjectGroup blocked for non-admin: '+name);
+    return;
+  }
   projectGroups[name] = projectKeys;
   try {
     await kvSet('projgroup:' + name, JSON.stringify(projectKeys));
@@ -2936,6 +2956,10 @@ async function saveProjectGroup(name, projectKeys) {
 }
 
 async function deleteProjectGroupKV(name) {
+  if(typeof canEditProjectGroups === 'function' && !canEditProjectGroups()){
+    appLogMsg('warn','settings','deleteProjectGroupKV blocked for non-admin: '+name);
+    return;
+  }
   delete projectGroups[name];
   try {
     const target = encodeURIComponent(KV.replace('/kv','') + '/kv');
@@ -3077,12 +3101,20 @@ function renderSettings(){
     const pgNames=Object.keys(projectGroups);
     const activePG=window._activePGTab||(pgNames[0]||null);
     window._activePGTab=activePG;
+    // v81: project groups are shared via KV. To prevent teammates from
+    // accidentally inflating a group back to "all projects", only admins
+    // (Owner + anyone in adminUsers) can edit; everyone else sees read-only.
+    const canEditGroups = cfg.email===ADMIN_EMAIL || adminUsers.includes(cfg.email);
     body.innerHTML=`
+      ${canEditGroups ? `
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
         <input class="form-input" id="new-pg-name" placeholder="New project group name (e.g. Commercial)…" style="flex:1"
           onkeydown="if(event.key==='Enter')createNewProjectGroup()">
         <button class="primary-btn" onclick="createNewProjectGroup()">+ New project group</button>
-      </div>
+      </div>` : `
+      <div style="padding:10px 14px;background:#FFF4E0;border:1px solid #E08000;border-radius:8px;margin-bottom:14px;font-size:12px;color:#664000">
+        <b>Read-only.</b> Project groups are managed by your admin. Ask them if you need a change.
+      </div>`}
       ${pgNames.length===0
         ? '<div style="font-size:13px;color:#9EA0A4;font-style:italic;padding:8px 0">No project groups yet — create one above.</div>'
         : `<div>
@@ -3106,27 +3138,37 @@ function renderSettings(){
                     style="font-size:11px;padding:5px 12px;border-radius:6px;border:1px solid #2E99CE;background:${currentProjectGroup===activePG?'#125462':'#fff'};color:${currentProjectGroup===activePG?'#fff':'#2E99CE'};cursor:pointer">
                     ${currentProjectGroup===activePG?'✓ Active':'Use this group'}
                   </button>
-                  <button 
+                  ${canEditGroups ? `<button
                     data-pgname="${activePG.replace(/"/g,'&quot;')}"
                     onclick="const n=this.getAttribute('data-pgname');deletePG(n)"
-                    style="font-size:11px;padding:5px 12px;border-radius:6px;border:1px solid #D6202B;background:#fff;color:#D6202B;cursor:pointer">Delete</button>
+                    style="font-size:11px;padding:5px 12px;border-radius:6px;border:1px solid #D6202B;background:#fff;color:#D6202B;cursor:pointer">Delete</button>` : ''}
                 </div>
               </div>
-              <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">
-                Select projects for this group (${(projectGroups[activePG]||[]).length} selected)
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:8px;flex-wrap:wrap">
+                <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em">
+                  <span id="pg-selcount-${activePG.replace(/[^a-z0-9]/gi,'_')}">${(projectGroups[activePG]||[]).length}</span> of ${allProjects.length} projects selected
+                </div>
+                ${canEditGroups ? `<div style="display:flex;gap:6px">
+                  <button data-pg="${activePG.replace(/"/g,'&quot;')}" onclick="pgSelectAllProjects(this.getAttribute('data-pg'))"
+                    style="font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid #2E99CE;background:#fff;color:#2E99CE;cursor:pointer;font-weight:700">Select all</button>
+                  <button data-pg="${activePG.replace(/"/g,'&quot;')}" onclick="pgClearAllProjects(this.getAttribute('data-pg'))"
+                    style="font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid #C9CACC;background:#fff;color:#73777C;cursor:pointer;font-weight:700">Clear all</button>
+                </div>` : ''}
               </div>
-              <div style="max-height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
+              <div id="pg-proj-list" style="max-height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
                 ${allProjects.map(p=>{
                   const inGroup=(projectGroups[activePG]||[]).includes(p.key);
-                  return`<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:6px;background:${inGroup?'#E0F0F8':'#F7F8F9'};border:1px solid ${inGroup?'#2E99CE':'#E4E6E8'}">
-                    <input type="checkbox" ${inGroup?'checked':''} 
-                      data-group="${activePG.replace(/"/g,'&quot;')}" 
+                  const rowId='pgrow-'+(activePG.replace(/[^a-z0-9]/gi,'_'))+'-'+p.key.replace(/[^a-z0-9]/gi,'_');
+                  const tickId='pgtick-'+(activePG.replace(/[^a-z0-9]/gi,'_'))+'-'+p.key.replace(/[^a-z0-9]/gi,'_');
+                  return`<div id="${rowId}" data-pg-row="1" data-pg-key="${p.key}" style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:6px;background:${inGroup?'#E0F0F8':'#F7F8F9'};border:1px solid ${inGroup?'#2E99CE':'#E4E6E8'}">
+                    <input type="checkbox" ${inGroup?'checked':''} ${canEditGroups?'':'disabled'}
+                      data-group="${activePG.replace(/"/g,'&quot;')}"
                       data-key="${p.key}"
-                      onchange="togglePGProject(this.getAttribute('data-group'),this.getAttribute('data-key'),this.checked)" 
-                      style="cursor:pointer">
+                      onchange="togglePGProject(this.getAttribute('data-group'),this.getAttribute('data-key'),this.checked)"
+                      style="cursor:${canEditGroups?'pointer':'not-allowed'}">
                     <span style="font-size:11px;font-weight:700;color:#257AA5;font-family:monospace;min-width:50px">${p.key}</span>
                     <span style="font-size:12px;color:#292E37;flex:1">${p.name}</span>
-                    ${inGroup?'<span style="font-size:11px;color:#2E99CE">✓</span>':''}
+                    <span id="${tickId}" style="font-size:11px;color:#2E99CE;visibility:${inGroup?'visible':'hidden'}">✓</span>
                   </div>`;
                 }).join('')}
               </div>
@@ -3260,7 +3302,20 @@ function deletePG(name){
   populateProjGroupSelector();
 }
 
+// v81: admin gate — only owner + adminUsers can write project-group changes.
+// Returns true if the current user is allowed to mutate shared group data.
+function canEditProjectGroups(){
+  try { return cfg.email===ADMIN_EMAIL || (adminUsers||[]).includes(cfg.email); }
+  catch { return false; }
+}
+
 function togglePGProject(groupName,projectKey,add){
+  if(!canEditProjectGroups()){
+    appLogMsg('warn','settings','Blocked non-admin write to projectGroup '+groupName);
+    // Revert the visual state if a teammate somehow toggled (e.g. via devtools)
+    renderSettings();
+    return;
+  }
   if(!projectGroups[groupName]) projectGroups[groupName]=[];
   if(add){
     if(!projectGroups[groupName].includes(projectKey)) projectGroups[groupName].push(projectKey);
@@ -3269,9 +3324,43 @@ function togglePGProject(groupName,projectKey,add){
   }
   // Save to KV immediately
   saveProjectGroup(groupName,[...projectGroups[groupName]]);
-  // Update just the count badge without re-rendering the whole tab
-  const countBadge=document.getElementById('pg-count-'+groupName.replace(/[^a-z0-9]/gi,'_'));
+  // v81: update the row's visual state in-place. Previously we only refreshed
+  // the count badge, so an unchecked row kept its blue "selected" background.
+  const safeGrp=groupName.replace(/[^a-z0-9]/gi,'_');
+  const safeKey=projectKey.replace(/[^a-z0-9]/gi,'_');
+  const row=document.getElementById('pgrow-'+safeGrp+'-'+safeKey);
+  if(row){
+    row.style.background = add ? '#E0F0F8' : '#F7F8F9';
+    row.style.border = '1px solid ' + (add ? '#2E99CE' : '#E4E6E8');
+  }
+  const tick=document.getElementById('pgtick-'+safeGrp+'-'+safeKey);
+  if(tick) tick.style.visibility = add ? 'visible' : 'hidden';
+  // Tab badge (top) and inline counter (above the list)
+  const countBadge=document.getElementById('pg-count-'+safeGrp);
   if(countBadge) countBadge.textContent=projectGroups[groupName].length;
+  const inlineCount=document.getElementById('pg-selcount-'+safeGrp);
+  if(inlineCount) inlineCount.textContent=projectGroups[groupName].length;
+}
+
+// v81: bulk operations for project-group editing. Both write the new array to
+// KV in a single PUT (not one PUT per project) and then re-render the tab so
+// every row reflects the new state.
+function pgSelectAllProjects(groupName){
+  if(!canEditProjectGroups()) return;
+  if(!projectGroups[groupName]) projectGroups[groupName]=[];
+  projectGroups[groupName] = allProjects.map(p=>p.key);
+  saveProjectGroup(groupName, [...projectGroups[groupName]]);
+  renderSettings();
+}
+
+function pgClearAllProjects(groupName){
+  if(!canEditProjectGroups()) return;
+  if(!projectGroups[groupName]) projectGroups[groupName]=[];
+  // Confirm because this is destructive
+  if(!confirm('Clear all projects from "'+groupName+'"?\n\nThis will save immediately to the shared group and other users will see the empty group.')) return;
+  projectGroups[groupName] = [];
+  saveProjectGroup(groupName, []);
+  renderSettings();
 }
 /* ══ SETTINGS HELPERS ══════════════════════════════════════════════ */
 function renderTeamList(){
