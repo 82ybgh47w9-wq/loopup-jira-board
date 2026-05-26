@@ -436,7 +436,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v92</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v93</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -1425,6 +1425,60 @@ async function onDrop(e,status){
   await transitionIssue(dragKey,status);
   setTimeout(()=>doFetch(true),1500);
 }
+
+// v93: Team-view drop handler. Each column on the Team view belongs to a
+// specific person, so dropping a card into a different column should
+// reassign the task to that person — alongside the existing status change.
+// We resolve the target user's accountId via /rest/api/3/user/search using
+// the displayName we already have (same lookup pattern submitCreate uses).
+async function onDropTeamLane(e, status, targetPerson){
+  e.preventDefault();
+  e.currentTarget.classList.remove("drag-over");
+  if(!dragKey){dragKey = e.dataTransfer.getData("text/plain") || window._dragKey;}
+  if(!dragKey) return;
+  const issue = allIssues.find(i => i.key === dragKey);
+  if(!issue){ dragKey = null; return; }
+  const statusChanged = normStatus(issue.status) !== status;
+  const assigneeChanged = !!targetPerson && issue.assignee !== targetPerson;
+  // Optimistic UI updates first (status + assignee), then fire writes.
+  if(statusChanged) locStat[dragKey] = status;
+  if(assigneeChanged){
+    for(let i = 0; i < allIssues.length; i++){
+      if(allIssues[i].key === dragKey) allIssues[i].assignee = targetPerson;
+    }
+  }
+  if(statusChanged || assigneeChanged){
+    saveAll(); updateStats(); renderMain();
+  }
+  if(statusChanged){
+    try { await transitionIssue(dragKey, status); } catch(e){ appLogMsg('warn','team-drop','transition failed: '+(e.message||e)); }
+  }
+  if(assigneeChanged){
+    try {
+      const users = await jiraGet('/rest/api/3/user/search?query=' + encodeURIComponent(targetPerson) + '&maxResults=5');
+      const arr = Array.isArray(users) ? users : [];
+      const exact = arr.find(u => (u.displayName||'').toLowerCase() === targetPerson.toLowerCase());
+      const pick = exact || arr[0];
+      if(pick && pick.accountId){
+        const r = await jiraPut('/rest/api/3/issue/' + dragKey, { fields: { assignee: { accountId: pick.accountId } } });
+        if(!(r && (r.ok || r.status === 204))){
+          let detail=''; try { detail = await r.text(); } catch{}
+          appLogMsg('error','team-drop','assignee PUT failed for '+dragKey+': '+r.status+' '+detail.slice(0,200));
+          alert('Could not reassign '+dragKey+' to '+targetPerson+' in Jira (HTTP '+r.status+'). The board has been reverted on next refresh.');
+        } else {
+          appLogMsg('info','team-drop','Reassigned '+dragKey+' → '+targetPerson);
+        }
+      } else {
+        appLogMsg('warn','team-drop','Could not resolve accountId for '+targetPerson);
+        alert('Could not find a Jira account for "'+targetPerson+'". The reassignment did not save.');
+      }
+    } catch(err){
+      appLogMsg('error','team-drop','assignee lookup threw: '+(err.message||err));
+    }
+  }
+  if(statusChanged || assigneeChanged) setTimeout(()=>doFetch(true), 1500);
+  dragKey = null;
+}
 async function onDropMatrix(e,status,priority){
   e.preventDefault();e.currentTarget.classList.remove("drag-over");
   if(!dragKey){dragKey=e.dataTransfer.getData("text/plain")||window._dragKey;}
@@ -2018,7 +2072,12 @@ function renderManager(){
         if(row.key==="active"){ const ai=activeKey?issues.find(i=>i.key===activeKey):null; if(ai)cards=[ai]; }
         else { cards = issues.filter(i=>row.statuses.includes(ns(i))); }
         const dropStatus = row.key==="active"?"In Progress":row.statuses[0];
-        html += `<div class="lane-drop-zone" ondragover="onDragOver(event,'${dropStatus}')" ondragleave="onDragLeave(event)" ondrop="onDrop(event,'${dropStatus}')"
+        // v93: Team view drops should reassign as well as transition status.
+        // We pass the column's owner (`person`) into onDropTeamLane so the
+        // handler can fire a PUT to update assignee when the card lands in
+        // someone else's lane.
+        const safePerson = person.replace(/'/g, "\\'");
+        html += `<div class="lane-drop-zone" ondragover="onDragOver(event,'${dropStatus}')" ondragleave="onDragLeave(event)" ondrop="onDropTeamLane(event,'${dropStatus}','${safePerson}')"
           style="min-width:220px;width:220px;padding:6px 8px;border-right:1px solid #E4E6E8;vertical-align:top;min-height:${row.key==="active"?"90px":row.key==="done"?"50px":"70px"}">
           ${cards.length ? cards.map(i=>swimCard(i,row.key==="active",row.key==="done")).join("") : `<div style="font-size:11px;color:#C9CACC;padding:4px;font-style:italic">${row.key==="active"?"Nothing active":""}</div>`}
         </div>`;
@@ -3114,7 +3173,9 @@ function openCreate(defaultAssignee, e) {
     aiSuggestions:[], aiLoading:false,
     showHierarchy:false,
     // v86: new fields for the AI-first parent selector
-    epicExpanded:false, epicFilter:''
+    epicExpanded:false, epicFilter:'',
+    // v93: "make active" preset (priority=Highest + status=In Progress + setActive)
+    makeActive:false
   };
   document.getElementById('create-overlay').classList.add('open');
   renderCreateModal();
@@ -3159,7 +3220,29 @@ function renderCreateModal() {
         //  - Loading → spinner.
         //  - AI suggestions ready → top 10 with "Best match" on the leader.
         //  - Optional "Show all N other parents" expand for the rare miss case.
+        // v93: once a parent is selected, collapse to a compact "✓ Selected
+        // parent" card with a "Change parent" button. We no longer rerender
+        // the full list as the user types the rest of the task name, which
+        // was the clunky "flashing" experience they reported.
         const summary = (s.summary||'').trim();
+        if(s.selEpic){
+          // Lookup the picked item across suggestions + full epic list so we
+          // can render its type badge + summary alongside the key.
+          const sel = (s.aiSuggestions||[]).find(x=>x.key===s.selEpic)
+                   || (s.epics||[]).find(x=>x.key===s.selEpic)
+                   || {key:s.selEpic, summary:'', type:'Epic'};
+          const t = sel.type || 'Epic';
+          const isMs = t === 'Milestone';
+          const typeBg = isMs ? '#E0F0F8' : '#F3EEFF';
+          const typeC = isMs ? '#125462' : '#6B3FA0';
+          return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;border:2px solid #5E8E38;background:#F0FAEC">
+            <span style="font-size:18px;color:#5E8E38;font-weight:700">✓</span>
+            <span style="font-size:9px;font-weight:700;background:${typeBg};color:${typeC};padding:2px 6px;border-radius:8px;text-transform:uppercase;letter-spacing:.04em">${t}</span>
+            <span style="font-size:10px;font-weight:700;color:#257AA5;font-family:monospace">${sel.key}</span>
+            <span style="font-size:12px;color:#292E37;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(sel.summary||'').replace(/</g,'&lt;')}</span>
+            <button onclick="clearSelectedParentForCreate()" style="font-size:11px;padding:5px 10px;border-radius:6px;border:1px solid #5E8E38;background:#fff;color:#3D6B1E;cursor:pointer;font-weight:700;white-space:nowrap">Change parent</button>
+          </div>`;
+        }
         const renderRow = (ep, opts) => {
           opts = opts || {};
           const sel = s.selEpic === ep.key;
@@ -3234,8 +3317,22 @@ function renderCreateModal() {
     </div>
     ${s.showHierarchy?`<div style="background:#F7F8F9;border-radius:10px;padding:12px;margin-bottom:14px;border:1px solid #E4E6E8"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Link to hierarchy</div><div id="hierarchy-rows"></div></div>`:''}
     <div style="display:flex;gap:16px;margin-bottom:14px">
-      <div style="flex:1"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Status</div><div style="display:flex;gap:4px;flex-wrap:wrap">${['Selected','In Progress','Backlog'].map(st=>{const sel=s.status===st;const sc=SC[st]||SC.Backlog;return`<button onclick="createState.status='${st}';renderCreateModal()" style="padding:5px 12px;border-radius:16px;font-size:11px;font-weight:700;cursor:pointer;border:2px solid ${sel?sc.c:'transparent'};background:${sel?sc.bg:'#EEF1F3'};color:${sel?sc.c:'#73777C'}">${st}</button>`;}).join('')}</div></div>
-      <div style="flex:1"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Priority</div><div style="display:flex;gap:4px;flex-wrap:wrap">${['Highest','High','Medium','Low'].map(pr=>{const sel=s.priority===pr;const pc=PC[pr]||PC.Medium;return`<button onclick="createState.priority='${pr}';renderCreateModal()" style="padding:5px 12px;border-radius:16px;font-size:11px;font-weight:700;cursor:pointer;border:2px solid ${sel?pc.c:'transparent'};background:${sel?pc.bg:'#EEF1F3'};color:${sel?pc.c:'#73777C'}">${pr}</button>`;}).join('')}</div></div>
+      <div style="flex:1"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Status</div><div style="display:flex;gap:4px;flex-wrap:wrap">${['Selected','In Progress','Backlog'].map(st=>{const sel=s.status===st;const sc=SC[st]||SC.Backlog;return`<button onclick="createState.status='${st}';createState.makeActive=false;renderCreateModal()" style="padding:5px 12px;border-radius:16px;font-size:11px;font-weight:700;cursor:pointer;border:2px solid ${sel?sc.c:'transparent'};background:${sel?sc.bg:'#EEF1F3'};color:${sel?sc.c:'#73777C'}">${st}</button>`;}).join('')}</div></div>
+      <div style="flex:1"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Priority</div><div style="display:flex;gap:4px;flex-wrap:wrap">${['Highest','High','Medium','Low'].map(pr=>{const sel=s.priority===pr;const pc=PC[pr]||PC.Medium;return`<button onclick="createState.priority='${pr}';createState.makeActive=false;renderCreateModal()" style="padding:5px 12px;border-radius:16px;font-size:11px;font-weight:700;cursor:pointer;border:2px solid ${sel?pc.c:'transparent'};background:${sel?pc.bg:'#EEF1F3'};color:${sel?pc.c:'#73777C'}">${pr}</button>`;}).join('')}</div></div>
+    </div>
+    <!-- v93: "Make active" shortcut. Toggling this ON forces priority=Highest +
+         status=In Progress, and after the task is created, sets the activeFlag
+         for the assignee so the new issue immediately shows the green "● Active"
+         pill across views. Clicking any Status or Priority button manually
+         unticks Make active (the user is overriding the preset). -->
+    <div style="margin-bottom:14px;padding:10px 12px;background:${s.makeActive?'#F0FAEC':'#F7F8F9'};border:1px solid ${s.makeActive?'#5E8E38':'#E4E6E8'};border-radius:8px">
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+        <input type="checkbox" ${s.makeActive?'checked':''} onchange="toggleMakeActiveOnCreate(this.checked)" style="width:18px;height:18px;cursor:pointer">
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:700;color:${s.makeActive?'#3D6B1E':'#292E37'}">${s.makeActive?'● ':''}Start working on this immediately</div>
+          <div style="font-size:11px;color:${s.makeActive?'#3D6B1E':'#9EA0A4'};margin-top:1px">Sets priority to <b>Highest</b>, status to <b>In Progress</b>, and marks it active for ${s.assignee || 'the assignee'} on save.</div>
+        </div>
+      </label>
     </div>
     <div style="margin-bottom:12px"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Description</div>
       <textarea id="cr-desc" placeholder="Add details…" oninput="createState.description=this.value" style="width:100%;min-height:60px;padding:10px 12px;border:1px solid #E4E6E8;border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box">${s.description}</textarea></div>
@@ -3249,6 +3346,19 @@ function renderCreateModal() {
     attachMentionTypeahead('cr-desc');
     attachMentionTypeahead('cr-comment');
   }, 50);
+}
+
+// v93: Make-active toggle handler. When turned ON, snap priority+status to
+// Highest/In Progress so the task is ready for active work the moment it's
+// created. The actual setActiveFlag call happens AFTER successful Jira create
+// (in submitCreate), once we have the new issue key.
+function toggleMakeActiveOnCreate(on){
+  createState.makeActive = !!on;
+  if(on){
+    createState.priority = 'Highest';
+    createState.status = 'In Progress';
+  }
+  renderCreateModal();
 }
 
 function updateCreateButtonState() {
@@ -3310,7 +3420,12 @@ async function loadCreateHierarchy() {
 }
 
 async function createHierarchyItem(level) {
-  // level is one of: 'Legend', 'Initiative', 'Epic' (capitalized)
+  // level is one of: 'Legend', 'Initiative', 'Epic', 'Milestone' (capitalized).
+  // v93 fix: 'Milestone' is now a first-class level. v87 made the bottom-row
+  // label adapt to project type (Milestone in COPS/MKT-style projects, Epic
+  // elsewhere), and that label is what's passed into this function. Without
+  // a Milestone branch the parent-determination skipped and the create
+  // silently produced an orphan with no Initiative link.
   const s = createState;
   const proj = s.projectKey;
   if(!proj) { alert('Please select a project first'); return; }
@@ -3319,12 +3434,14 @@ async function createHierarchyItem(level) {
   const name = (nameEl?.value||'').trim();
   if(!name) { alert('Please enter a name for the new '+level); return; }
 
-  // Determine parent based on hierarchy rules
+  // Determine parent based on hierarchy rules. Epic and Milestone share a
+  // tier in LoopUp's hierarchy — both descend from an Initiative — so they
+  // share parent-lookup logic.
   let parentKey = null;
   if(level === 'Initiative') {
     parentKey = s.selLegend;
     if(!parentKey) { alert('Please select or create a Legend first'); return; }
-  } else if(level === 'Epic') {
+  } else if(level === 'Epic' || level === 'Milestone') {
     parentKey = s.selInit;
     if(!parentKey) { alert('Please select or create an Initiative first'); return; }
   }
@@ -3335,12 +3452,14 @@ async function createHierarchyItem(level) {
   btn.disabled = true;
   btn.textContent = 'Creating…';
 
-  // v86: at the Epic level, use the issue type the project actually supports.
-  // Some projects (e.g. MKT) use Milestone in place of Epic and reject
-  // `issuetype: Epic` outright. createState.epicCreateType is set by
-  // loadCreateHierarchy based on what already exists in the project.
+  // v86: at the Epic/Milestone level, use the issue type the project actually
+  // supports. epicCreateType is set by loadCreateHierarchy based on what
+  // already exists in the project. The user might have clicked +New on a row
+  // labelled "Milestone" — in that case we already know the type, no override
+  // needed. Only when level==='Epic' do we consult epicCreateType.
   let createTypeName = level;
   if(level === 'Epic') createTypeName = s.epicCreateType || 'Epic';
+  // (level === 'Milestone' stays as Milestone)
 
   const payload = {
     fields: {
@@ -3374,7 +3493,10 @@ async function createHierarchyItem(level) {
   };
   try {
     let attempt = await tryCreate(createTypeName);
-    if((!attempt.result || !attempt.result.success) && level === 'Epic') {
+    // v93: fallback retry now fires for both Epic and Milestone levels —
+    // either could be the "first guess" depending on h.label, and either
+    // could be the type the project actually accepts.
+    if((!attempt.result || !attempt.result.success) && (level === 'Epic' || level === 'Milestone')) {
       const fallback = createTypeName === 'Epic' ? 'Milestone' : 'Epic';
       appLogMsg('warn','hierarchy','Create as '+createTypeName+' failed — retrying as '+fallback);
       attempt = await tryCreate(fallback);
@@ -3425,7 +3547,9 @@ async function createHierarchyItem(level) {
       } else if(level === 'Initiative') {
         s.initiatives.push(newItem);
         s.selInit = result.key;
-      } else if(level === 'Epic') {
+      } else if(level === 'Epic' || level === 'Milestone') {
+        // v93: Milestone goes into the same Epic-level cache; the dropdown
+        // shows both side-by-side.
         s.epics.push(newItem);
         s.selEpic = result.key;
       }
@@ -3445,7 +3569,7 @@ async function createHierarchyItem(level) {
     } else {
       btn.disabled = false;
       btn.textContent = origTxt;
-      const triedTypes = level === 'Epic' && createTypeName !== attempt.typeName
+      const triedTypes = (level === 'Epic' || level === 'Milestone') && createTypeName !== attempt.typeName
         ? createTypeName + ' and ' + attempt.typeName
         : attempt.typeName;
       alert('Failed to create at the '+level+' level (tried '+triedTypes+'). Check that the project allows the issue type and that you have permissions.');
@@ -3476,10 +3600,19 @@ function selectEpicSuggestion(key, summary, project) {
 let aiSearchTimer = null;
 function scheduleAiSearch() {
   clearTimeout(aiSearchTimer);
+  // v93: once the user has picked a parent, stop re-running AI search as they
+  // continue typing the task name. The flashing/re-filtering as you type the
+  // rest of the title was disorienting — and the user has already committed
+  // to a parent, so there's nothing to suggest. If they want to change it,
+  // there's a "Change parent" button on the selected-parent card.
+  if(createState.selEpic) return;
   aiSearchTimer = setTimeout(runAiSearch, 900);
 }
 
 async function runAiSearch() {
+  // v93: defence in depth — even if scheduleAiSearch was somehow called with
+  // a parent already selected, don't run the search.
+  if(createState.selEpic) return;
   appLogMsg("info","ai","AI search triggered",createState.summary);
   const summary = (createState.summary||'').trim();
   const proj = createState.projectKey;
@@ -3500,6 +3633,19 @@ async function runAiSearch() {
   } catch { createState.aiSuggestions = []; }
   createState.aiLoading = false;
   renderCreateModal();
+}
+
+// v93: clear the parent selection so the AI list / search re-opens. Used by
+// the "Change parent" button on the compact selected-parent card.
+function clearSelectedParentForCreate(){
+  createState.selEpic = '';
+  createState.selInit = '';
+  createState.selLegend = '';
+  createState.epicExpanded = false;
+  createState.epicFilter = '';
+  renderCreateModal();
+  // If task name is long enough, kick off a fresh AI search immediately
+  if((createState.summary||'').trim().length >= 3) scheduleAiSearch();
 }
 
 async function renderHierarchyRows(){
@@ -3675,13 +3821,29 @@ async function submitCreate(){
       } catch(e) { appLogMsg('warn','create','Comment failed for '+newKey+': '+(e.message||e)); }
     }
 
+    // v93: if Make-active was toggled on, set the active flag for the
+    // assignee now that we have the new issue's key. Uses the existing
+    // setActiveFlag helper (Cloudflare KV) so other users immediately see
+    // the assignee's "active task" change too.
+    if(s.makeActive){
+      // Resolve the assignee name (user might be unassigned — in that case
+      // active doesn't make sense, so we skip with a log entry).
+      const activeName = s.assignee || currentIam || '';
+      if(activeName && typeof setActiveFlag === 'function'){
+        try { await setActiveFlag(activeName, newKey); appLogMsg('info','create','Marked '+newKey+' active for '+activeName); }
+        catch(e) { appLogMsg('warn','create','setActiveFlag failed for '+newKey+': '+(e.message||e)); }
+      } else if(!activeName) {
+        appLogMsg('warn','create','Make-active was on but no assignee — skipping setActiveFlag');
+      }
+    }
+
     closeCreate();
     doFetch(false);
 
     // Show success toast
     const toast = document.createElement('div');
     toast.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#5E8E38;color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:700;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.2)';
-    toast.innerHTML = '✓ Created <a href="'+BASE()+newKey+'" target="_blank" style="color:#fff;text-decoration:underline;margin-left:6px">'+newKey+'</a>';
+    toast.innerHTML = (s.makeActive?'● Started ':'✓ Created ') + '<a href="'+BASE()+newKey+'" target="_blank" style="color:#fff;text-decoration:underline;margin-left:6px">'+newKey+'</a>';
     document.body.appendChild(toast);
     setTimeout(()=>toast.remove(), 4000);
   } catch(e) {
@@ -3711,7 +3873,8 @@ function quickAddTask(epicKey, epicSummary, projectKey) {
     selLegend: '', selInit: '', selEpic: epicKey || '',
     legends: [], initiatives: [], epics: [],
     aiSuggestions: [], aiLoading: false, showHierarchy: false,
-    epicExpanded: !!(epicKey), epicFilter: ''
+    epicExpanded: !!(epicKey), epicFilter: '',
+    makeActive: false
   };
   document.getElementById('create-overlay').classList.add('open');
   renderCreateModal();
