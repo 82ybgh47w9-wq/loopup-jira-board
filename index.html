@@ -396,7 +396,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v85</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v86</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -2511,7 +2511,9 @@ function openCreate(defaultAssignee, e) {
     selLegend:'', selInit:'', selEpic:'',
     legends:[], initiatives:[], epics:[],
     aiSuggestions:[], aiLoading:false,
-    showHierarchy:false
+    showHierarchy:false,
+    // v86: new fields for the AI-first parent selector
+    epicExpanded:false, epicFilter:''
   };
   document.getElementById('create-overlay').classList.add('open');
   renderCreateModal();
@@ -2545,30 +2547,90 @@ function renderCreateModal() {
     ${!s.projectKey?`<div style="text-align:center;padding:40px 20px;color:#C9CACC"><div style="font-size:32px;margin-bottom:8px">↑</div><div style="font-size:14px;font-weight:600;color:#9EA0A4">Select a project to get started</div></div>`:`
     <div style="margin-bottom:14px"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Task name <span style="color:#D6202B">*</span></div>
       <input id="cr-summary" class="form-input" value="${s.summary}" placeholder="What needs to be done?" oninput="createState.summary=this.value;scheduleAiSearch();updateCreateButtonState()" style="font-size:14px;height:38px;padding:0 12px;border-radius:8px;border:1px solid #E4E6E8;width:100%;box-sizing:border-box"></div>
-    <div style="margin-bottom:14px"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center"><span>Select parent (Epic or Milestone)</span><span style="font-weight:600;color:#C9CACC;text-transform:none;letter-spacing:0">${(()=>{const list=[...s.aiSuggestions,...(s.epics||[]).filter(ep=>!s.aiSuggestions.find(a=>a.key===ep.key))];const ep=list.filter(x=>x.type==='Epic'||!x.type).length;const ms=list.filter(x=>x.type==='Milestone').length;return list.length?(ep+' epics · '+ms+' milestones'):'';})()}</span></div>
-      ${s.aiLoading?`<div style="padding:8px;font-size:12px;color:#9EA0A4">${spinHtml(14)} Finding matching parents…</div>`:''}
-      <input id="cr-epic-filter" placeholder="🔍 Filter by key or summary…" value="${s.epicFilter||''}" oninput="createState.epicFilter=this.value;renderCreateModal();setTimeout(()=>{const el=document.getElementById('cr-epic-filter');if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length);}},10)" style="width:100%;padding:6px 10px;font-size:12px;border:1px solid #E4E6E8;border-radius:6px;margin-bottom:6px;box-sizing:border-box">
-      ${s.aiSuggestions.length?`<div style="font-size:10px;color:#5E8E38;font-weight:700;margin-bottom:4px">✦ Suggested</div>`:''}
-      <div style="max-height:320px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;border:1px solid #EEF1F3;border-radius:8px;padding:4px;background:#FCFCFD">
-        ${(()=>{
-          const filt=(s.epicFilter||'').toLowerCase().trim();
-          const combined=[...s.aiSuggestions,...(s.epics||[]).filter(ep=>!s.aiSuggestions.find(a=>a.key===ep.key))];
-          const visible=filt?combined.filter(ep=>(ep.key||'').toLowerCase().includes(filt)||(ep.summary||'').toLowerCase().includes(filt)):combined;
-          if(!visible.length){
-            return '<div style="padding:16px;text-align:center;color:#9EA0A4;font-size:12px">'+(filt?'No matches for "'+filt+'"':combined.length?'':'No epics or milestones found in this project — use "+ Create" below to add one')+'</div>';
-          }
-          return visible.map(ep=>{
-            const sel=s.selEpic===ep.key;
-            const isSug=!!s.aiSuggestions.find(a=>a.key===ep.key);
-            const t=ep.type||'Epic';
-            const isMs=t==='Milestone';
-            const typeBg=isMs?'#E0F0F8':'#F3EEFF';
-            const typeC=isMs?'#125462':'#6B3FA0';
-            return`<div onclick="selectEpicSuggestion('${ep.key}','${(ep.summary||'').replace(/'/g,"\\'")}','${ep.project||''}')" style="display:flex;align-items:center;gap:8px;padding:${isSug?'8':'7'}px 10px;border-radius:8px;cursor:pointer;border:${sel?'2px solid #2E99CE':isSug?'1px solid #E4E6E8':'1px solid #EEF1F3'};background:${sel?'#E0F0F8':isSug?'#fff':'#F7F8F9'}"><span style="font-size:9px;font-weight:700;background:${typeBg};color:${typeC};padding:2px 6px;border-radius:8px;text-transform:uppercase;letter-spacing:.04em">${t}</span><span style="font-size:10px;font-weight:700;color:#257AA5;font-family:monospace">${ep.key}</span><span style="font-size:12px;color:#292E37;flex:1">${ep.summary||''}</span>${sel?'<span style="color:#2E99CE;font-weight:700">✓</span>':''}</div>`;
-          }).join('');
-        })()}
+    <div style="margin-bottom:14px">
+      <div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
+        <span>Select parent (Epic or Milestone)</span>
+        ${s.selEpic?`<span style="font-weight:700;color:#5E8E38;text-transform:none;letter-spacing:0;font-size:11px">✓ ${s.selEpic} selected</span>`:''}
       </div>
-      ${!s.showHierarchy?`<button onclick="createState.showHierarchy=true;renderCreateModal()" style="margin-top:8px;font-size:11px;color:#257AA5;background:none;border:1px dashed #C9CACC;border-radius:6px;padding:6px 12px;cursor:pointer;width:100%">+ Create a new epic (show hierarchy)</button>`:''}</div>
+      ${(()=>{
+        // v86: AI-first epic selection.
+        //  - No task name yet → quiet placeholder, no list.
+        //  - Loading → spinner.
+        //  - AI suggestions ready → top 10 with "Best match" on the leader.
+        //  - Optional "Show all N other parents" expand for the rare miss case.
+        const summary = (s.summary||'').trim();
+        const renderRow = (ep, opts) => {
+          opts = opts || {};
+          const sel = s.selEpic === ep.key;
+          const t = ep.type || 'Epic';
+          const isMs = t === 'Milestone';
+          const typeBg = isMs ? '#E0F0F8' : '#F3EEFF';
+          const typeC = isMs ? '#125462' : '#6B3FA0';
+          const bestMatch = opts.bestMatch ? '<span style="font-size:9px;background:#5E8E38;color:#fff;padding:2px 7px;border-radius:8px;font-weight:700;text-transform:uppercase;letter-spacing:.04em">Best match</span>' : '';
+          return `<div onclick="selectEpicSuggestion('${ep.key}','${(ep.summary||'').replace(/'/g,"\\'")}','${ep.project||''}')" style="display:flex;align-items:center;gap:8px;padding:${opts.bestMatch?'9':'7'}px 10px;border-radius:8px;cursor:pointer;border:${sel?'2px solid #2E99CE':opts.suggestion?'1px solid #E4E6E8':'1px solid #EEF1F3'};background:${sel?'#E0F0F8':opts.suggestion?'#fff':'#F7F8F9'}">
+            ${bestMatch}
+            <span style="font-size:9px;font-weight:700;background:${typeBg};color:${typeC};padding:2px 6px;border-radius:8px;text-transform:uppercase;letter-spacing:.04em">${t}</span>
+            <span style="font-size:10px;font-weight:700;color:#257AA5;font-family:monospace">${ep.key}</span>
+            <span style="font-size:12px;color:#292E37;flex:1">${ep.summary||''}</span>
+            ${sel?'<span style="color:#2E99CE;font-weight:700">✓</span>':''}
+          </div>`;
+        };
+        // Empty / typing-prompt state
+        if(summary.length < 3) {
+          return `<div style="padding:22px 14px;text-align:center;color:#9EA0A4;font-size:12px;border:1px dashed #E4E6E8;border-radius:8px;background:#FCFCFD">
+            ${summary.length===0?'Start typing the task name above to find relevant parents.':'Keep typing — at least 3 characters.'}
+          </div>`;
+        }
+        if(s.aiLoading) {
+          return `<div style="padding:14px;display:flex;align-items:center;justify-content:center;gap:8px;color:#9EA0A4;font-size:12px;border:1px solid #EEF1F3;border-radius:8px;background:#FCFCFD">
+            ${spinHtml(14)} Finding matching parents…
+          </div>`;
+        }
+        const suggestions = (s.aiSuggestions||[]).slice(0, 10);
+        const sugKeys = new Set(suggestions.map(x=>x.key));
+        const others = (s.epics||[]).filter(ep => !sugKeys.has(ep.key));
+        const expanded = !!s.epicExpanded;
+        let html = '';
+        if(suggestions.length) {
+          const safeQuery = summary.replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+          html += `<div style="font-size:10px;color:#5E8E38;font-weight:700;margin-bottom:6px">✦ AI suggestions for "${safeQuery}"</div>`;
+          html += `<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:${others.length?'10':'0'}px">`;
+          suggestions.forEach((ep, idx) => {
+            html += renderRow(ep, { suggestion:true, bestMatch: idx===0 });
+          });
+          html += `</div>`;
+        } else {
+          html += `<div style="padding:14px 12px;text-align:center;color:#9EA0A4;font-size:12px;border:1px dashed #E4E6E8;border-radius:8px;background:#FCFCFD;margin-bottom:8px">
+            No AI matches for "${summary.replace(/</g,'&lt;').replace(/"/g,'&quot;')}". ${others.length?'Use "Show all" below or create a new one.':''}
+          </div>`;
+        }
+        // Show-all expand section
+        if(others.length) {
+          if(!expanded) {
+            html += `<button onclick="createState.epicExpanded=true;renderCreateModal()" style="width:100%;padding:8px;font-size:11px;color:#257AA5;background:#F7F8F9;border:1px dashed #C9CACC;border-radius:6px;cursor:pointer;font-weight:600">
+              Show all ${others.length} other parent${others.length===1?'':'s'} in this project ▼
+            </button>`;
+          } else {
+            html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;margin-top:4px">
+              <span style="font-size:10px;color:#9EA0A4;font-weight:700;text-transform:uppercase;letter-spacing:.04em">All other parents (${others.length})</span>
+              <button onclick="createState.epicExpanded=false;createState.epicFilter='';renderCreateModal()" style="font-size:10px;color:#9EA0A4;background:none;border:none;cursor:pointer">Collapse ▲</button>
+            </div>`;
+            html += `<input id="cr-epic-filter" placeholder="🔍 Filter by key or summary…" value="${(s.epicFilter||'').replace(/"/g,'&quot;')}" oninput="createState.epicFilter=this.value;renderCreateModal();setTimeout(()=>{const el=document.getElementById('cr-epic-filter');if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length);}},10)" style="width:100%;padding:6px 10px;font-size:12px;border:1px solid #E4E6E8;border-radius:6px;margin-bottom:6px;box-sizing:border-box">`;
+            const filt = (s.epicFilter||'').toLowerCase().trim();
+            const visible = filt ? others.filter(ep=>(ep.key||'').toLowerCase().includes(filt)||(ep.summary||'').toLowerCase().includes(filt)) : others;
+            html += `<div style="max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;border:1px solid #EEF1F3;border-radius:8px;padding:4px;background:#FCFCFD">`;
+            if(!visible.length) {
+              html += `<div style="padding:14px;text-align:center;color:#9EA0A4;font-size:12px">No matches for "${filt.replace(/</g,'&lt;').replace(/"/g,'&quot;')}"</div>`;
+            } else {
+              visible.forEach(ep => { html += renderRow(ep, { suggestion:false }); });
+            }
+            html += `</div>`;
+          }
+        }
+        return html;
+      })()}
+      ${!s.showHierarchy?`<button onclick="createState.showHierarchy=true;renderCreateModal()" style="margin-top:8px;font-size:11px;color:#257AA5;background:none;border:1px dashed #C9CACC;border-radius:6px;padding:6px 12px;cursor:pointer;width:100%">+ Create a new epic (show hierarchy)</button>`:''}
+    </div>
     ${s.showHierarchy?`<div style="background:#F7F8F9;border-radius:10px;padding:12px;margin-bottom:14px;border:1px solid #E4E6E8"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Link to hierarchy</div><div id="hierarchy-rows"></div></div>`:''}
     <div style="display:flex;gap:16px;margin-bottom:14px">
       <div style="flex:1"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Status</div><div style="display:flex;gap:4px;flex-wrap:wrap">${['Selected','In Progress','Backlog'].map(st=>{const sel=s.status===st;const sc=SC[st]||SC.Backlog;return`<button onclick="createState.status='${st}';renderCreateModal()" style="padding:5px 12px;border-radius:16px;font-size:11px;font-weight:700;cursor:pointer;border:2px solid ${sel?sc.c:'transparent'};background:${sel?sc.bg:'#EEF1F3'};color:${sel?sc.c:'#73777C'}">${st}</button>`;}).join('')}</div></div>
@@ -2628,6 +2690,17 @@ async function loadCreateHierarchy() {
     createState.legends = (ld.issues||[]).map(parseIssue);
     createState.initiatives = (id.issues||[]).map(parseIssue);
     createState.epics = (ed.issues||[]).map(parseIssue);
+    // v86: decide which issue type to create when the user clicks "+ New" at the
+    // Epic-level row. Some projects (e.g. MKT) use Milestone in place of Epic
+    // and reject `issuetype: Epic` on create. Prefer whichever type already
+    // exists in the project; if neither, fall back to Epic.
+    const epicCount = createState.epics.filter(e => (e.type||'')==='Epic').length;
+    const msCount = createState.epics.filter(e => (e.type||'')==='Milestone').length;
+    if(epicCount === 0 && msCount > 0) createState.epicCreateType = 'Milestone';
+    else if(msCount === 0 && epicCount > 0) createState.epicCreateType = 'Epic';
+    else if(epicCount === 0 && msCount === 0) createState.epicCreateType = 'Epic';
+    else createState.epicCreateType = epicCount >= msCount ? 'Epic' : 'Milestone';
+    appLogMsg('info','hierarchy','Project '+proj+' parent-level: '+createState.epicCreateType+' (epics='+epicCount+', milestones='+msCount+')');
     refreshHierarchyRows();
   } catch(e) {
     const el = document.getElementById('ct-hierarchy-body');
@@ -2661,22 +2734,51 @@ async function createHierarchyItem(level) {
   btn.disabled = true;
   btn.textContent = 'Creating…';
 
+  // v86: at the Epic level, use the issue type the project actually supports.
+  // Some projects (e.g. MKT) use Milestone in place of Epic and reject
+  // `issuetype: Epic` outright. createState.epicCreateType is set by
+  // loadCreateHierarchy based on what already exists in the project.
+  let createTypeName = level;
+  if(level === 'Epic') createTypeName = s.epicCreateType || 'Epic';
+
   const payload = {
     fields: {
       project: { key: proj },
       summary: name,
-      issuetype: { name: level }
+      issuetype: { name: createTypeName }
     }
   };
   if(parentKey) payload.fields.parent = { key: parentKey };
 
   appLogMsg('info','hierarchy','Creating '+level+': '+name+(parentKey?' under '+parentKey:''));
 
+  // v86: helper to try an issue type and (for the Epic-level row only) fall
+  // back to the other type if the project rejects the first attempt. This is
+  // belt-and-braces for projects where the heuristic in loadCreateHierarchy
+  // can't tell which type to use (e.g. brand-new projects with neither type
+  // populated yet).
+  const tryCreate = async (typeName) => {
+    payload.fields.issuetype = { name: typeName };
+    appLogMsg('info','hierarchy','Creating '+typeName+' "'+name+'"'+(parentKey?' under '+parentKey:''));
+    const r = await createIssue(payload);
+    return { typeName, result: r };
+  };
   try {
-    const result = await createIssue(payload);
+    let attempt = await tryCreate(createTypeName);
+    if((!attempt.result || !attempt.result.success) && level === 'Epic') {
+      const fallback = createTypeName === 'Epic' ? 'Milestone' : 'Epic';
+      appLogMsg('warn','hierarchy','Create as '+createTypeName+' failed — retrying as '+fallback);
+      attempt = await tryCreate(fallback);
+      if(attempt.result && attempt.result.success) {
+        // Remember for the rest of this session so subsequent creates skip the failed attempt
+        s.epicCreateType = fallback;
+      }
+    }
+    const finalType = attempt.typeName;
+    const result = attempt.result;
     if(result && result.success) {
       const newItem = {
-        key: result.key, summary: name, type: level,
+        key: result.key, summary: name, type: finalType,
         parent_key: parentKey, status: 'Backlog', priority: 'Medium',
         assignee: 'Unassigned', project: proj
       };
@@ -2691,11 +2793,11 @@ async function createHierarchyItem(level) {
         s.epics.push(newItem);
         s.selEpic = result.key;
       }
-      appLogMsg('info','hierarchy','Created '+result.key);
+      appLogMsg('info','hierarchy','Created '+result.key+' ('+finalType+')');
       // Toast
       const toast = document.createElement('div');
       toast.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#5E8E38;color:#fff;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;z-index:9999';
-      toast.innerHTML = '✓ Created '+level+' <a href="'+BASE()+result.key+'" target="_blank" style="color:#fff;text-decoration:underline">'+result.key+'</a>';
+      toast.innerHTML = '✓ Created '+finalType+' <a href="'+BASE()+result.key+'" target="_blank" style="color:#fff;text-decoration:underline">'+result.key+'</a>';
       document.body.appendChild(toast);
       setTimeout(()=>toast.remove(), 3000);
       // Hide the inline form and re-render hierarchy
@@ -2707,8 +2809,11 @@ async function createHierarchyItem(level) {
     } else {
       btn.disabled = false;
       btn.textContent = origTxt;
-      alert('Failed to create '+level+'. Check that the project allows this issue type and that you have permissions.');
-      appLogMsg('error','hierarchy','Failed to create '+level);
+      const triedTypes = level === 'Epic' && createTypeName !== attempt.typeName
+        ? createTypeName + ' and ' + attempt.typeName
+        : attempt.typeName;
+      alert('Failed to create at the '+level+' level (tried '+triedTypes+'). Check that the project allows the issue type and that you have permissions.');
+      appLogMsg('error','hierarchy','Failed to create '+level+' (tried: '+triedTypes+')');
     }
   } catch(e) {
     btn.disabled = false;
@@ -2740,9 +2845,17 @@ function scheduleAiSearch() {
 
 async function runAiSearch() {
   appLogMsg("info","ai","AI search triggered",createState.summary);
-  const summary = createState.summary;
+  const summary = (createState.summary||'').trim();
   const proj = createState.projectKey;
-  if(summary.length < 3) return;
+  // v86: clear stale suggestions if the user has backspaced under the threshold,
+  // so the panel reverts to its empty/typing-prompt state instead of holding
+  // ranking from a previous task name.
+  if(summary.length < 3) {
+    createState.aiSuggestions = [];
+    createState.aiLoading = false;
+    renderCreateModal();
+    return;
+  }
   createState.aiLoading = true;
   renderCreateModal();
   try {
@@ -2770,7 +2883,8 @@ async function renderHierarchyRows(){
   const rows=[
     {label:'Legend',key:'selLegend',list:s.legends||[],color:'#9A4500',bg:'#FFF0E6'},
     {label:'Initiative',key:'selInit',list:filtInits,color:'#6B3FA0',bg:'#F3EEFF'},
-    {label:'Epic',key:'selEpic',list:filtEpics,color:'#125462',bg:'#E0F0F8'}];
+    // v86: label reflects what this project actually uses at this level.
+    {label:(s.epicCreateType==='Milestone'?'Milestone':'Epic'),key:'selEpic',list:filtEpics,color:'#125462',bg:'#E0F0F8'}];
   el.innerHTML=rows.map(h=>{const sel=s[h.key]||'';return`<div style="margin-bottom:8px">
     <div style="font-size:10px;font-weight:700;color:${h.color};margin-bottom:3px">${h.label}</div>
     <div style="display:flex;gap:6px;align-items:center">
@@ -2930,7 +3044,8 @@ function quickAddTask(epicKey, epicSummary, projectKey) {
     summary: '', description: '', comment: '', dueDate: '',
     selLegend: '', selInit: '', selEpic: epicKey || '',
     legends: [], initiatives: [], epics: [],
-    aiSuggestions: [], aiLoading: false, showHierarchy: false
+    aiSuggestions: [], aiLoading: false, showHierarchy: false,
+    epicExpanded: !!(epicKey), epicFilter: ''
   };
   document.getElementById('create-overlay').classList.add('open');
   renderCreateModal();
