@@ -350,6 +350,34 @@ button,select,textarea,input{font-family:inherit}
 </div>
 
 
+<!-- v89: PARENT PICKER OVERLAY — set or change Legend/Initiative/Epic parent
+     for the currently-open issue. Opens from the Hierarchy section in the
+     issue detail panel. Allows picking an existing item or creating a new one. -->
+<div id="parent-overlay" style="position:fixed;inset:0;z-index:710;background:rgba(41,46,55,.7);display:none;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)closeParentPicker()">
+  <div style="background:#fff;border-radius:12px;width:520px;max-width:95vw;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.25)">
+    <div style="padding:14px 18px;border-bottom:1px solid #E4E6E8;display:flex;align-items:center;justify-content:space-between">
+      <div>
+        <div style="font-size:15px;font-weight:700;color:#125462" id="parent-pick-title">Set parent</div>
+        <div id="parent-pick-sub" style="font-size:11px;color:#9EA0A4;margin-top:2px"></div>
+      </div>
+      <button onclick="closeParentPicker()" style="background:none;border:none;cursor:pointer;font-size:18px;color:#9EA0A4">✕</button>
+    </div>
+    <div style="padding:12px 18px;border-bottom:1px solid #E4E6E8">
+      <input id="parent-pick-filter" class="form-input" placeholder="🔍 Filter by key or summary…" oninput="renderParentPickerList()" autocomplete="off">
+    </div>
+    <div id="parent-pick-results" style="flex:1;overflow-y:auto;padding:8px 14px;min-height:160px"></div>
+    <div style="padding:10px 18px;border-top:1px solid #E4E6E8;display:flex;gap:8px;align-items:center">
+      <div id="parent-pick-create" style="display:flex;gap:6px;flex:1">
+        <input id="parent-pick-new-name" class="form-input" placeholder="New parent name…" onkeydown="if(event.key==='Enter')createParentInline()" style="flex:1;font-size:12px">
+        <button class="primary-btn" onclick="createParentInline()" style="font-size:11px;padding:6px 12px">+ Create new</button>
+      </div>
+      <button onclick="clearParentOfCurrent()" id="parent-pick-clear-btn" style="font-size:11px;padding:6px 12px;border:1px solid #C9CACC;border-radius:6px;background:#fff;color:#73777C;cursor:pointer;display:none">Remove parent</button>
+      <button onclick="closeParentPicker()" style="font-size:12px;padding:6px 14px;border:1px solid #E4E6E8;border-radius:6px;background:#fff;color:#292E37;cursor:pointer">Cancel</button>
+    </div>
+  </div>
+</div>
+
+
 <!-- SETTINGS -->
 <div id="settings-overlay" onclick="if(event.target===this)closeSettings()">
   <div id="settings-panel">
@@ -408,7 +436,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v88</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v89</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -621,10 +649,10 @@ button,select,textarea,input{font-family:inherit}
 <div id="pane-overlay" onclick="if(event.target===this)closePaneOverlay()">
   <div id="right-pane">
     <div id="pane-hdr"></div>
-    <div id="pane-tabs">
-      <button class="active" onclick="setPaneTab('main')">Details</button>
-      <button onclick="setPaneTab('subtasks')" id="subtasks-tab-btn">Subtasks</button>
-    </div>
+    <!-- v89: pane-tabs are now generated dynamically by renderPaneTabs() based
+         on the open issue's type. A Legend shows Initiatives / Epics+Milestones
+         / Tasks / Sub-tasks descendant tabs; an Initiative shows three; etc. -->
+    <div id="pane-tabs"></div>
     <div id="pane-body"></div>
   </div>
 </div>
@@ -2095,9 +2123,29 @@ function renderDone(){
 
 /* ══ RIGHT PANE ══ */
 function openPane(key){
-  const i=allIssues.map(gm).find(i=>i.key===key);if(!i)return;
+  // v88-fix: openPane should be able to land on ANY issue, even ones not in
+  // allIssues (e.g. items found via the new global search dropdown that live
+  // outside the active project group). Walk allIssues first for the locally-
+  // resolved version (cheap), fall back to a Jira fetch otherwise.
+  let i = (allIssues||[]).map(gm).find(x=>x.key===key);
+  if(!i){
+    // Async load — parseIssue then re-call openPane
+    document.getElementById("pane-overlay").classList.add("open");
+    document.getElementById("pane-hdr").innerHTML = `<div style="padding:14px;color:#fff;font-size:13px">${spinHtml(14,'#fff')} Loading ${key}…</div>`;
+    document.getElementById("pane-body").innerHTML = '';
+    document.getElementById("pane-tabs").innerHTML = '';
+    jiraGet('/rest/api/3/issue/'+key+'?fields=summary,status,assignee,priority,issuetype,updated,parent,description,project,subtasks,customfield_10014,comment').then(d=>{
+      const parsed = parseIssue(d);
+      openIssue = parsed; paneTab = 'main';
+      renderPaneHdr(parsed); renderPaneTabs(); renderPaneMain();
+      if(typeof markCommentsRead === 'function') markCommentsRead(key);
+    }).catch(e => {
+      document.getElementById("pane-hdr").innerHTML = '<div style="padding:14px;color:#fff;font-size:13px">Failed to load '+key+': '+(e.message||e)+'</div>';
+    });
+    return;
+  }
   openIssue=i;paneTab="main";
-  renderPaneHdr(i);setPaneTab("main");
+  renderPaneHdr(i); renderPaneTabs(); renderPaneMain();
   document.getElementById("pane-overlay").classList.add("open");
   // Mark this issue's comments as read when opened
   if(typeof markCommentsRead === 'function') markCommentsRead(key);
@@ -2133,10 +2181,184 @@ function renderPaneHdr(i){
     </div>`;
 }
 
+// v89: each entry maps an open issue's type to the descendant tabs we offer.
+// First-level tab gets a "+ Create" button (parent = the open issue). Deeper
+// tabs just list — to create at those levels, drill into the intermediate parent.
+const PANE_DESCENDANT_TABS = {
+  'Legend': [
+    {label:'Initiatives',     types:['Initiative'],            tabKey:'initiatives', walk:[['Initiative']]},
+    {label:'Epics/Milestones',types:['Epic','Milestone'],      tabKey:'epics',       walk:[['Initiative'],['Epic','Milestone']]},
+    {label:'Tasks',           types:['Task','Story','Bug'],    tabKey:'tasks',       walk:[['Initiative'],['Epic','Milestone'],['Task','Story','Bug']]},
+    {label:'Sub-tasks',       types:['Sub-task','Subtask'],    tabKey:'subtasks',    walk:[['Initiative'],['Epic','Milestone'],['Task','Story','Bug'],['Sub-task','Subtask']]}
+  ],
+  'Initiative': [
+    {label:'Epics/Milestones',types:['Epic','Milestone'],      tabKey:'epics',       walk:[['Epic','Milestone']]},
+    {label:'Tasks',           types:['Task','Story','Bug'],    tabKey:'tasks',       walk:[['Epic','Milestone'],['Task','Story','Bug']]},
+    {label:'Sub-tasks',       types:['Sub-task','Subtask'],    tabKey:'subtasks',    walk:[['Epic','Milestone'],['Task','Story','Bug'],['Sub-task','Subtask']]}
+  ],
+  'Epic': [
+    {label:'Tasks',     types:['Task','Story','Bug'],  tabKey:'tasks',    walk:[['Task','Story','Bug']]},
+    {label:'Sub-tasks', types:['Sub-task','Subtask'],  tabKey:'subtasks', walk:[['Task','Story','Bug'],['Sub-task','Subtask']]}
+  ],
+  'Milestone': [
+    {label:'Tasks',     types:['Task','Story','Bug'],  tabKey:'tasks',    walk:[['Task','Story','Bug']]},
+    {label:'Sub-tasks', types:['Sub-task','Subtask'],  tabKey:'subtasks', walk:[['Task','Story','Bug'],['Sub-task','Subtask']]}
+  ],
+  'Task':  [{label:'Sub-tasks', types:['Sub-task','Subtask'], tabKey:'subtasks', walk:[['Sub-task','Subtask']]}],
+  'Story': [{label:'Sub-tasks', types:['Sub-task','Subtask'], tabKey:'subtasks', walk:[['Sub-task','Subtask']]}],
+  'Bug':   [{label:'Sub-tasks', types:['Sub-task','Subtask'], tabKey:'subtasks', walk:[['Sub-task','Subtask']]}]
+};
+
+// Per-issue cache: descendantsCache[issueKey][tabKey] = [items]
+const descendantsCache = {};
+
+function getPaneTabsFor(issueType){
+  return PANE_DESCENDANT_TABS[issueType] || [];
+}
+
+function renderPaneTabs(){
+  const el = document.getElementById('pane-tabs');
+  if(!el) return;
+  const tabs = openIssue ? getPaneTabsFor(openIssue.type) : [];
+  let html = `<button class="${paneTab==='main'?'active':''}" onclick="setPaneTab('main')">Details</button>`;
+  tabs.forEach(t => {
+    const cached = (descendantsCache[openIssue?.key]||{})[t.tabKey];
+    const count = cached ? ' ('+cached.length+')' : '';
+    html += `<button class="${paneTab===t.tabKey?'active':''}" onclick="setPaneTab('${t.tabKey}')">${t.label}${count}</button>`;
+  });
+  el.innerHTML = html;
+}
+
 function setPaneTab(t){
-  paneTab=t;
-  document.querySelectorAll("#pane-tabs button").forEach((b,i)=>b.classList.toggle("active",["main","subtasks"][i]===t));
-  if(t==="main")renderPaneMain();else renderPaneSubtasks();
+  paneTab = t;
+  renderPaneTabs();
+  if(t === 'main') { renderPaneMain(); return; }
+  // Descendant tab — find spec and render
+  const tabs = openIssue ? getPaneTabsFor(openIssue.type) : [];
+  const spec = tabs.find(x => x.tabKey === t);
+  if(spec) renderPaneDescendants(spec);
+  else if(t === 'subtasks') renderPaneSubtasks(); // legacy fallback
+}
+
+async function renderPaneDescendants(spec){
+  const i = openIssue;
+  if(!i) return;
+  const body = document.getElementById('pane-body');
+  if(!body) return;
+  body.innerHTML = `<div class="pane-section"><div class="pane-section-title">${spec.label}</div><div id="pdesc-list">${spinHtml()} Loading ${spec.label.toLowerCase()} under ${i.key}…</div></div>`;
+  let items = (descendantsCache[i.key] && descendantsCache[i.key][spec.tabKey]) || null;
+  if(!items){
+    try {
+      items = await fetchDescendants(i.key, spec.walk);
+      if(!descendantsCache[i.key]) descendantsCache[i.key] = {};
+      descendantsCache[i.key][spec.tabKey] = items;
+      renderPaneTabs(); // refresh count in tab label
+    } catch(e){
+      document.getElementById('pdesc-list').innerHTML = '<div style="color:#D6202B;font-size:12px;padding:10px">Failed to load: '+(e.message||e)+'</div>';
+      return;
+    }
+  }
+  const list = items || [];
+  const isDirectChildTab = spec.walk.length === 1;
+  const createBtn = isDirectChildTab && (spec.tabKey === 'tasks' || spec.tabKey === 'subtasks' || spec.tabKey === 'initiatives' || spec.tabKey === 'epics')
+    ? `<button onclick="createDescendantFromPane('${spec.tabKey}','${i.key}')" class="primary-btn" style="font-size:11px;padding:5px 14px">+ Create ${spec.label.replace(/s$/, '').toLowerCase()}</button>`
+    : '';
+  let html = '';
+  if(!list.length){
+    html = `<div style="padding:18px;text-align:center;color:#9EA0A4;font-size:13px;font-style:italic">No ${spec.label.toLowerCase()} found under ${i.key}.</div>`;
+  } else {
+    // Sort by parent_key so items under the same parent cluster, then by status/key
+    const grouped = {};
+    list.forEach(it => {
+      const p = it.parent_key || '__noparent__';
+      (grouped[p] = grouped[p] || []).push(it);
+    });
+    // For direct-child tabs, all items share the same parent so don't bother grouping by parent
+    if(isDirectChildTab){
+      html = list.map(renderDescendantRow).join('');
+    } else {
+      // Group by direct parent so the user can see WHICH parent each row belongs to
+      const parentKeys = Object.keys(grouped).sort();
+      html = parentKeys.map(pk => {
+        const rows = grouped[pk];
+        const parentLbl = pk === '__noparent__' ? 'No parent' : pk;
+        return `<div style="margin-bottom:10px">
+          <div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;padding:6px 4px;border-bottom:1px solid #EEF1F3;margin-bottom:4px">
+            Under <span style="color:#257AA5;font-family:monospace">${parentLbl}</span> · ${rows.length}
+          </div>
+          ${rows.map(renderDescendantRow).join('')}
+        </div>`;
+      }).join('');
+    }
+  }
+  document.getElementById('pdesc-list').innerHTML = html;
+  if(createBtn){
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'margin-top:14px;padding-top:10px;border-top:1px solid #EEF1F3;display:flex;justify-content:flex-start';
+    wrap.innerHTML = createBtn;
+    document.getElementById('pdesc-list').parentElement.appendChild(wrap);
+  }
+}
+
+function renderDescendantRow(it){
+  const t = it.type || 'Task';
+  const tc = TC[t] || TC.Task;
+  const safeKey = (it.key||'').replace(/'/g,"\\'");
+  const assignee = it.assignee && it.assignee !== 'Unassigned' ? it.assignee : '';
+  return `<div onclick="openPane('${safeKey}')" style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;cursor:pointer;background:#F7F8F9;border:1px solid #EEF1F3;margin-bottom:3px">
+    <span style="font-size:9px;font-weight:700;background:${tc.bg};color:${tc.c};padding:2px 6px;border-radius:8px;text-transform:uppercase;letter-spacing:.04em">${t}</span>
+    <span style="font-size:10px;font-weight:700;color:#257AA5;font-family:monospace">${it.key}</span>
+    <span style="font-size:12px;color:#292E37;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(it.summary||'').replace(/</g,'&lt;')}</span>
+    ${it.status ? spill(it.status) : ''}
+    ${assignee ? `<span style="font-size:10px;color:#9EA0A4">${assignee}</span>` : ''}
+  </div>`;
+}
+
+async function fetchDescendants(rootKey, levelsToTraverse){
+  let currentParents = [rootKey];
+  let finalLevel = [];
+  for(let i = 0; i < levelsToTraverse.length; i++){
+    if(!currentParents.length){ finalLevel = []; break; }
+    const types = levelsToTraverse[i];
+    const typeFilter = types.length === 1
+      ? 'issuetype = "'+types[0]+'"'
+      : 'issuetype in ('+types.map(t=>'"'+t+'"').join(',')+')';
+    const parentClause = currentParents.length === 1
+      ? 'parent = '+currentParents[0]
+      : 'parent in ('+currentParents.join(',')+')';
+    const jql = parentClause + ' AND ' + typeFilter + ' ORDER BY rank ASC';
+    const url = '/rest/api/3/search/jql?jql='+encodeURIComponent(jql)+'&fields=summary,status,assignee,priority,issuetype,updated,parent&maxResults=200';
+    const d = await jiraGet(url);
+    const issues = (d.issues||[]).map(parseIssue);
+    if(i === levelsToTraverse.length - 1){
+      finalLevel = issues;
+    } else {
+      currentParents = issues.map(x => x.key);
+    }
+  }
+  return finalLevel;
+}
+
+function createDescendantFromPane(tabKey, parentKey){
+  // Open the create modal pre-filled with the chosen parent.
+  // For 'initiatives' / 'epics' tabs, parent is the legend/initiative itself.
+  // For 'tasks' / 'subtasks' (when offered as a direct-child tab), parent is the open issue.
+  const i = openIssue;
+  if(!i) return;
+  try {
+    // Reuse quickAddTask for tasks; for other types, fall back to openCreate
+    if(tabKey === 'tasks'){
+      // Pre-fill epic = parentKey (the Epic/Milestone we're under)
+      quickAddTask(parentKey, '', i.project);
+    } else if(tabKey === 'subtasks'){
+      // Subtasks live under a Task — we can't create them via the standard
+      // Create modal (which only creates Tasks). Direct the user to Jira.
+      alert('Sub-tasks need to be created under a specific Task — open the parent task and use the "+ Add subtask" button on its Subtasks tab, or create one in Jira.');
+    } else {
+      // For initiatives / epics, we'd need a custom flow; for now point to Settings.
+      alert('To create a new '+tabKey.slice(0,-1)+' under '+parentKey+', use the "+ New" button in the Create-task modal\'s hierarchy section.');
+    }
+  } catch(e){ alert('Could not start create flow: '+(e.message||e)); }
 }
 
 async function renderPaneMain(){
@@ -2162,22 +2384,51 @@ async function renderPaneMain(){
 
   buildChain(i.key).then(chain=>{
     const isActive=activeFlags[i.assignee]===i.key;
+    // v89: build hierarchy rows with editable parent slots.
+    //  - For each node in the chain (excluding the current issue), add an
+    //    inline "Change" link so the user can re-parent it.
+    //  - At the top of the chain, if the topmost item *should* have a parent
+    //    (i.e. its expected-parent-types is non-empty) but doesn't, insert a
+    //    "+ Set [type]" row at the top.
+    const topNode = chain[0];
+    const topExpectedParents = topNode ? expectedParentTypesFor(topNode.type) : [];
+    const needsTopParent = topNode && topExpectedParents.length > 0 && !topNode.parent_key;
+    const missingParentRow = needsTopParent
+      ? `<div class="hierarchy-row" style="background:#FFF4E0;border:1px dashed #E08000;border-radius:6px;padding:6px 10px;display:flex;align-items:center;gap:6px;cursor:pointer" onclick="openParentPicker('${topNode.key}')">
+          <span class="hierarchy-label" style="color:#664000;font-weight:700">${topExpectedParents.join(' / ')}</span>
+          <span style="flex:1;font-size:12px;color:#664000;font-style:italic">No ${topExpectedParents.join(' / ')} linked — click to set</span>
+          <span style="font-size:11px;color:#E08000;font-weight:700">+ Set ${topExpectedParents.join(' / ')}</span>
+        </div>`
+      : '';
     const chainRows=chain.map((node,idx)=>{
       const isCurrent=node.key===i.key;
+      const nodeExpected = expectedParentTypesFor(node.type);
+      const canChangeParent = nodeExpected.length > 0; // anything except Legend
+      const changeLink = canChangeParent && !isCurrent
+        ? ` <a href="#" onclick="event.preventDefault();event.stopPropagation();openParentPicker('${node.key}')" style="font-size:10px;color:#2E99CE;margin-left:6px;text-decoration:underline">change</a>`
+        : '';
       if(isCurrent){
+        const myChangeLink = canChangeParent
+          ? ` <a href="#" onclick="event.preventDefault();event.stopPropagation();openParentPicker('${node.key}')" style="font-size:11px;color:#2E99CE;margin-left:6px;text-decoration:underline">change parent</a>`
+          : '';
         return`<div class="hierarchy-row" style="background:#F0F9FF;border-radius:6px;padding:5px 8px;border-left:3px solid #2E99CE">
           <span class="hierarchy-label" style="font-weight:700;color:#125462">${node.type}</span>
           <span class="hierarchy-key"><a href="${BASE()}${node.key}" target="_blank" style="color:#125462;font-family:monospace;font-size:13px;font-weight:700">${node.key}</a></span>
-          <span class="hierarchy-val" style="font-size:13px;font-weight:700;color:#292E37">${node.summary}</span>
+          <span class="hierarchy-val" style="font-size:13px;font-weight:700;color:#292E37">${node.summary}${myChangeLink}</span>
         </div>`;
       }
-      return hierRow(node.type,node.key,node.summary,node.type);
+      return `<div class="hierarchy-row">
+        <span class="hierarchy-label">${node.type}</span>
+        <span class="hierarchy-key"><a href="${BASE()}${node.key}" target="_blank" style="color:#257AA5;font-family:monospace;font-size:10px">${node.key}</a></span>
+        <span class="hierarchy-val">${tbadge(node.type||"")} <span style="font-size:12px">${node.summary||""}</span>${changeLink}</span>
+      </div>`;
     }).join("");
 
     document.getElementById("pane-body").innerHTML=`
     <div class="pane-section">
       <div class="pane-section-title">Hierarchy</div>
       ${hierRow("Project",i.project,i.projectName,"")}
+      ${missingParentRow}
       ${chainRows}
     </div>
     <div class="pane-section">
@@ -2365,14 +2616,27 @@ function closeAssigneePicker() {
 function showAssigneeInitialSuggestions() {
   const el = document.getElementById('assignee-results');
   if(!el) return;
-  const list = (teamMembers || []).slice().sort();
-  if(!list.length) {
+  // v89: put the running user (currentIam) at the top so "assign to me" is one
+  // click — that's the most common action when picking up an unassigned issue.
+  const me = (currentIam || '').trim();
+  const others = (teamMembers || []).filter(m => m && m !== me).sort();
+  if(!me && !others.length) {
     el.innerHTML = '<div style="font-size:12px;color:#9EA0A4;padding:14px;text-align:center">Start typing a name or email to search Jira…</div>';
     return;
   }
-  el.innerHTML =
-    '<div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin:2px 4px 8px">Team members</div>' +
-    list.map(name => {
+  let html = '';
+  if(me) {
+    const safeMe = me.replace(/'/g, "\\'").replace(/"/g,'&quot;');
+    html += '<div style="font-size:10px;font-weight:700;color:#5E8E38;text-transform:uppercase;letter-spacing:.05em;margin:2px 4px 6px">Assign to me</div>' +
+      `<div onclick="assignFromTeamName('${safeMe}')"
+        style="display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:6px;cursor:pointer;margin-bottom:10px;background:#F0FAEC;border:2px solid #5E8E38">
+        ${ava(me, 28)}
+        <span style="flex:1;font-size:13px;font-weight:700;color:#292E37">${me} <span style="font-size:10px;background:#5E8E38;color:#fff;padding:2px 6px;border-radius:8px;margin-left:4px;font-weight:700">You</span></span>
+      </div>`;
+  }
+  if(others.length) {
+    html += '<div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin:2px 4px 8px">Team members</div>';
+    html += others.map(name => {
       const safe = String(name).replace(/'/g, "\\'").replace(/"/g,'&quot;');
       return `<div onclick="assignFromTeamName('${safe}')"
         style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;cursor:pointer;margin-bottom:3px;background:#F7F8F9;border:1px solid #E4E6E8">
@@ -2380,6 +2644,8 @@ function showAssigneeInitialSuggestions() {
         <span style="flex:1;font-size:13px;font-weight:600;color:#292E37">${name}</span>
       </div>`;
     }).join('');
+  }
+  el.innerHTML = html;
 }
 
 async function assignFromTeamName(name) {
@@ -2511,6 +2777,223 @@ async function unassignIssueFromPicker() {
     if(el) el.innerHTML = '<div style="font-size:12px;color:#D6202B;padding:14px;text-align:center">Error: ' + (e.message||'unknown') + '</div>';
   }
 }
+
+/* ══ v89: PARENT PICKER ══════════════════════════════════════════════
+   Opens from the Hierarchy section in the issue detail panel. Lets the
+   user pick (or create) the immediate parent for the currently-open issue.
+   Updates Jira via PUT /rest/api/3/issue/{key} { fields: { parent: ... } }
+   and refreshes the panel optimistically. */
+let _parentPickerCtx = null; // { childKey, childProject, expectedTypes, currentParentKey, candidates }
+
+const PARENT_TYPE_RULES = {
+  'Sub-task': ['Task'],
+  'Subtask':  ['Task'],
+  'Task':     ['Epic','Milestone'],
+  'Story':    ['Epic','Milestone'],
+  'Bug':      ['Epic','Milestone','Task'],
+  'Epic':       ['Initiative'],
+  'Milestone':  ['Initiative'],
+  'Initiative': ['Legend'],
+  'Legend':     [] // top of the chain — no parent
+};
+
+function expectedParentTypesFor(issueType){
+  return PARENT_TYPE_RULES[issueType] || [];
+}
+
+async function openParentPicker(childKey){
+  const child = (allIssues||[]).find(x=>x.key===childKey) || (openIssue && openIssue.key===childKey ? openIssue : null);
+  if(!child){ alert('Could not load that issue. Please refresh.'); return; }
+  const expected = expectedParentTypesFor(child.type);
+  if(!expected.length){ alert('"'+child.type+'" is at the top of the hierarchy — it has no parent to set.'); return; }
+  _parentPickerCtx = {
+    childKey: child.key,
+    childType: child.type,
+    childProject: child.project,
+    expectedTypes: expected,
+    currentParentKey: child.parent_key || '',
+    candidates: []
+  };
+  const ov = document.getElementById('parent-overlay');
+  if(!ov) return;
+  ov.style.display = 'flex';
+  document.getElementById('parent-pick-title').textContent =
+    (child.parent_key ? 'Change ' : 'Set ') + expected.join(' or ') + ' parent';
+  document.getElementById('parent-pick-sub').textContent =
+    'For ' + child.key + ' (' + (child.type||'') + ') in ' + child.project +
+    (child.parent_key ? ' — currently '+child.parent_key : ' — currently none');
+  const filt = document.getElementById('parent-pick-filter');
+  if(filt){ filt.value=''; setTimeout(()=>filt.focus(),50); }
+  const clearBtn = document.getElementById('parent-pick-clear-btn');
+  if(clearBtn) clearBtn.style.display = child.parent_key ? '' : 'none';
+  document.getElementById('parent-pick-results').innerHTML =
+    '<div style="padding:18px;text-align:center;color:#9EA0A4;font-size:12px">'+spinHtml(14)+' Loading '+expected.join(' / ')+'s in '+child.project+'…</div>';
+  try {
+    const typesJql = expected.length === 1 ? 'issuetype = "'+expected[0]+'"' : 'issuetype in ('+expected.map(t=>'"'+t+'"').join(',')+')';
+    const jql = 'project = '+child.project+' AND '+typesJql+' ORDER BY updated DESC';
+    const d = await jiraGet('/rest/api/3/search/jql?jql='+encodeURIComponent(jql)+'&fields=summary,issuetype,parent&maxResults=150');
+    _parentPickerCtx.candidates = (d.issues||[]).map(parseIssue);
+    renderParentPickerList();
+  } catch(e){
+    document.getElementById('parent-pick-results').innerHTML =
+      '<div style="padding:18px;text-align:center;color:#D6202B;font-size:12px">Failed to load: '+(e.message||e)+'</div>';
+  }
+}
+
+function closeParentPicker(){
+  const ov = document.getElementById('parent-overlay');
+  if(ov) ov.style.display = 'none';
+  _parentPickerCtx = null;
+}
+
+function renderParentPickerList(){
+  if(!_parentPickerCtx) return;
+  const filt = (document.getElementById('parent-pick-filter')?.value||'').toLowerCase().trim();
+  const all = _parentPickerCtx.candidates || [];
+  const list = filt
+    ? all.filter(c => (c.key||'').toLowerCase().includes(filt) || (c.summary||'').toLowerCase().includes(filt))
+    : all;
+  const el = document.getElementById('parent-pick-results');
+  if(!el) return;
+  if(!list.length){
+    el.innerHTML = '<div style="padding:18px;text-align:center;color:#9EA0A4;font-size:12px">'+
+      (filt ? 'No matches for "'+filt+'"' : 'No '+(_parentPickerCtx.expectedTypes.join(' / '))+'s in this project yet — use "+ Create new" below.')+'</div>';
+    return;
+  }
+  el.innerHTML = list.slice(0, 200).map(c => {
+    const isCurrent = c.key === _parentPickerCtx.currentParentKey;
+    const t = c.type || 'Epic';
+    const tc = TC[t] || TC.Task;
+    const safeKey = c.key.replace(/'/g,"\\'");
+    return `<div onclick="commitParent('${safeKey}')" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;cursor:pointer;border:${isCurrent?'2px solid #5E8E38':'1px solid #EEF1F3'};background:${isCurrent?'#F0FAEC':'#F7F8F9'};margin-bottom:3px">
+      <span style="font-size:9px;font-weight:700;background:${tc.bg};color:${tc.c};padding:2px 6px;border-radius:8px;text-transform:uppercase">${t}</span>
+      <span style="font-size:10px;font-weight:700;color:#257AA5;font-family:monospace">${c.key}</span>
+      <span style="font-size:12px;color:#292E37;flex:1">${(c.summary||'').replace(/</g,'&lt;')}</span>
+      ${isCurrent?'<span style="font-size:10px;color:#5E8E38;font-weight:700">CURRENT</span>':''}
+    </div>`;
+  }).join('');
+}
+
+async function commitParent(parentKey){
+  if(!_parentPickerCtx) return;
+  const childKey = _parentPickerCtx.childKey;
+  const el = document.getElementById('parent-pick-results');
+  if(el) el.innerHTML = '<div style="padding:18px;text-align:center;color:#9EA0A4;font-size:12px">'+spinHtml(14)+' Linking '+childKey+' to '+parentKey+'…</div>';
+  appLogMsg('info','hierarchy','Setting parent of '+childKey+' to '+parentKey);
+  try {
+    const r = await jiraPut('/rest/api/3/issue/'+childKey, { fields: { parent: { key: parentKey } } });
+    if(!(r && (r.ok || r.status === 204))){
+      let detail=''; try { detail = await r.text(); } catch{}
+      throw new Error('Jira returned HTTP '+r.status+(detail?' — '+detail.slice(0,200):''));
+    }
+    // Optimistic local update
+    for(let i=0;i<allIssues.length;i++){
+      if(allIssues[i].key === childKey){
+        // Find parent in our caches to get its type/summary
+        const p = _parentPickerCtx.candidates.find(c => c.key === parentKey);
+        allIssues[i].parent_key = parentKey;
+        if(p){ allIssues[i].parent_summary = p.summary; allIssues[i].parent_type = p.type; }
+      }
+    }
+    if(openIssue && openIssue.key === childKey){
+      const p = _parentPickerCtx.candidates.find(c => c.key === parentKey);
+      openIssue.parent_key = parentKey;
+      if(p){ openIssue.parent_summary = p.summary; openIssue.parent_type = p.type; }
+    }
+    closeParentPicker();
+    try { renderPaneHdr(openIssue); } catch{}
+    try { renderPaneMain(); } catch{}
+    try { renderMain(); } catch{}
+    setTimeout(()=>doFetch(true), 1500);
+  } catch(e){
+    if(el) el.innerHTML = '<div style="padding:18px;text-align:center;color:#D6202B;font-size:12px">Failed: '+(e.message||e)+'</div>';
+    appLogMsg('error','hierarchy','Set parent failed: '+(e.message||e));
+  }
+}
+
+async function clearParentOfCurrent(){
+  if(!_parentPickerCtx) return;
+  const childKey = _parentPickerCtx.childKey;
+  if(!confirm('Remove the parent link from '+childKey+'?\n\nThis will leave the issue with no parent in the hierarchy.')) return;
+  const el = document.getElementById('parent-pick-results');
+  if(el) el.innerHTML = '<div style="padding:18px;text-align:center;color:#9EA0A4;font-size:12px">'+spinHtml(14)+' Removing parent…</div>';
+  try {
+    // Jira accepts setting parent to null via the edit endpoint
+    const r = await jiraPut('/rest/api/3/issue/'+childKey, { fields: { parent: null } });
+    if(!(r && (r.ok || r.status === 204))){
+      let detail=''; try { detail = await r.text(); } catch{}
+      throw new Error('Jira returned HTTP '+r.status+(detail?' — '+detail.slice(0,200):''));
+    }
+    for(let i=0;i<allIssues.length;i++){
+      if(allIssues[i].key === childKey){
+        allIssues[i].parent_key = null;
+        allIssues[i].parent_summary = '';
+        allIssues[i].parent_type = '';
+      }
+    }
+    if(openIssue && openIssue.key === childKey){
+      openIssue.parent_key = null;
+      openIssue.parent_summary = '';
+      openIssue.parent_type = '';
+    }
+    closeParentPicker();
+    try { renderPaneHdr(openIssue); } catch{}
+    try { renderPaneMain(); } catch{}
+    try { renderMain(); } catch{}
+    setTimeout(()=>doFetch(true), 1500);
+  } catch(e){
+    if(el) el.innerHTML = '<div style="padding:18px;text-align:center;color:#D6202B;font-size:12px">Failed: '+(e.message||e)+'</div>';
+  }
+}
+
+async function createParentInline(){
+  if(!_parentPickerCtx) return;
+  const input = document.getElementById('parent-pick-new-name');
+  const name = (input?.value||'').trim();
+  if(!name){ if(input) input.focus(); return; }
+  const childKey = _parentPickerCtx.childKey;
+  const proj = _parentPickerCtx.childProject;
+  const expected = _parentPickerCtx.expectedTypes;
+  // Prefer Milestone if the project uses milestones, else Epic, else the first expected type
+  let typeName = expected[0];
+  if(expected.includes('Epic') || expected.includes('Milestone')){
+    const epicCount = (_parentPickerCtx.candidates||[]).filter(c=>c.type==='Epic').length;
+    const msCount = (_parentPickerCtx.candidates||[]).filter(c=>c.type==='Milestone').length;
+    if(epicCount === 0 && msCount > 0) typeName = 'Milestone';
+    else if(msCount === 0 && epicCount > 0) typeName = 'Epic';
+    else typeName = epicCount >= msCount ? 'Epic' : 'Milestone';
+  }
+  const el = document.getElementById('parent-pick-results');
+  if(el) el.innerHTML = '<div style="padding:18px;text-align:center;color:#9EA0A4;font-size:12px">'+spinHtml(14)+' Creating '+typeName+' "'+name+'"…</div>';
+  appLogMsg('info','hierarchy','Inline-creating '+typeName+' "'+name+'" in '+proj);
+  // Try preferred type; if it fails and the alternative type also belongs to
+  // expected, retry. Mirrors the v86 epic-vs-milestone fallback pattern.
+  const tryOne = async (tName) => {
+    const payload = { fields: { project: { key: proj }, summary: name, issuetype: { name: tName } } };
+    return await createIssue(payload);
+  };
+  try {
+    let result = await tryOne(typeName);
+    if((!result || !result.success) && expected.includes(typeName === 'Epic' ? 'Milestone' : 'Epic')){
+      const fallback = typeName === 'Epic' ? 'Milestone' : 'Epic';
+      appLogMsg('warn','hierarchy','Inline create as '+typeName+' failed — retrying as '+fallback);
+      result = await tryOne(fallback);
+      if(result && result.success) typeName = fallback;
+    }
+    if(!(result && result.success)){
+      throw new Error('Project rejected creating a new '+expected.join(' or '));
+    }
+    // Add to our local candidate cache so the list shows it immediately
+    _parentPickerCtx.candidates.unshift({ key: result.key, summary: name, type: typeName, parent_key: null, status:'Backlog', priority:'Medium', assignee:'Unassigned', project: proj });
+    if(input) input.value = '';
+    // Immediately commit it as the new parent
+    await commitParent(result.key);
+  } catch(e){
+    if(el) el.innerHTML = '<div style="padding:18px;text-align:center;color:#D6202B;font-size:12px">Create failed: '+(e.message||e)+'</div>';
+    appLogMsg('error','hierarchy','Inline create failed: '+(e.message||e));
+  }
+}
+
 
 /* ══ CREATE TASK ══ */
 let createState={projectKey:"",issueType:"Task",assignee:"",priority:"Medium",status:"Selected",epicKey:"",summary:"",description:"",epicSuggestions:[],loadingEpics:false};
@@ -2772,9 +3255,17 @@ async function createHierarchyItem(level) {
       issuetype: { name: createTypeName }
     }
   };
-  if(parentKey) payload.fields.parent = { key: parentKey };
+  // v89: do NOT pass `parent` in the create payload for hierarchy levels
+  // (Initiative/Epic/Milestone). Jira's Create endpoint silently drops the
+  // parent field for non-Sub-task types in some project configurations —
+  // including LoopUp's MKT project, where Milestone MKT-530 was created
+  // detached even though we sent parent=MKT-529. We now link via a
+  // follow-up PUT below, which goes through the edit endpoint and respects
+  // the hierarchy field consistently.
+  // (Sub-tasks still need parent in the create payload — those would fail
+  // without it — but createHierarchyItem isn't called for sub-tasks.)
 
-  appLogMsg('info','hierarchy','Creating '+level+': '+name+(parentKey?' under '+parentKey:''));
+  appLogMsg('info','hierarchy','Creating '+level+': '+name+(parentKey?' (will link to '+parentKey+' via PUT)':''));
 
   // v86: helper to try an issue type and (for the Epic-level row only) fall
   // back to the other type if the project rejects the first attempt. This is
@@ -2801,9 +3292,33 @@ async function createHierarchyItem(level) {
     const finalType = attempt.typeName;
     const result = attempt.result;
     if(result && result.success) {
+      // v89: now that the new issue exists, link it to its parent via PUT.
+      // If this fails, surface a clear warning so the user knows to set
+      // the parent manually in Jira rather than discovering the orphan
+      // later in the board.
+      let linkedOk = true;
+      if(parentKey){
+        try {
+          const pr = await jiraPut('/rest/api/3/issue/'+result.key, { fields: { parent: { key: parentKey } } });
+          if(!(pr && (pr.ok || pr.status === 204))){
+            linkedOk = false;
+            let detail=''; try { detail = await pr.text(); } catch{}
+            appLogMsg('error','hierarchy','Parent link PUT failed for '+result.key+' → '+parentKey+' (HTTP '+pr.status+')', detail.slice(0,200));
+          } else {
+            appLogMsg('info','hierarchy','Linked '+result.key+' to parent '+parentKey);
+          }
+        } catch(e) {
+          linkedOk = false;
+          appLogMsg('error','hierarchy','Parent link PUT exception: '+(e.message||e));
+        }
+      }
+      if(!linkedOk){
+        alert('Created '+result.key+' ('+finalType+') successfully, but Jira rejected the parent link to '+parentKey+'.\n\nThe new '+finalType+' exists in Jira but is NOT linked to '+parentKey+'. You can set the parent manually:\n  1. Open '+result.key+' in Jira\n  2. Edit the Parent field → set to '+parentKey);
+      }
       const newItem = {
         key: result.key, summary: name, type: finalType,
-        parent_key: parentKey, status: 'Backlog', priority: 'Medium',
+        parent_key: linkedOk ? parentKey : null,
+        status: 'Backlog', priority: 'Medium',
         assignee: 'Unassigned', project: proj,
         // v88: flag so submitCreate can warn the user if the subsequent task
         // create fails — they'll know the parent already exists in Jira.
@@ -3575,6 +4090,33 @@ function showSearchHint(msg){
   dd.innerHTML = '<div class="sr-empty">'+msg+'</div>';
   dd.classList.add('open');
 }
+// v89: order results within each scope group by issue type, low to high:
+// Sub-task → Task → Story/Bug → Milestone/Epic → Initiative → Legend → other.
+// Anything Jira returns that isn't one of our known types (e.g. Email Request)
+// goes at the bottom under "Other types".
+const SEARCH_TYPE_ORDER = {
+  'Sub-task':1, 'Subtask':1,
+  'Task':2,
+  'Story':3, 'Bug':3,
+  'Epic':4, 'Milestone':4,
+  'Initiative':5,
+  'Legend':6
+};
+function searchTypeRank(t){ return SEARCH_TYPE_ORDER[t] || 99; }
+function sortByTypeThenUpdated(arr){
+  return [...arr].sort((a,b)=>{
+    const ra = searchTypeRank(a.type), rb = searchTypeRank(b.type);
+    if(ra !== rb) return ra - rb;
+    return (b.updated||'').localeCompare(a.updated||'');
+  });
+}
+
+// State for "show more" expansion. We default to a per-scope cap of 12 and
+// let the user expand to all matches via a button at the bottom of each group.
+let _searchExpandScope = false;
+let _searchExpandOther = false;
+const SEARCH_DEFAULT_CAP = 12;
+
 async function runSearch(q){
   showSearchHint(spinHtml(14)+' Searching Jira…');
   appLogMsg('info','search','Running Jira search for: '+q);
@@ -3586,10 +4128,10 @@ async function runSearch(q){
     const clauses = ['text ~ "'+esc+'*"'];
     if(isKey) clauses.unshift('key = ' + q.toUpperCase());
     const jql = '(' + clauses.join(' OR ') + ') ORDER BY updated DESC';
-    const url = '/rest/api/3/search/jql?jql=' + encodeURIComponent(jql) + '&fields=summary,issuetype,project,status,assignee,parent&maxResults=40';
+    // v89: bumped to 80 results so deeper expansions don't truncate prematurely.
+    const url = '/rest/api/3/search/jql?jql=' + encodeURIComponent(jql) + '&fields=summary,issuetype,project,status,assignee,parent,priority,updated&maxResults=80';
     const d = await jiraGet(url);
     const items = (d.issues||[]).map(parseIssue);
-    // Categorize
     const inProjGroupKeys = (currentProjectGroup && projectGroups[currentProjectGroup]) ? new Set(projectGroups[currentProjectGroup]) : null;
     const teamSet = (currentGroup && groups[currentGroup]) ? new Set(groups[currentGroup]) : null;
     const inScope = [];
@@ -3599,13 +4141,27 @@ async function runSearch(q){
       const teamOk = !teamSet || teamSet.has(it.assignee);
       if(projOk && teamOk) inScope.push(it); else other.push(it);
     }
-    _searchRows = [...inScope.map(i=>({...i, _group:'scope'})), ...other.map(i=>({...i, _group:'other'}))];
+    // Sort each group low → high by type rank, then by recency
+    const sortedScope = sortByTypeThenUpdated(inScope);
+    const sortedOther = sortByTypeThenUpdated(other);
+    // Reset expansion state on each fresh query
+    _searchExpandScope = false;
+    _searchExpandOther = false;
+    _searchRows = [...sortedScope.map(i=>({...i, _group:'scope'})), ...sortedOther.map(i=>({...i, _group:'other'}))];
     _searchActiveIndex = _searchRows.length ? 0 : -1;
-    renderSearchDropdown(_searchRows, {inScope, other});
+    renderSearchDropdown(_searchRows, {inScope: sortedScope, other: sortedOther});
   } catch(e){
     appLogMsg('error','search','Search failed: '+(e.message||e));
     showSearchHint('Search failed: '+(e.message||'unknown'));
   }
+}
+function toggleSearchExpand(which){
+  if(which === 'scope') _searchExpandScope = !_searchExpandScope;
+  if(which === 'other') _searchExpandOther = !_searchExpandOther;
+  // Re-render from cached rows
+  const scope = _searchRows.filter(r => r._group==='scope');
+  const other = _searchRows.filter(r => r._group==='other');
+  renderSearchDropdown(_searchRows, { inScope: scope, other: other });
 }
 function renderSearchDropdown(rows, grouped){
   const dd = document.getElementById('search-results-dropdown');
@@ -3615,7 +4171,6 @@ function renderSearchDropdown(rows, grouped){
     dd.classList.add('open');
     return;
   }
-  // Split into scope / other if grouped wasn't passed
   let scope, other;
   if(grouped){ scope = grouped.inScope; other = grouped.other; }
   else { scope = rows.filter(r=>r._group==='scope'); other = rows.filter(r=>r._group==='other'); }
@@ -3626,28 +4181,50 @@ function renderSearchDropdown(rows, grouped){
     return parts.length ? parts.join(' · ') : 'Your active scope';
   })();
   let html = '';
+  let rowIdx = 0;
   if(scope && scope.length){
-    html += '<div class="sr-group-hdr"><span style="color:#5E8E38">●</span> In your scope <span style="color:#C9CACC;font-weight:400;text-transform:none;letter-spacing:0">— '+scopeLabel+' · '+scope.length+' result'+(scope.length===1?'':'s')+'</span></div>';
-    html += scope.map((it, idx)=>renderSearchRow(it, idx)).join('');
+    const cap = _searchExpandScope ? scope.length : Math.min(SEARCH_DEFAULT_CAP, scope.length);
+    const visible = scope.slice(0, cap);
+    html += '<div class="sr-group-hdr"><span style="color:#5E8E38">●</span> In your scope <span style="color:#C9CACC;font-weight:400;text-transform:none;letter-spacing:0">— '+scopeLabel+' · showing '+visible.length+' of '+scope.length+'</span></div>';
+    html += visible.map((it)=>renderSearchRow(it, rowIdx++, true)).join('');
+    if(scope.length > SEARCH_DEFAULT_CAP){
+      html += `<div class="sr-row" onclick="toggleSearchExpand('scope')" style="justify-content:center;color:#2E99CE;font-weight:700;font-size:11px;background:#F7F8F9;cursor:pointer">${_searchExpandScope ? 'Show fewer ▲' : 'Show all '+scope.length+' in scope ▼'}</div>`;
+    }
   }
   if(other && other.length){
-    const offset = scope ? scope.length : 0;
-    html += '<div class="sr-group-hdr"><span style="color:#C9CACC">●</span> Other workspace items <span style="color:#C9CACC;font-weight:400;text-transform:none;letter-spacing:0">— '+other.length+' result'+(other.length===1?'':'s')+'</span></div>';
-    html += other.map((it, idx)=>renderSearchRow(it, idx + offset)).join('');
+    const cap = _searchExpandOther ? other.length : Math.min(SEARCH_DEFAULT_CAP, other.length);
+    const visible = other.slice(0, cap);
+    html += '<div class="sr-group-hdr"><span style="color:#C9CACC">●</span> Other workspace items <span style="color:#C9CACC;font-weight:400;text-transform:none;letter-spacing:0">— showing '+visible.length+' of '+other.length+'</span></div>';
+    html += visible.map((it)=>renderSearchRow(it, rowIdx++, false)).join('');
+    if(other.length > SEARCH_DEFAULT_CAP){
+      html += `<div class="sr-row" onclick="toggleSearchExpand('other')" style="justify-content:center;color:#2E99CE;font-weight:700;font-size:11px;background:#F7F8F9;cursor:pointer">${_searchExpandOther ? 'Show fewer ▲' : 'Show all '+other.length+' other ▼'}</div>`;
+    }
   }
   dd.innerHTML = html;
   dd.classList.add('open');
 }
-function renderSearchRow(it, idx){
+function renderSearchRow(it, idx, isScope){
   const t = it.type || 'Task';
   const tc = TC[t] || TC.Task;
   const active = idx === _searchActiveIndex;
   const safeKey = (it.key||'').replace(/'/g, "\\'");
-  return `<div class="sr-row" style="${active?'background:#E0F0F8':''}" onclick="pickSearchResult('${safeKey}')" data-idx="${idx}">
-    <span class="sr-type" style="background:${tc.bg};color:${tc.c}">${t}</span>
+  // v89: in-scope rows get extra detail — status, priority, and parent.
+  // Out-of-scope rows stay compact so we can pack more in.
+  const statusBadge = (it.status && isScope) ? spill(it.status) : '';
+  const prBadge = (it.priority && isScope) ? pbadge(it.priority) : '';
+  const parentInfo = (isScope && it.parent_key) ? '<span style="font-size:10px;color:#9EA0A4">↑ <span style="font-family:monospace">'+it.parent_key+'</span></span>' : '';
+  const assignee = it.assignee && it.assignee !== 'Unassigned' ? it.assignee : '';
+  return `<div class="sr-row" style="${active?'background:#E0F0F8':''}${isScope?';align-items:flex-start':''}" onclick="pickSearchResult('${safeKey}')" data-idx="${idx}">
+    <span class="sr-type" style="background:${tc.bg};color:${tc.c};flex-shrink:0">${t}</span>
     <span class="sr-key">${it.key}</span>
-    <span class="sr-sum">${(it.summary||'').replace(/</g,'&lt;')}</span>
-    <span class="sr-meta">${it.project||''}${it.assignee && it.assignee!=='Unassigned'?' · '+it.assignee:''}</span>
+    <div style="flex:1;display:flex;flex-direction:column;gap:3px;min-width:0">
+      <span class="sr-sum">${(it.summary||'').replace(/</g,'&lt;')}</span>
+      ${isScope ? `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:10px">
+        ${statusBadge}${prBadge}${parentInfo}
+        <span style="color:#9EA0A4">${it.project||''}${assignee?' · '+assignee:''}</span>
+      </div>` : ''}
+    </div>
+    ${!isScope ? `<span class="sr-meta">${it.project||''}${assignee?' · '+assignee:''}</span>` : ''}
   </div>`;
 }
 function pickSearchResult(key){
