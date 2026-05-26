@@ -396,7 +396,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v82</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v83</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -646,6 +646,11 @@ let openIssue=null, paneTab="main", commentsCache={}, subtasksCache={};
 let expandState={}, rowCollapsed={Done:true,"In Progress":false,Selected:false,Backlog:false};
 let teamMembers=[...DEFAULT_TEAM], adminUsers=[ADMIN_EMAIL];
 let groups={}, excludedProjects=[], groupProjectAssignment={};
+// v83: which teams are shared via KV (visible to all users) vs personal (local-only).
+// A team name in this set means it lives in KV under "team:<name>"; everyone else
+// on the workspace will load it via loadTeams(). Teams NOT in this set are personal
+// to the current user — kept only in localStorage, never pushed.
+let sharedTeams = new Set();
 let activeFlags={};
 const gm=i=>({...i,status:locStat[i.key]||i.status,priority:locPri[i.key]||i.priority});
 let settingsTab="projects";
@@ -673,7 +678,7 @@ let priBandCollapsed = {Highest:false, High:false, Medium:false, Low:false, 'No 
 let showDoneByView = {mytasks:false, myepics:false, team:false, prioritise:false, manager:false};
 
 /* ══ PERSISTENCE ══ */
-function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,groupProjectAssignment,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed,doneDays,commentReadState,priViewMode,priBandCollapsed,showDoneByView}));}catch{}}
+function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,groupProjectAssignment,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed,doneDays,commentReadState,priViewMode,priBandCollapsed,showDoneByView,sharedTeams:[...sharedTeams]}));}catch{}}
 function loadAll(){try{const d=JSON.parse(localStorage.getItem(STOR)||"{}");if(d.cfg)cfg=d.cfg;if(d.locStat)locStat=d.locStat;if(d.locPri)locPri=d.locPri;if(d.currentIam)currentIam=d.currentIam;if(d.currentProjFilter)currentProjFilter=d.currentProjFilter;
 if(d.currentProjectGroup)currentProjectGroup=d.currentProjectGroup;if(d.currentGroup)currentGroup=d.currentGroup;if(d.teamMembers)teamMembers=d.teamMembers;if(d.adminUsers)adminUsers=d.adminUsers;if(d.groups)groups=d.groups;
 if(d.groupProjectAssignment)groupProjectAssignment=d.groupProjectAssignment;if(d.excludedProjects)excludedProjects=d.excludedProjects;if(d.currentView)currentView=d.currentView;if(d.currentLevel)currentLevel=d.currentLevel;if(d.rowCollapsed)rowCollapsed={...rowCollapsed,...d.rowCollapsed};if(d.swimCollapsed)swimCollapsed={...swimCollapsed,...d.swimCollapsed};
@@ -681,7 +686,9 @@ if(d.doneDays)doneDays=d.doneDays;
 if(d.commentReadState)commentReadState=d.commentReadState;
 if(d.priViewMode)priViewMode=d.priViewMode;
 if(d.priBandCollapsed)priBandCollapsed={...priBandCollapsed,...d.priBandCollapsed};
-if(d.showDoneByView)showDoneByView={...showDoneByView,...d.showDoneByView};}catch{}}
+if(d.showDoneByView)showDoneByView={...showDoneByView,...d.showDoneByView};
+if(Array.isArray(d.sharedTeams)) sharedTeams = new Set(d.sharedTeams);
+}catch{}}
 
 /* ══ KV (active flags) ══ */
 async function kvSet(k,v){
@@ -1398,8 +1405,14 @@ function populateIamSelector(){const sel=document.getElementById("iam-sel");sel.
 function populateGroupSelector(){
   const sel=document.getElementById("group-sel");
   const wrap=document.getElementById("group-sel-wrap");
-  const keys=Object.keys(groups);
-  if(sel) sel.innerHTML='<option value="">All people</option>'+keys.map(g=>`<option value="${g}" ${g===currentGroup?"selected":""}>${g}</option>`).join("");
+  const keys=Object.keys(groups).sort();
+  // v83: prefix shared teams with a globe icon so users can tell which teams
+  // came from the workspace vs ones they created locally.
+  if(sel) sel.innerHTML='<option value="">All people</option>'+keys.map(g=>{
+    const isShared = sharedTeams.has(g);
+    const label = (isShared ? '🌐 ' : '') + g;
+    return `<option value="${g}" ${g===currentGroup?"selected":""}>${label}</option>`;
+  }).join("");
   if(wrap) wrap.style.display=keys.length?"flex":"none";
 }
 function updateManagerVisibility(){document.getElementById("btn-manager").style.display="inline-block";}
@@ -1710,9 +1723,11 @@ function setView(v){
   const isPri = v==="prioritise";
   const isMT = v==="mytasks";
   const isAct = v==="activity";
-  // Team dropdown: hide on My Tasks, Prioritise, Activity
-  const uaw=document.getElementById('group-sel-wrap');
-  if(uaw) uaw.style.display=(isMT||isPri||isAct)?"none":"flex";
+  // v83: Team dropdown persists across all views. populateGroupSelector()
+  // is the single source of truth for visibility — it hides the wrap only
+  // when there are zero teams. The previous view-based hide rule had no
+  // functional reason and made the control feel inconsistent.
+  populateGroupSelector();
   // Unassigned filter: Prioritise and My Epics
   const ua=document.getElementById("unassigned-filter-wrap");
   if(ua) ua.style.display=(v==="myepics"||isPri)?"flex":"none";
@@ -2053,8 +2068,14 @@ function renderPaneHdr(i){
       <button onclick="closePaneOverlay()" style="background:rgba(255,255,255,.15);border:none;color:#fff;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:16px">✕</button>
     </div>
     <div style="margin-top:10px;display:flex;align-items:center;gap:8px">
-      ${ava(i.assignee,24)}<span style="font-size:12px;color:rgba(255,255,255,.75)">${i.assignee}</span>
-      <button onclick="(async()=>{await toggleActive('${i.assignee.replace(/'/g,"\\'")}','${i.key}');renderPaneHdr(openIssue)})();renderMain()" 
+      <div onclick="event.stopPropagation();openAssigneePicker('${i.key}')" title="Click to change assignee"
+        style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:3px 8px 3px 3px;border-radius:14px;background:rgba(255,255,255,.08);transition:background .12s"
+        onmouseover="this.style.background='rgba(255,255,255,.16)'"
+        onmouseout="this.style.background='rgba(255,255,255,.08)'">
+        ${ava(i.assignee,24)}<span style="font-size:12px;color:rgba(255,255,255,.85)">${i.assignee}</span>
+        <span style="font-size:10px;color:rgba(255,255,255,.55);font-weight:600;margin-left:2px">✎</span>
+      </div>
+      <button onclick="(async()=>{await toggleActive('${i.assignee.replace(/'/g,"\\'")}','${i.key}');renderPaneHdr(openIssue)})();renderMain()"
         style="margin-left:auto;font-size:11px;padding:4px 10px;border-radius:12px;border:none;cursor:pointer;font-weight:700;${isActive?"background:#fff;color:#125462":"background:rgba(255,255,255,.2);color:#fff"}">
         ${isActive?"● Active — clear":"○ Set as active"}
       </button>
@@ -3078,7 +3099,9 @@ async function deleteProjectGroupKV(name) {
    one KV entry per team under `team:<name>`, plus a per-team mapping under
    `teamassign:<name>`. saveAll() still persists locally as a fast fallback. */
 async function loadTeams() {
-  // Load team member lists
+  // Load team member lists from KV (these are "shared" teams visible to all users).
+  // v83: track which team names came from KV so we know which are shared vs personal.
+  let kvNames = [];
   try {
     const r = await fetch(KV + "?action=listprefix&prefix=team:");
     if(r.ok) {
@@ -3089,15 +3112,14 @@ async function loadTeams() {
         if(!name) continue;
         try {
           const parsed = JSON.parse(val);
-          if(Array.isArray(parsed)) loaded[name] = parsed;
+          if(Array.isArray(parsed)) { loaded[name] = parsed; kvNames.push(name); }
         } catch {}
       }
-      // Merge: KV wins, but keep any local-only teams that haven't been pushed yet
+      // Merge: KV wins, but keep any local-only (personal) teams.
       const merged = {...groups, ...loaded};
-      // Drop teams that exist locally but were deleted in KV? — we don't, to
-      // avoid wiping a mid-edit team. Deletion goes through deleteTeamKV which
-      // removes both sides explicitly.
       groups = merged;
+      // Mark KV-sourced teams as shared
+      for(const n of kvNames) sharedTeams.add(n);
     }
   } catch(e) {
     appLogMsg('warn','team','loadTeams KV failed, using local: '+(e.message||e));
@@ -3127,20 +3149,91 @@ async function loadTeams() {
 }
 
 async function saveTeamKV(name, members) {
+  // v83: only push to KV if the team is actually shared. Personal teams stay
+  // in localStorage only — they shouldn't pollute other users' dropdowns.
   groups[name] = members;
-  try { await kvSet('team:' + name, JSON.stringify(members)); } catch {}
+  if(sharedTeams.has(name)) {
+    try { await kvSet('team:' + name, JSON.stringify(members)); } catch {}
+  }
   saveAll();
 }
 
 async function deleteTeamKV(name) {
   delete groups[name];
-  try { await fetch(KV + "?action=delete&key=" + encodeURIComponent('team:' + name)); } catch {}
-  // Also clean up any team→projectgroup assignment in KV
-  try { await fetch(KV + "?action=delete&key=" + encodeURIComponent('teamassign:' + name)); } catch {}
+  if(sharedTeams.has(name)) {
+    try { await fetch(KV + "?action=delete&key=" + encodeURIComponent('team:' + name)); } catch {}
+    try { await fetch(KV + "?action=delete&key=" + encodeURIComponent('teamassign:' + name)); } catch {}
+  }
+  sharedTeams.delete(name);
   if(groupProjectAssignment && groupProjectAssignment[name]) {
     delete groupProjectAssignment[name];
   }
   saveAll();
+}
+
+// v83: anyone can create a team. Default is personal (local only). The owner
+// can flip it to "shared" via shareTeamWithEveryone(), which pushes it to KV.
+// Only admins can re-share or modify a shared team (to prevent accidental
+// overwrites of cross-team data).
+function canEditSharedTeams() {
+  try { return cfg.email === ADMIN_EMAIL || (adminUsers||[]).includes(cfg.email); }
+  catch { return false; }
+}
+
+async function shareTeamWithEveryone(name) {
+  if(!groups[name]) { alert('Team "'+name+'" not found.'); return; }
+  if(!canEditSharedTeams()) {
+    alert('Only admins can share a team with everyone.\n\nPersonal teams stay on your machine only.');
+    return;
+  }
+  if(!confirm('Share "'+name+'" with everyone on the workspace?\n\nIt will appear in every teammate\'s Team dropdown after their next refresh. Subsequent edits will be visible to everyone.')) return;
+  sharedTeams.add(name);
+  saveAll();
+  try { await kvSet('team:' + name, JSON.stringify(groups[name]||[])); } catch {}
+  // If this team has a project-group mapping, share that too
+  if(groupProjectAssignment[name]) {
+    try { await kvSet('teamassign:' + name, JSON.stringify(groupProjectAssignment[name])); } catch {}
+  }
+  appLogMsg('info','team','Shared team to KV: '+name);
+  renderSettings();
+  populateGroupSelector();
+}
+
+async function unshareTeam(name) {
+  if(!canEditSharedTeams()) {
+    alert('Only admins can change sharing for a team.');
+    return;
+  }
+  if(!confirm('Stop sharing "'+name+'" with everyone?\n\nIt will be removed from teammates\' dropdowns on their next refresh. You will keep your local copy.')) return;
+  try { await fetch(KV + "?action=delete&key=" + encodeURIComponent('team:' + name)); } catch {}
+  try { await fetch(KV + "?action=delete&key=" + encodeURIComponent('teamassign:' + name)); } catch {}
+  sharedTeams.delete(name);
+  saveAll();
+  appLogMsg('info','team','Unshared team: '+name);
+  renderSettings();
+  populateGroupSelector();
+}
+
+// v83: one-time admin migration. If an admin has local teams that aren't in KV
+// (i.e. they were created pre-v80 before sharing existed, or pre-v83 before the
+// shared/personal split), push them to KV as shared. This is how Marcus's
+// Commercial / Marketing teams get propagated to teammates without him having
+// to click anything. Runs on every boot but is idempotent.
+async function migrateLocalTeamsToShared() {
+  if(!canEditSharedTeams()) return;
+  const localNames = Object.keys(groups || {});
+  const toShare = localNames.filter(n => !sharedTeams.has(n));
+  if(!toShare.length) return;
+  appLogMsg('info','team','Migrating '+toShare.length+' local team(s) to shared: '+toShare.join(', '));
+  for(const name of toShare) {
+    sharedTeams.add(name);
+    try { await kvSet('team:' + name, JSON.stringify(groups[name]||[])); } catch {}
+    if(groupProjectAssignment[name]) {
+      try { await kvSet('teamassign:' + name, JSON.stringify(groupProjectAssignment[name])); } catch {}
+    }
+  }
+  saveAll();
+  appLogMsg('info','team','Migration complete; teammates will see these after refresh');
 }
 
 async function saveTeamAssignmentKV(teamName, projectGroupName) {
@@ -3303,10 +3396,28 @@ function renderSettings(){
             </div>
             ${activeGrp ? `
             <div>
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-                <span style="font-size:14px;font-weight:700">${activeGrp}</span>
-                <button data-grp="${activeGrp.replace(/"/g,'&quot;')}" onclick="const g=this.getAttribute('data-grp');deleteGroup(g);window._activeGrpTab=null;renderSettings()"
-                  style="border:1px solid #D6202B;color:#D6202B;background:none;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:12px">Delete team</button>
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:8px;flex-wrap:wrap">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="font-size:14px;font-weight:700">${activeGrp}</span>
+                  ${sharedTeams.has(activeGrp)
+                    ? '<span style="font-size:10px;background:#5E8E38;color:#fff;padding:2px 8px;border-radius:10px;font-weight:700" title="Visible to all users on the workspace">🌐 Shared</span>'
+                    : '<span style="font-size:10px;background:#EEF1F3;color:#73777C;padding:2px 8px;border-radius:10px;font-weight:700" title="Only visible to you">Personal</span>'}
+                </div>
+                <div style="display:flex;gap:6px">
+                  ${canEditSharedTeams() ? (sharedTeams.has(activeGrp)
+                    ? `<button data-grp="${activeGrp.replace(/"/g,'&quot;')}" onclick="unshareTeam(this.getAttribute('data-grp'))"
+                        style="border:1px solid #E08000;color:#E08000;background:#fff;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:12px;font-weight:700">Stop sharing</button>`
+                    : `<button data-grp="${activeGrp.replace(/"/g,'&quot;')}" onclick="shareTeamWithEveryone(this.getAttribute('data-grp'))"
+                        style="border:1px solid #5E8E38;color:#fff;background:#5E8E38;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:12px;font-weight:700">🌐 Share with everyone</button>`)
+                    : ''}
+                  <button data-grp="${activeGrp.replace(/"/g,'&quot;')}" onclick="const g=this.getAttribute('data-grp');deleteGroup(g);window._activeGrpTab=null;renderSettings()"
+                    style="border:1px solid #D6202B;color:#D6202B;background:none;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:12px">Delete team</button>
+                </div>
+              </div>
+              ${sharedTeams.has(activeGrp) && !canEditSharedTeams() ? `
+                <div style="padding:8px 12px;background:#FFF4E0;border:1px solid #E08000;border-radius:6px;margin-bottom:10px;font-size:12px;color:#664000">
+                  <b>Shared team.</b> This team is managed by an admin. Changes you make here will not be saved.
+                </div>` : ''}
               
               <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#F7F8F9;border-radius:8px;margin-bottom:12px">
                 <span style="font-size:12px;color:#73777C;white-space:nowrap">Project group:</span>
@@ -3315,7 +3426,7 @@ function renderSettings(){
                   <option value="">None (use global setting)</option>
                   ${Object.keys(projectGroups).map(pg=>{const s=(groupProjectAssignment[activeGrp]||"")===pg?"selected":"";return "<option value=\""+pg+"\" "+s+">"+pg+"</option>";}).join("")}
                 </select>
-              </div></div>
+              </div>
               <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Search to add members</div>
               <input class="form-input" id="grp-search-input" placeholder="Search Jira users by name or email…"
                 data-grpname="${activeGrp}" oninput="searchGroupUsers(this.getAttribute('data-grpname'),this.value)" style="margin-bottom:8px">
@@ -3520,16 +3631,25 @@ function createGroup(){
   populateGroupSelector();
 }
 function deleteGroup(name){
-  // v80: delete in KV too so it disappears for other users
+  // v83: only admins can delete a shared team. Personal teams the user owns
+  // can always be deleted by them (they're local).
+  if(sharedTeams.has(name) && !canEditSharedTeams()) {
+    alert('Only admins can delete a shared team.');
+    return;
+  }
   deleteTeamKV(name);
   if(currentGroup===name)currentGroup="";
   saveAll();populateGroupSelector();window._activeGrpTab=null;renderSettings();
 }
 function toggleGroupMember(group,member,add){
+  // v83: block non-admin edits to shared teams; personal teams editable by owner.
+  if(sharedTeams.has(group) && !canEditSharedTeams()) {
+    appLogMsg('warn','team','Non-admin tried to edit shared team: '+group);
+    return;
+  }
   if(!groups[group])groups[group]=[];
   if(add){if(!groups[group].includes(member))groups[group].push(member);}
   else{groups[group]=groups[group].filter(m=>m!==member);}
-  // v80: persist this team's roster to KV
   saveTeamKV(group, [...groups[group]]);
 }
 function grpAdd(g,idx){const m=teamMembers.filter(x=>!(groups[g]||[]).includes(x)).sort()[idx];if(m){toggleGroupMember(g,m,true);renderSettings();}}
@@ -4471,6 +4591,9 @@ async function init(){
     // immediately rather than only after opening Settings.
     try { await loadProjectGroups(); } catch {}
     try { await loadTeams(); } catch {}
+    // v83: one-time admin migration — any local teams that aren't already
+    // shared get pushed to KV so teammates can see them. Idempotent.
+    try { await migrateLocalTeamsToShared(); } catch {}
     populateProjGroupSelector();
     populateProjFilter();
     populateCtrlProjFilter();
