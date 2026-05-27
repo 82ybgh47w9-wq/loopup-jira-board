@@ -557,7 +557,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v111</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v112</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -7564,25 +7564,22 @@ async function mtgExtract() {
     }
 
     // Step 4: Enrich tasks with IDs and defaults
-    // v111: richer per-task state — epic/initiative/legend keys + summaries,
-    // resolved assigneeId for Jira, target status, validation, lifecycle.
+    // v112: prefer AI's direct epicKey ("ROAM-22") when given. Fall back to a
+    // smarter fuzzy match (word overlap, both directions) on parentSuggestion.
     mtgTasks = tasks.map((t, i) => ({
       id: 'mtg_' + Date.now() + '_' + i,
       summary: t.summary || 'Untitled task',
       description: t.description || '',
-      // Assignee: AI gives a display name; we resolve to accountId on demand
       assignee: t.assignee || '',
       assigneeId: null,
-      // Project
       project: t.project || (projects[0] || ''),
-      // Hierarchy — AI suggests epic by summary text; user picks from dropdown
-      epicKey: '',
-      epicSummary: t.parentSuggestion || '',
-      initiativeKey: '',
-      initiativeSummary: '',
-      legendKey: '',
-      legendSummary: '',
-      // Target status when pushed to Jira
+      // AI may provide epicKey directly (e.g. "ROAM-22"). Keep parentSuggestion
+      // for fallback fuzzy matching when no key is provided.
+      epicKey: t.epicKey || '',
+      epicSummary: '',
+      _parentSuggestion: t.parentSuggestion || '',
+      initiativeKey: '', initiativeSummary: '',
+      legendKey: '', legendSummary: '',
       status_target: 'Backlog',
       priority: t.priority || 'Medium',
       type: 'Task',
@@ -7590,25 +7587,56 @@ async function mtgExtract() {
       confidence: t.confidence || 'medium',
       duplicate: null,
       included: true,
-      // Lifecycle: pending | creating | created | error
       status: 'pending',
       jiraKey: null,
-      // UI state
       expanded: false
     }));
-    // Auto-match epic by parentSuggestion text where possible
+
+    // v112: Resolve epicKey to the actual epic from the live data.
+    // Strategy:
+    //   1) If AI gave epicKey AND it exists in allIssues → use it directly.
+    //   2) Else build the best fuzzy match between (task.summary + parentSuggestion)
+    //      and each candidate epic.summary using word-overlap Jaccard similarity.
+    //      Score >= 0.25 wins; we also boost matches in the same project.
+    const stopWords = new Set(['the','and','for','with','from','that','this','your','our','will','have','has','are','can','any','all','new','use','make','need','what','when','how','why','who','about','into','onto','etc']);
+    const tokenize = s => new Set((s||'').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2 && !stopWords.has(w)));
     mtgTasks.forEach(t => {
-      if(t.epicSummary && epics.length){
-        const match = epics.find(e =>
-          e.summary && t.epicSummary &&
-          e.summary.toLowerCase().includes(t.epicSummary.toLowerCase().split(/\s+/).slice(0,3).join(' '))
-        );
-        if(match){
-          t.epicKey = match.key;
-          t.epicSummary = match.summary;
-          // Auto-fill initiative/legend by walking up the allIssues parent chain
+      // 1) AI gave us a key — trust it if it resolves
+      if(t.epicKey){
+        const ep = allIssues.find(i => i.key === t.epicKey);
+        if(ep && isEpicLevel(ep.type)){
+          t.epicSummary = ep.summary;
+          if(ep.project) t.project = ep.project;
           mtgFillHierarchy(t);
+          return;
+        } else {
+          // Key didn't resolve — clear and fall through to fuzzy
+          t.epicKey = '';
         }
+      }
+      // 2) Fuzzy match — score every candidate epic
+      const candidates = epics; // limited slice from earlier
+      if(!candidates.length) return;
+      const taskText = (t.summary + ' ' + (t._parentSuggestion || '') + ' ' + (t.description||'')).toLowerCase();
+      const tWords = tokenize(taskText);
+      if(!tWords.size) return;
+      let best = null, bestScore = 0;
+      for(const ep of candidates){
+        const eWords = tokenize(ep.summary || '');
+        if(!eWords.size) continue;
+        // Jaccard-like: shared / smaller-set-size (so a short epic title can still match)
+        let shared = 0;
+        for(const w of eWords) if(tWords.has(w)) shared++;
+        const score = shared / Math.min(tWords.size, eWords.size);
+        const sameProject = ep.project === t.project ? 0.15 : 0;
+        const total = score + sameProject;
+        if(total > bestScore){ bestScore = total; best = ep; }
+      }
+      if(best && bestScore >= 0.25){
+        t.epicKey = best.key;
+        t.epicSummary = best.summary;
+        if(best.project) t.project = best.project;
+        mtgFillHierarchy(t);
       }
     });
 
@@ -7711,6 +7739,11 @@ function mtgOpenPickerFor(taskId, kind, event){
     mtgOpenPicker = { taskId, kind };
     mtgPickerQuery = '';
     mtgPickerResults = [];
+    // v112: Auto-expand the task card so the user sees description, source quote,
+    // and current hierarchy while picking. Especially useful for the Epic picker
+    // where you need the AI's source quote as context to pick the right epic.
+    const t = mtgTasks.find(x => x.id === taskId);
+    if(t) t.expanded = true;
   }
   renderMtgStaging('ready');
   setTimeout(() => { const inp = document.querySelector('.mtg-pill-pop .mtg-pop-input'); if(inp) inp.focus(); }, 0);
