@@ -608,7 +608,7 @@ button,select,textarea,input{font-family:inherit}
     <button onclick="setView('prioritise')">Prioritise</button>
     <button onclick="setView('manager')" id="btn-manager">Team</button>
     <button onclick="setView('activity')">Comments</button>
-    <button onclick="setView('meetings')" id="btn-meetings">Meetings</button>
+    <button onclick="setView('meetings')" id="btn-meetings" style="display:none">Meetings</button>
   </div>
 </div>
 
@@ -1879,12 +1879,21 @@ function populateGroupSelector(){
 }
 function updateManagerVisibility(){
   document.getElementById("btn-manager").style.display="inline-block";
-  // v108: Meetings tab visible to all users. The admin-only gate was removed
-  // because updateManagerVisibility didn't always run after cfg was loaded.
-  // To re-gate later, replace the next line with the v107 admin check block.
+  // v109: Meetings tab is gated by a localStorage flag. To enable for a
+  // browser, run in console:  localStorage.setItem('meetings_beta','1')
+  // To disable:               localStorage.removeItem('meetings_beta')
+  // To open to all users:     replace next line with mb.style.display='inline-block'
   const mb = document.getElementById("btn-meetings");
-  if(mb) mb.style.display = "inline-block";
+  if(mb) mb.style.display = (localStorage.getItem('meetings_beta') === '1') ? "inline-block" : "none";
 }
+// v109: also run the gate on page load in case updateManagerVisibility hasn't
+// fired by the time the user expects to see the tab. Idempotent and cheap.
+window.addEventListener('DOMContentLoaded', () => {
+  try {
+    const mb = document.getElementById("btn-meetings");
+    if(mb) mb.style.display = (localStorage.getItem('meetings_beta') === '1') ? "inline-block" : "none";
+  } catch(e) {}
+});
 
 /* ══ STATS ══ */
 // v82: stats bar is now scoped by current view. Previously the four status
