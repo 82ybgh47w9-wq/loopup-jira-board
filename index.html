@@ -608,7 +608,7 @@ button,select,textarea,input{font-family:inherit}
     <button onclick="setView('prioritise')">Prioritise</button>
     <button onclick="setView('manager')" id="btn-manager">Team</button>
     <button onclick="setView('activity')">Comments</button>
-    <button onclick="setView('meetings')" id="btn-meetings" style="display:none">Meetings</button>
+    <button onclick="setView('meetings')" id="btn-meetings">Meetings</button>
   </div>
 </div>
 
@@ -1879,16 +1879,11 @@ function populateGroupSelector(){
 }
 function updateManagerVisibility(){
   document.getElementById("btn-manager").style.display="inline-block";
-  // v107: gate the Meetings tab to admins only during the beta rollout.
-  // Reuses the same admin check pattern used elsewhere in the app
-  // (owner email + any user in adminUsers). To open Meetings to everyone,
-  // replace this block with: mb.style.display="inline-block".
+  // v108: Meetings tab visible to all users. The admin-only gate was removed
+  // because updateManagerVisibility didn't always run after cfg was loaded.
+  // To re-gate later, replace the next line with the v107 admin check block.
   const mb = document.getElementById("btn-meetings");
-  if(mb){
-    const email = (cfg && cfg.email) || "";
-    const isAdmin = email===ADMIN_EMAIL || (adminUsers||[]).includes(email);
-    mb.style.display = isAdmin ? "inline-block" : "none";
-  }
+  if(mb) mb.style.display = "inline-block";
 }
 
 /* ══ STATS ══ */
