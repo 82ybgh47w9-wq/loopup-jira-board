@@ -436,7 +436,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v100</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v101</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -1537,19 +1537,119 @@ function showPage(name){
 }
 
 
+// v101: refresh strategy state.
+//   _lastFetchAt — millis timestamp of the last successful allIssues fetch.
+//                  Used to decide whether a trigger (view change, focus,
+//                  background poll) is acting on stale-enough data to be
+//                  worth re-fetching.
+//   _fetchInFlight — guard so overlapping triggers don't fire double fetches.
+//   _autoRefreshTimer — interval handle for the background poll.
+// Thresholds (in ms): tuneable in one place.
+let _lastFetchAt = 0;
+let _fetchInFlight = false;
+let _autoRefreshTimer = null;
+const REFRESH_MIN_INTERVAL_MS = 15000;   // never auto-refresh more than once every 15s
+const REFRESH_STALE_ON_VIEW_MS = 45000;  // on view switch, refresh if older than 45s
+const REFRESH_STALE_ON_FOCUS_MS = 30000; // on tab focus, refresh if older than 30s
+const REFRESH_BG_POLL_MS = 90000;        // background poll every 90s when focused
+const REFRESH_TICK_MS = 5000;            // tick the "Synced Ns ago" label every 5s
+
+// True if the user is mid-input — don't disrupt typing with a re-render.
+function _userIsTyping(){
+  const a = document.activeElement;
+  if(!a) return false;
+  const tag = (a.tagName||'').toUpperCase();
+  if(tag === 'TEXTAREA') return true;
+  if(tag === 'INPUT') {
+    const t = (a.type||'').toLowerCase();
+    return ['text','search','email','password','url','tel'].includes(t);
+  }
+  if(a.isContentEditable) return true;
+  return false;
+}
+
+// Returns true if it's been long enough since the last fetch AND no fetch is
+// currently in progress AND the user isn't typing. Used as the gate for every
+// auto-trigger so we never disrupt the user or hammer Jira.
+function _canAutoRefresh(){
+  if(_fetchInFlight) return false;
+  if(_userIsTyping()) return false;
+  if(document.hidden) return false;
+  if(Date.now() - _lastFetchAt < REFRESH_MIN_INTERVAL_MS) return false;
+  return true;
+}
+
+// Schedule a silent refresh if stale beyond the given threshold and the gate
+// passes. Called by view-switch, focus, and the background poll.
+function maybeAutoRefresh(staleMs, reason){
+  if(!_canAutoRefresh()) return;
+  if(Date.now() - _lastFetchAt < staleMs) return;
+  appLogMsg('info','refresh','Auto-refresh triggered: '+reason);
+  doFetch(true);
+}
+
 async function doFetch(silent=false){
-  const rb=document.getElementById("refresh-btn");rb.disabled=true;rb.innerHTML=spinHtml(13)+" Refresh";
-  if(!silent)showPage("loading");
-  document.getElementById("loading-msg").textContent="Loading team tasks…";
-  try{allIssues=await fetchAllTeamIssues();await loadActiveFlags();updateStats();renderMain();const now=new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});const st=document.getElementById("sync-time");st.textContent="Synced "+now;st.style.display="inline";document.getElementById("jira-link").style.display="inline";
+  if(_fetchInFlight) { appLogMsg('info','refresh','Skipping doFetch — already in flight'); return; }
+  _fetchInFlight = true;
+  const rb=document.getElementById("refresh-btn");
+  if(rb){ rb.disabled=true; rb.innerHTML=spinHtml(13)+" Refresh"; }
+  // Show full-page loading only on first load; subsequent fetches stay silent
+  // so the user keeps their current view without it being wiped.
+  if(!silent && !allIssues.length) showPage("loading");
+  const lm = document.getElementById("loading-msg");
+  if(lm) lm.textContent="Loading team tasks…";
+  try{
+    allIssues=await fetchAllTeamIssues();
+    await loadActiveFlags();
+    updateStats();
+    renderMain();
+    _lastFetchAt = Date.now();
+    updateSyncIndicator();
+    document.getElementById("jira-link").style.display="inline";
     // Preload activity to populate the New Comments counter
     if(currentIam) loadActivity().catch(()=>{});
   }
-  catch(e){showPage("error");document.getElementById("error-msg").textContent=e.message;}
-  rb.disabled=false;rb.innerHTML="↻ Refresh";
+  catch(e){
+    if(!allIssues.length){
+      // First-ever fetch failed — show the error page so the user knows
+      showPage("error");
+      const em = document.getElementById("error-msg");
+      if(em) em.textContent = e.message;
+    } else {
+      // Subsequent fetch failed — log but keep showing what we have
+      appLogMsg('error','refresh','Background fetch failed: '+(e.message||e));
+    }
+  }
+  finally {
+    _fetchInFlight = false;
+    if(rb){ rb.disabled=false; rb.innerHTML="↻ Refresh"; }
+  }
 }
 
-async function doRefresh(){await doFetch(true);}
+// v101: tick the "Synced N seconds ago" indicator so the user has a sense
+// of how fresh the data is, and the label turns amber if it crosses 60s
+// without refresh (e.g. while doFetch is failing or we're paused).
+function updateSyncIndicator(){
+  const st = document.getElementById("sync-time");
+  if(!st) return;
+  if(!_lastFetchAt){ st.style.display = 'none'; return; }
+  st.style.display = 'inline';
+  const ageSec = Math.floor((Date.now() - _lastFetchAt) / 1000);
+  let label;
+  if(ageSec < 5) label = 'Synced just now';
+  else if(ageSec < 60) label = 'Synced '+ageSec+'s ago';
+  else if(ageSec < 3600) label = 'Synced '+Math.floor(ageSec/60)+'m ago';
+  else label = 'Synced over an hour ago';
+  st.textContent = label;
+  st.style.color = ageSec >= 120 ? '#E08000' : '#C9CACC';
+}
+
+async function doRefresh(){
+  // Manual press of the Refresh button — bypass the throttle floor so the
+  // user always gets immediate feedback when they explicitly ask.
+  _lastFetchAt = 0;
+  await doFetch(true);
+}
 function onIamChange(){currentIam=document.getElementById("iam-sel").value;saveAll();updateManagerVisibility();if(currentIam)doFetch(false);else showPage("welcome");}
 function onGroupChange(){
   currentGroup=document.getElementById("group-sel").value;
@@ -1946,8 +2046,26 @@ function setView(v){
   if(searchBox) searchBox.style.display=isAct?"none":"flex";
   saveAll();
   renderMain();
+  // v101: auto-refresh stale data on view change. Skipped for the very first
+  // setView (during init) — init's own doFetch handles that. For Comments
+  // view we also call activityLoaded=false so it fetches fresh comments.
+  if(_lastSetViewAt) {
+    if(v === 'activity') {
+      // Comments view always wants fresh comments — its own fetch will run
+      // via renderActivity, which respects activityLoaded.
+    } else {
+      maybeAutoRefresh(REFRESH_STALE_ON_VIEW_MS, 'view-change → '+v);
+    }
+  }
+  _lastSetViewAt = Date.now();
 }
 function setLevel(l){currentLevel=l;document.querySelectorAll("#level-seg button").forEach((b,i)=>b.classList.toggle("active",["all","epics","tasks"][i]===l));saveAll();renderMain();}
+
+// v101: track last-view so setView can decide whether to trigger an
+// auto-refresh on tab change. We don't refresh on the very first setView
+// after a fresh page-load (init handles that) but do on every subsequent
+// tab change when the data is stale.
+let _lastSetViewAt = 0;
 function renderMain(){
   if(!allIssues.length)return;
   if(currentView==="mytasks"){showPage("mytasks");renderMyTasks();}
@@ -2170,10 +2288,21 @@ function renderDone(){
   const el=document.getElementById("done-content")||document.getElementById("page-done");
   const dsel=document.getElementById("done-person-sel");
   if(dsel){
-    const p=doneViewPerson||"";
-    dsel.innerHTML='<option value="">Everyone</option>'+teamMembers.map(m=>
-      `<option value="${m}" ${m===p?'selected':''}>${m}${m===currentIam?' (me)':''}</option>`
-    ).join('');
+    // v101: Team-first dropdown. "Team (all)" is the default and what the
+    // user said matters most. Then "Me — <name>" pinned second, then the
+    // rest of the visible team alphabetically. Visual labels make scope
+    // obvious at a glance.
+    const p = doneViewPerson || '';
+    const me = currentIam || '';
+    const others = (getVisibleTeam()||[]).filter(m => m && m !== me).sort();
+    let html = '<option value="" ' + (p===''?'selected':'') + '>👥 Team (all visible)</option>';
+    if(me) html += '<option value="' + me + '" ' + (p===me?'selected':'') + '>🙋 Me — ' + me + '</option>';
+    if(others.length){
+      html += '<optgroup label="Other team members">';
+      html += others.map(m => '<option value="'+m+'" '+(m===p?'selected':'')+'>'+m+'</option>').join('');
+      html += '</optgroup>';
+    }
+    dsel.innerHTML = html;
   }
   const vt=getVisibleTeam();
   let done=getFiltered(null).filter(i=>normStatus(i.status)==="Done"&&vt.includes(i.assignee)).sort((a,b)=>b.updated.localeCompare(a.updated));
@@ -6545,9 +6674,47 @@ if(cfg.email && cfg.token && cfg.url){
       // Groups exist but none selected - show blocking modal
       showProjectGroupModal();
     }
+    // v101: install the auto-refresh triggers. These only start firing after
+    // the first successful fetch (since _lastFetchAt is 0 until then), so
+    // they're safe to register here unconditionally.
+    installAutoRefreshHooks();
   });
 } else {
   showSetup();
+}
+
+// v101: hook focus, visibility, and background-poll triggers. Idempotent —
+// safe to call multiple times; we track install state to avoid duplicates.
+let _autoRefreshHooksInstalled = false;
+function installAutoRefreshHooks(){
+  if(_autoRefreshHooksInstalled) return;
+  _autoRefreshHooksInstalled = true;
+
+  // Tick the "Synced Ns ago" label so the user has live feedback.
+  setInterval(updateSyncIndicator, REFRESH_TICK_MS);
+
+  // Refresh on tab focus (catches "user came back after a meeting").
+  window.addEventListener('focus', () => {
+    maybeAutoRefresh(REFRESH_STALE_ON_FOCUS_MS, 'window focus');
+  });
+
+  // Same for the page-visible event (covers tab-switch scenarios that don't
+  // also fire focus in every browser).
+  document.addEventListener('visibilitychange', () => {
+    if(!document.hidden) {
+      maybeAutoRefresh(REFRESH_STALE_ON_FOCUS_MS, 'visibilitychange → visible');
+    }
+  });
+
+  // Background poll. Runs every REFRESH_BG_POLL_MS, but maybeAutoRefresh's
+  // guards will skip if the window is hidden, the user is typing, a fetch is
+  // already in flight, or the data is still fresh.
+  if(_autoRefreshTimer) clearInterval(_autoRefreshTimer);
+  _autoRefreshTimer = setInterval(() => {
+    maybeAutoRefresh(REFRESH_BG_POLL_MS, 'background poll');
+  }, REFRESH_BG_POLL_MS);
+
+  appLogMsg('info','refresh','Auto-refresh hooks installed (poll '+(REFRESH_BG_POLL_MS/1000)+'s, stale '+(REFRESH_STALE_ON_VIEW_MS/1000)+'s on view, '+(REFRESH_STALE_ON_FOCUS_MS/1000)+'s on focus)');
 }
 </script>
 </body>
