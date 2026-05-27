@@ -436,7 +436,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v104</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v105</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -764,11 +764,15 @@ let priDragKey = null;
 let priDragEpic = null;
 let priViewMode = 'vertical'; // 'vertical' (default, original) or 'horizontal' (transposed)
 let priBandCollapsed = {Highest:false, High:false, Medium:false, Low:false, 'No priority':true};
-// Per-view "Show Done" state — each view independently tracks whether to include Done items
-let showDoneByView = {mytasks:false, myepics:false, team:false, prioritise:false, manager:false};
+// v105: Show Done is now a SINGLE GLOBAL flag, defaulting ON. Was per-view (object
+// keyed by view) which felt fiddly — flipping it on My Tasks didn't carry over to
+// Prioritise. The legacy `showDoneByView` variable is kept declared (referenced in
+// a few hydration helpers) but the runtime behaviour reads/writes `showDone` only.
+let showDone = true;
+let showDoneByView = {mytasks:true, myepics:true, team:true, prioritise:true, manager:true};
 
 /* ══ PERSISTENCE ══ */
-function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,groupProjectAssignment,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed,doneDays,commentReadState,priViewMode,priBandCollapsed,showDoneByView,sharedTeams:[...sharedTeams],priProjKey}));}catch{}}
+function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,groupProjectAssignment,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed,doneDays,commentReadState,priViewMode,priBandCollapsed,showDone,showDoneByView,sharedTeams:[...sharedTeams],priProjKey}));}catch{}}
 function loadAll(){try{const d=JSON.parse(localStorage.getItem(STOR)||"{}");if(d.cfg)cfg=d.cfg;if(d.locStat)locStat=d.locStat;if(d.locPri)locPri=d.locPri;if(d.currentIam)currentIam=d.currentIam;if(d.currentProjFilter)currentProjFilter=d.currentProjFilter;
 if(d.currentProjectGroup)currentProjectGroup=d.currentProjectGroup;if(d.currentGroup)currentGroup=d.currentGroup;if(d.teamMembers)teamMembers=d.teamMembers;if(d.adminUsers)adminUsers=d.adminUsers;if(d.groups)groups=d.groups;
 if(d.groupProjectAssignment)groupProjectAssignment=d.groupProjectAssignment;if(d.excludedProjects)excludedProjects=d.excludedProjects;if(d.currentView)currentView=d.currentView;if(d.currentLevel)currentLevel=d.currentLevel;if(d.rowCollapsed)rowCollapsed={...rowCollapsed,...d.rowCollapsed};if(d.swimCollapsed)swimCollapsed={...swimCollapsed,...d.swimCollapsed};
@@ -776,7 +780,17 @@ if(d.doneDays)doneDays=d.doneDays;
 if(d.commentReadState)commentReadState=d.commentReadState;
 if(d.priViewMode)priViewMode=d.priViewMode;
 if(d.priBandCollapsed)priBandCollapsed={...priBandCollapsed,...d.priBandCollapsed};
-if(d.showDoneByView)showDoneByView={...showDoneByView,...d.showDoneByView};
+// v105: hydrate the single global flag. If the saved settings still carry the
+// legacy per-view object (from v104 and earlier), migrate by OR-ing all values
+// together — if the user had Show Done on for *any* view, we honour that. If no
+// stored value at all, the in-memory default (true) wins. Then mirror back into
+// showDoneByView so any leftover reader stays consistent.
+if(typeof d.showDone === 'boolean'){
+  showDone = d.showDone;
+} else if(d.showDoneByView && typeof d.showDoneByView === 'object'){
+  showDone = Object.values(d.showDoneByView).some(v => !!v);
+}
+showDoneByView = {mytasks:showDone, myepics:showDone, team:showDone, prioritise:showDone, manager:showDone};
 if(Array.isArray(d.sharedTeams)) sharedTeams = new Set(d.sharedTeams);
 if(typeof d.priProjKey === 'string') priProjKey = d.priProjKey;
 }catch{}}
@@ -1386,43 +1400,22 @@ function normStatus(s){if(!s)return"Backlog";const l=s.toLowerCase();if(l.includ
 
 function getVisibleTeam(){if(currentGroup&&groups[currentGroup])return groups[currentGroup];return teamMembers;}
 
-/* ══ SHOW DONE TOGGLE HELPERS ════════════════════════════════════════════ */
-function getShowDone(view) {
-  // Returns true if Done items should be shown in the given view
-  return !!(showDoneByView && showDoneByView[view]);
+/* ══ SHOW DONE TOGGLE HELPERS ════════════════════════════════════════════
+   v105: Single global flag — was a per-view object. Toggling on any view now
+   updates every view, and the setting persists across reloads (default ON).
+   Helper signatures kept as-is so callers don't churn; the `view` arg is now
+   ignored but retained for backwards compatibility. */
+function getShowDone(_view) {
+  return !!showDone;
 }
 
-function toggleShowDone(view, checkbox) {
-  if(!showDoneByView) showDoneByView = {};
-  showDoneByView[view] = !!checkbox.checked;
+function toggleShowDone(_view, checkbox) {
+  showDone = !!checkbox.checked;
+  // Keep legacy per-view object in step in case any reader still reads it.
+  showDoneByView = {mytasks:showDone, myepics:showDone, team:showDone, prioritise:showDone, manager:showDone};
   saveAll();
-  appLogMsg('info','filter','Show Done ['+view+'] = '+showDoneByView[view]);
-  // Trigger a re-render appropriate for the view
-  if(view === 'prioritise') {
-    // Need to re-fetch because Prioritise loads its own data scoped by JQL
-    if(document.getElementById('pri-proj')?.value) loadPriBoard();
-  } else if(view === 'myepics') {
-    renderMyEpics();
-  } else {
-    renderMain();
-  }
-}
-
-// The global "Show Done" checkbox in the shared filter bar is the SINGLE source of truth.
-// It writes to whichever view is currently active so each view has independent state.
-// Maps currentView → showDoneByView key (Manager/Team share the 'team' bucket).
-function _showDoneKeyForView(view) {
-  if(view === 'manager' || view === 'people') return 'team';
-  return view; // 'mytasks', 'myepics', 'prioritise'
-}
-
-function onGlobalShowDoneChange(checkbox) {
-  const stateKey = _showDoneKeyForView(currentView);
-  if(!showDoneByView) showDoneByView = {};
-  showDoneByView[stateKey] = !!checkbox.checked;
-  saveAll();
-  appLogMsg('info','filter','Show Done ['+stateKey+'] = '+showDoneByView[stateKey]);
-  // For views that fetch their own data scoped by JQL, we need a re-fetch (saves an API round trip)
+  appLogMsg('info','filter','Show Done = '+showDone);
+  // Re-render every surface that filters on Done so the change is visible everywhere.
   if(currentView === 'prioritise') {
     if(document.getElementById('pri-proj')?.value) loadPriBoard();
     else renderPriBoard();
@@ -1433,25 +1426,35 @@ function onGlobalShowDoneChange(checkbox) {
   }
 }
 
-// Sync the global Show Done checkbox to reflect the current view's state
-function syncGlobalShowDoneCheckbox() {
-  const cb = document.getElementById('show-done-global');
-  if(!cb) return;
-  const stateKey = _showDoneKeyForView(currentView);
-  cb.checked = !!(showDoneByView && showDoneByView[stateKey]);
+function _showDoneKeyForView(_view) { return 'global'; }
+
+function onGlobalShowDoneChange(checkbox) {
+  showDone = !!checkbox.checked;
+  showDoneByView = {mytasks:showDone, myepics:showDone, team:showDone, prioritise:showDone, manager:showDone};
+  saveAll();
+  appLogMsg('info','filter','Show Done = '+showDone);
+  // Re-render the active view; Prioritise reloads because its JQL excludes Done at query time.
+  if(currentView === 'prioritise') {
+    if(document.getElementById('pri-proj')?.value) loadPriBoard();
+    else renderPriBoard();
+  } else if(currentView === 'myepics') {
+    renderMyEpics();
+  } else {
+    renderMain();
+  }
 }
 
-// Legacy: kept for backwards compat with the per-view checkboxes that previously existed
-// in pri-controls and myepics-controls. They were removed from the UI in v73 but the function
-// is still referenced by some flow (loadPriBoard, renderMyEpics) — make it a safe no-op + sync.
+function syncGlobalShowDoneCheckbox() {
+  const cb = document.getElementById('show-done-global');
+  if(cb) cb.checked = !!showDone;
+}
+
 function syncPerViewShowDoneCheckboxes() {
-  // The global checkbox is now the single source of truth — sync it instead.
   syncGlobalShowDoneCheckbox();
-  // Any leftover per-view checkboxes (in case some weren't removed) — keep them in sync too.
   const myepicsCb = document.getElementById('myepics-show-done');
-  if(myepicsCb) myepicsCb.checked = !!(showDoneByView && showDoneByView.myepics);
+  if(myepicsCb) myepicsCb.checked = !!showDone;
   const priCb = document.getElementById('pri-show-done');
-  if(priCb) priCb.checked = !!(showDoneByView && showDoneByView.prioritise);
+  if(priCb) priCb.checked = !!showDone;
 }
 
 // Returns the CSS style string for a "Done" card/row (strikethrough + green tint)
