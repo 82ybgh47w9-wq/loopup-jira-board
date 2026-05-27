@@ -311,6 +311,71 @@ button,select,textarea,input{font-family:inherit}
 .mtg-empty svg{margin-bottom:12px;opacity:.5}
 .mtg-create-log{background:#F7F8F9;border-radius:8px;padding:12px 16px;margin-top:12px}
 .mtg-create-log-row{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px}
+
+/* ══ MEETING INTAKE v111 — improved staging card ══ */
+.mtg-card2{background:#fff;border:1px solid #E4E6E8;border-radius:10px;margin-bottom:10px;overflow:hidden;transition:.15s}
+.mtg-card2:hover{border-color:#C9CACC}
+.mtg-card2.is-invalid{border-left:3px solid #E08000}
+.mtg-card2.is-created{border-left:3px solid #5E8E38;background:#FCFEFB}
+.mtg-card2.is-creating{border-left:3px solid #2E99CE;background:#FAFCFE}
+.mtg-card2.is-error{border-left:3px solid #D6202B;background:#FFFCFC}
+.mtg-card2.is-dupe{border-left:3px solid #E08000;background:#FFFCF5}
+.mtg-card2-top{display:flex;align-items:center;gap:10px;padding:10px 12px}
+.mtg-check2{width:18px;height:18px;border-radius:4px;border:2px solid #C9CACC;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;font-size:11px;color:#fff;transition:.15s}
+.mtg-check2.checked{background:#125462;border-color:#125462}
+.mtg-card2-summary{flex:1;font-size:13px;font-weight:600;color:#292E37;line-height:1.35;outline:none;cursor:text;padding:2px 4px;border-radius:4px;min-width:0}
+.mtg-card2-summary:hover{background:#F7F8F9}
+.mtg-card2-summary:focus{background:#fff;box-shadow:0 0 0 2px #2E99CE40}
+.mtg-card2-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.mtg-push-one{padding:5px 10px;border-radius:6px;border:none;background:#125462;color:#fff;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:5px;white-space:nowrap}
+.mtg-push-one:hover:not(:disabled){background:#0E4450}
+.mtg-push-one:disabled{background:#EEF1F3;color:#9EA0A4;cursor:not-allowed}
+.mtg-warn-pill{background:#FFF8E0;color:#854F0B;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;cursor:help;display:flex;align-items:center;gap:4px}
+.mtg-exp-btn{background:transparent;border:none;color:#9EA0A4;cursor:pointer;font-size:14px;padding:4px 6px;border-radius:4px}
+.mtg-exp-btn:hover{background:#F7F8F9}
+.mtg-exp-btn.open{transform:rotate(180deg)}
+.mtg-fields{display:flex;flex-wrap:wrap;gap:6px;padding:0 12px 10px 42px;align-items:center}
+.mtg-pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:14px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid #E4E6E8;background:#F7F8F9;color:#292E37;transition:.12s;position:relative;max-width:240px}
+.mtg-pill:hover{background:#EEF1F3;border-color:#C9CACC}
+.mtg-pill.is-empty{color:#9EA0A4;border-style:dashed;background:#fff}
+.mtg-pill.is-missing{color:#854F0B;background:#FFF8E0;border-color:#E0B450;border-style:solid}
+.mtg-pill-label{font-size:9px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em}
+.mtg-pill-value{font-weight:700;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mtg-pill.status-Backlog{background:#EEF1F3;border-color:#C9CACC;color:#5D7987}
+.mtg-pill.status-Selected{background:#F1F7EC;border-color:#A9C98E;color:#3D6B1E}
+.mtg-pill.status-In-Progress{background:#E0F0F8;border-color:#7CB7DA;color:#125462}
+.mtg-pill.status-Done{background:#E8F5E0;border-color:#7DAF5A;color:#2D7A2D}
+.mtg-priority-Highest{background:#FCEBEB;border-color:#E89696;color:#A11820}
+.mtg-priority-High{background:#FAEEDA;border-color:#D4B07A;color:#945200}
+.mtg-priority-Medium{background:#E0F0F8;border-color:#7CB7DA;color:#125462}
+.mtg-priority-Low{background:#EAF3DE;border-color:#A9C98E;color:#3D6B1E}
+.mtg-pill-pop{position:absolute;top:calc(100% + 4px);left:0;z-index:200;background:#fff;border:1px solid #C9CACC;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);min-width:280px;max-width:380px;max-height:340px;overflow-y:auto;padding:6px}
+.mtg-pop-input{width:100%;padding:7px 10px;border:1px solid #C9CACC;border-radius:6px;font-size:12px;font-family:inherit;margin-bottom:6px;box-sizing:border-box}
+.mtg-pop-input:focus{border-color:#2E99CE;outline:none}
+.mtg-pop-row{display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:12px;color:#292E37}
+.mtg-pop-row:hover{background:#E0F0F8}
+.mtg-pop-row.selected{background:#125462;color:#fff}
+.mtg-pop-row .k{font-size:10px;font-family:monospace;color:#257AA5;font-weight:700}
+.mtg-pop-row.selected .k{color:#A4D4EE}
+.mtg-pop-row .s{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mtg-pop-row .t{font-size:9px;font-weight:700;padding:2px 6px;border-radius:8px;text-transform:uppercase;letter-spacing:.04em}
+.mtg-pop-hint{font-size:11px;color:#9EA0A4;padding:8px 10px;text-align:center}
+.mtg-pop-create{display:flex;align-items:center;gap:6px;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:12px;color:#125462;font-weight:700;border-top:1px solid #EEF1F3;margin-top:4px}
+.mtg-pop-create:hover{background:#E0F0F8}
+.mtg-detail2{padding:12px 16px 12px 42px;background:#FCFCFD;border-top:1px solid #EEF1F3;display:none}
+.mtg-detail2.open{display:block}
+.mtg-detail2-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.mtg-hier-row{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:11px}
+.mtg-hier-row .lbl{width:80px;font-size:9px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;flex-shrink:0}
+.mtg-hier-row .val{font-size:11px;color:#292E37;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mtg-hier-row .val.muted{color:#9EA0A4;font-style:italic}
+.mtg-desc-area{width:100%;min-height:60px;padding:8px 10px;border:1px solid #E4E6E8;border-radius:6px;font-size:12px;font-family:inherit;resize:vertical;color:#292E37;box-sizing:border-box}
+.mtg-desc-area:focus{border-color:#2E99CE;outline:none}
+.mtg-validate-bar{display:flex;align-items:center;gap:6px;padding:6px 12px 0 42px;font-size:11px;color:#854F0B}
+.mtg-validate-bar .warn-icon{font-size:13px}
+.mtg-bulk-bar{display:flex;align-items:center;gap:8px;padding:8px 14px;background:#F7F8F9;border-bottom:1px solid #E4E6E8;font-size:12px}
+.mtg-bulk-bar .stat{color:#5D7987}
+.mtg-bulk-bar .stat strong{color:#292E37}
 </style>
 </head>
 <body>
@@ -492,7 +557,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v110</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v111</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -5665,6 +5730,40 @@ function renderSettings(){
           <span>Enabled</span>
         </label>
       </div>
+      <div style="padding:10px 14px;background:#F7F8F9;border-radius:8px;margin-bottom:14px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div>
+            <div style="font-size:12px;font-weight:700">Meetings: Push requirements</div>
+            <div style="font-size:11px;color:#9EA0A4">Which fields a task must have before it can be pushed to Jira</div>
+          </div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:14px;padding-top:4px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#9EA0A4;cursor:not-allowed" title="Project is always required">
+            <input type="checkbox" checked disabled>
+            <span>Project</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#292E37;cursor:pointer">
+            <input type="checkbox" ${(mtgGetPushReqs().legend?'checked':'')} onchange="mtgSetPushReq('legend',this.checked)">
+            <span>Legend</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#292E37;cursor:pointer">
+            <input type="checkbox" ${(mtgGetPushReqs().initiative?'checked':'')} onchange="mtgSetPushReq('initiative',this.checked)">
+            <span>Initiative</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#292E37;cursor:pointer">
+            <input type="checkbox" ${(mtgGetPushReqs().epic?'checked':'')} onchange="mtgSetPushReq('epic',this.checked)">
+            <span>Epic / Milestone</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#292E37;cursor:pointer">
+            <input type="checkbox" ${(mtgGetPushReqs().assignee?'checked':'')} onchange="mtgSetPushReq('assignee',this.checked)">
+            <span>Assignee</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#292E37;cursor:pointer">
+            <input type="checkbox" ${(mtgGetPushReqs().status?'checked':'')} onchange="mtgSetPushReq('status',this.checked)">
+            <span>Status</span>
+          </label>
+        </div>
+      </div>
       <div style="font-size:12px;color:#9EA0A4;margin-bottom:10px">Users with Manager board access:</div>
       <div id="admin-list" style="display:flex;flex-direction:column;gap:5px;margin-bottom:12px"></div>
       <div style="display:flex;gap:8px">
@@ -5803,6 +5902,35 @@ function toggleMeetingsBeta(enabled){
   if(enabled) localStorage.setItem('meetings_beta','1');
   else localStorage.removeItem('meetings_beta');
   updateManagerVisibility();
+}
+// v111: Per-browser push requirements. Project is always required.
+// Defaults: legend, initiative, epic ON; assignee, status OFF.
+function mtgGetPushReqs(){
+  try {
+    const stored = localStorage.getItem('mtg_push_reqs');
+    if(stored) return JSON.parse(stored);
+  } catch(e) {}
+  return { project:true, legend:true, initiative:true, epic:true, assignee:false, status:false };
+}
+function mtgSetPushReq(field, required){
+  const r = mtgGetPushReqs();
+  r[field] = !!required;
+  r.project = true; // always required
+  localStorage.setItem('mtg_push_reqs', JSON.stringify(r));
+  if(currentView === 'meetings') renderMtgStaging('ready');
+}
+// v111: Validate a task against current push requirements. Returns an array
+// of missing field names (empty array = passes validation, ready to push).
+function mtgValidateTask(task){
+  const reqs = mtgGetPushReqs();
+  const missing = [];
+  if(!task.project || !task.project.trim()) missing.push('Project');
+  if(reqs.legend && !task.legendKey) missing.push('Legend');
+  if(reqs.initiative && !task.initiativeKey) missing.push('Initiative');
+  if(reqs.epic && !task.epicKey) missing.push('Epic');
+  if(reqs.assignee && (!task.assigneeId && (!task.assignee || task.assignee === 'Unassigned'))) missing.push('Assignee');
+  if(reqs.status && !task.status_target) missing.push('Status');
+  return missing;
 }
 function updateCredentials(){
   cfg.url=(document.getElementById("cfg-url2").value||"").trim().replace(/\/$/,"");
@@ -7436,23 +7564,53 @@ async function mtgExtract() {
     }
 
     // Step 4: Enrich tasks with IDs and defaults
+    // v111: richer per-task state — epic/initiative/legend keys + summaries,
+    // resolved assigneeId for Jira, target status, validation, lifecycle.
     mtgTasks = tasks.map((t, i) => ({
       id: 'mtg_' + Date.now() + '_' + i,
       summary: t.summary || 'Untitled task',
       description: t.description || '',
-      assignee: t.assignee || 'Unassigned',
-      project: t.project || (projects[0] || 'COPS'),
-      parentKey: t.parentKey || '',
-      parentSuggestion: t.parentSuggestion || '',
+      // Assignee: AI gives a display name; we resolve to accountId on demand
+      assignee: t.assignee || '',
+      assigneeId: null,
+      // Project
+      project: t.project || (projects[0] || ''),
+      // Hierarchy — AI suggests epic by summary text; user picks from dropdown
+      epicKey: '',
+      epicSummary: t.parentSuggestion || '',
+      initiativeKey: '',
+      initiativeSummary: '',
+      legendKey: '',
+      legendSummary: '',
+      // Target status when pushed to Jira
+      status_target: 'Backlog',
       priority: t.priority || 'Medium',
       type: 'Task',
       sourceQuote: t.sourceQuote || '',
       confidence: t.confidence || 'medium',
       duplicate: null,
       included: true,
-      status: 'pending',  // pending | creating | created | error
-      jiraKey: null
+      // Lifecycle: pending | creating | created | error
+      status: 'pending',
+      jiraKey: null,
+      // UI state
+      expanded: false
     }));
+    // Auto-match epic by parentSuggestion text where possible
+    mtgTasks.forEach(t => {
+      if(t.epicSummary && epics.length){
+        const match = epics.find(e =>
+          e.summary && t.epicSummary &&
+          e.summary.toLowerCase().includes(t.epicSummary.toLowerCase().split(/\s+/).slice(0,3).join(' '))
+        );
+        if(match){
+          t.epicKey = match.key;
+          t.epicSummary = match.summary;
+          // Auto-fill initiative/legend by walking up the allIssues parent chain
+          mtgFillHierarchy(t);
+        }
+      }
+    });
 
     // Step 5: Check for duplicates
     await mtgCheckDuplicates();
@@ -7538,6 +7696,156 @@ async function mtgCheckDuplicates() {
   }
 }
 
+// v111: Global state for inline picker pop-ups (only one open at a time).
+let mtgOpenPicker = null; // { taskId, kind }
+let mtgPickerQuery = '';
+let mtgPickerResults = [];
+let mtgPickerLoading = false;
+let mtgSearchTimer = null;
+
+function mtgOpenPickerFor(taskId, kind, event){
+  if(event) event.stopPropagation();
+  if(mtgOpenPicker && mtgOpenPicker.taskId === taskId && mtgOpenPicker.kind === kind){
+    mtgOpenPicker = null;
+  } else {
+    mtgOpenPicker = { taskId, kind };
+    mtgPickerQuery = '';
+    mtgPickerResults = [];
+  }
+  renderMtgStaging('ready');
+  setTimeout(() => { const inp = document.querySelector('.mtg-pill-pop .mtg-pop-input'); if(inp) inp.focus(); }, 0);
+}
+
+function mtgClosePicker(){ mtgOpenPicker = null; renderMtgStaging('ready'); }
+
+// Outside-click closes picker
+document.addEventListener('click', (e) => {
+  if(!mtgOpenPicker) return;
+  if(e.target.closest('.mtg-pill-pop') || e.target.closest('.mtg-pill')) return;
+  mtgClosePicker();
+});
+
+function mtgFillHierarchy(task){
+  if(!task.epicKey) return;
+  const epic = allIssues.find(i => i.key === task.epicKey);
+  if(!epic) return;
+  if(epic.parent_key){
+    const init = allIssues.find(i => i.key === epic.parent_key);
+    if(init && init.type === 'Initiative'){
+      task.initiativeKey = init.key;
+      task.initiativeSummary = init.summary;
+      if(init.parent_key){
+        const leg = allIssues.find(i => i.key === init.parent_key);
+        if(leg && leg.type === 'Legend'){
+          task.legendKey = leg.key;
+          task.legendSummary = leg.summary;
+        }
+      }
+    }
+  }
+}
+
+function mtgPickProject(taskId, projectKey){
+  const t = mtgTasks.find(x => x.id === taskId); if(!t) return;
+  if(t.epicKey){
+    const ep = allIssues.find(i => i.key === t.epicKey);
+    if(!ep || ep.project !== projectKey){
+      t.epicKey = ''; t.epicSummary = '';
+      t.initiativeKey = ''; t.initiativeSummary = '';
+      t.legendKey = ''; t.legendSummary = '';
+    }
+  }
+  t.project = projectKey;
+  mtgOpenPicker = null;
+  renderMtgStaging('ready');
+}
+
+function mtgPickEpic(taskId, epicKey, epicSummary){
+  const t = mtgTasks.find(x => x.id === taskId); if(!t) return;
+  t.epicKey = epicKey;
+  t.epicSummary = epicSummary;
+  // If project doesn't match, update project from epic
+  const ep = allIssues.find(i => i.key === epicKey);
+  if(ep && ep.project) t.project = ep.project;
+  mtgFillHierarchy(t);
+  mtgOpenPicker = null;
+  renderMtgStaging('ready');
+}
+
+function mtgPickAssignee(taskId, accountId, displayName){
+  const t = mtgTasks.find(x => x.id === taskId); if(!t) return;
+  t.assignee = displayName;
+  t.assigneeId = accountId || null;
+  mtgOpenPicker = null;
+  renderMtgStaging('ready');
+}
+
+function mtgPickStatus(taskId, status){
+  const t = mtgTasks.find(x => x.id === taskId); if(!t) return;
+  t.status_target = status;
+  mtgOpenPicker = null;
+  renderMtgStaging('ready');
+}
+
+function mtgPickPriority(taskId, priority){
+  const t = mtgTasks.find(x => x.id === taskId); if(!t) return;
+  t.priority = priority;
+  mtgOpenPicker = null;
+  renderMtgStaging('ready');
+}
+
+function mtgUpdateField(taskId, field, value){
+  const t = mtgTasks.find(x => x.id === taskId);
+  if(t) t[field] = value;
+}
+
+function mtgToggleExpandCard(taskId){
+  const t = mtgTasks.find(x => x.id === taskId);
+  if(t){ t.expanded = !t.expanded; renderMtgStaging('ready'); }
+}
+
+function mtgSearchEpicsDebounced(taskId, query){
+  mtgPickerQuery = query;
+  if(mtgSearchTimer) clearTimeout(mtgSearchTimer);
+  mtgSearchTimer = setTimeout(() => renderMtgStaging('ready'), 100);
+}
+
+function mtgSearchUsersDebounced(taskId, query){
+  mtgPickerQuery = query;
+  if(mtgSearchTimer) clearTimeout(mtgSearchTimer);
+  if(query.length < 2){
+    mtgPickerResults = [];
+    renderMtgStaging('ready');
+    return;
+  }
+  mtgPickerLoading = true;
+  renderMtgStaging('ready');
+  mtgSearchTimer = setTimeout(async () => {
+    try {
+      const users = await jiraGet('/rest/api/3/user/search?query=' + encodeURIComponent(query) + '&maxResults=10');
+      const arr = Array.isArray(users) ? users : [];
+      mtgPickerResults = arr.map(u => ({ accountId: u.accountId, displayName: u.displayName, email: u.emailAddress }));
+    } catch(e) {
+      mtgPickerResults = [];
+    }
+    mtgPickerLoading = false;
+    renderMtgStaging('ready');
+  }, 300);
+}
+
+function mtgOpenCreateEpic(taskId){
+  const t = mtgTasks.find(x => x.id === taskId);
+  if(!t || !t.project){ alert('Pick a project first.'); return; }
+  // Reuse the existing Add Task / Create modal pre-configured for an Epic in this project
+  if(typeof openCreateForType === 'function'){
+    openCreateForType('Epic', t.project);
+  } else if(typeof openCreate === 'function'){
+    openCreate();
+  } else {
+    alert('To create a new Epic, use the + Create button at the top right.');
+  }
+}
+
 function renderMtgStaging(state, errorMsg) {
   const staging = document.getElementById('mtg-staging');
   const titleEl = document.getElementById('mtg-staging-title');
@@ -7577,80 +7885,154 @@ function renderMtgStaging(state, errorMsg) {
     return;
   }
 
-  // Build project options from allIssues
+  // Build option lists from current data
   const projectKeys = [...new Set(allIssues.map(i => i.project))].sort();
   const priOpts = ['Highest', 'High', 'Medium', 'Low'];
-  const includedCount = mtgTasks.filter(t => t.included && t.status === 'pending').length;
+  const statusOpts = ['Backlog', 'Selected', 'In Progress', 'Done'];
+
+  // Header stats
+  let validCount = 0;
+  for (const t of mtgTasks) {
+    if (t.status !== 'pending' || !t.included) continue;
+    if (mtgValidateTask(t).length === 0) validCount++;
+  }
   const createdCount = mtgTasks.filter(t => t.status === 'created').length;
 
   if (titleEl) titleEl.textContent = mtgMeetingTitle || 'Staging Area';
-  if (countEl) countEl.textContent = `${mtgTasks.length} tasks · ${createdCount} created`;
+  if (countEl) countEl.textContent = `${mtgTasks.length} tasks · ${createdCount} created · ${validCount} ready`;
   if (pushBtn) {
-    pushBtn.disabled = includedCount === 0;
+    pushBtn.disabled = validCount === 0;
     pushBtn.innerHTML = mtgTasks.some(t => t.status === 'creating')
       ? spinHtml(14, '#fff') + ' Creating…'
-      : `Push ${includedCount} to Jira →`;
+      : (validCount === 0 ? 'Push to Jira →' : `Push ${validCount} to Jira →`);
   }
+
+  // Pop-up renderer: returns inline HTML for the open picker on this task/field
+  const renderPop = (task, kind) => {
+    const isOpen = mtgOpenPicker && mtgOpenPicker.taskId === task.id && mtgOpenPicker.kind === kind;
+    if (!isOpen) return '';
+    if (kind === 'status') {
+      return `<div class="mtg-pill-pop" onclick="event.stopPropagation()" style="min-width:160px">
+        ${statusOpts.map(s => `<div class="mtg-pop-row ${s === (task.status_target||'Backlog') ? 'selected' : ''}" onclick="mtgPickStatus('${task.id}','${s.replace(/'/g,"\\'")}')"><span class="s">${s}</span></div>`).join('')}
+      </div>`;
+    }
+    if (kind === 'priority') {
+      return `<div class="mtg-pill-pop" onclick="event.stopPropagation()" style="min-width:140px">
+        ${priOpts.map(p => `<div class="mtg-pop-row ${p === (task.priority||'Medium') ? 'selected' : ''}" onclick="mtgPickPriority('${task.id}','${p}')"><span class="s">${p}</span></div>`).join('')}
+      </div>`;
+    }
+    if (kind === 'project') {
+      const q = (mtgPickerQuery || '').toLowerCase();
+      const filtered = projectKeys.filter(k => !q || k.toLowerCase().includes(q));
+      return `<div class="mtg-pill-pop" onclick="event.stopPropagation()">
+        <input class="mtg-pop-input" placeholder="Filter projects…" value="${_escHtml(mtgPickerQuery)}" oninput="mtgPickerQuery=this.value;renderMtgStaging('ready')">
+        ${filtered.length ? filtered.map(k => {
+          const proj = (typeof allProjects !== 'undefined' && allProjects) ? allProjects.find(p => p.key === k) : null;
+          return `<div class="mtg-pop-row ${k === task.project ? 'selected' : ''}" onclick="mtgPickProject('${task.id}','${k}')">
+            <span class="k">${k}</span><span class="s">${_escHtml((proj||{}).name||'')}</span>
+          </div>`;
+        }).join('') : '<div class="mtg-pop-hint">No matching projects.</div>'}
+      </div>`;
+    }
+    if (kind === 'epic') {
+      if (!task.project) {
+        return `<div class="mtg-pill-pop" onclick="event.stopPropagation()"><div class="mtg-pop-hint">Pick a Project first, then search for an Epic.</div></div>`;
+      }
+      const q = (mtgPickerQuery || '').toLowerCase();
+      const matches = allIssues
+        .filter(i => isEpicLevel(i.type) && i.project === task.project)
+        .filter(i => !q || (i.summary||'').toLowerCase().includes(q) || (i.key||'').toLowerCase().includes(q))
+        .slice(0, 30);
+      return `<div class="mtg-pill-pop" onclick="event.stopPropagation()">
+        <input class="mtg-pop-input" placeholder="Search Epic/Milestone in ${task.project}…" value="${_escHtml(mtgPickerQuery)}" oninput="mtgSearchEpicsDebounced('${task.id}',this.value)">
+        ${matches.length ? matches.map(e => `<div class="mtg-pop-row ${e.key === task.epicKey ? 'selected' : ''}" onclick="mtgPickEpic('${task.id}','${e.key}','${(e.summary||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')">
+          <span class="t" style="background:${e.type==='Milestone'?'#E0F0F8':'#F3EEFF'};color:${e.type==='Milestone'?'#125462':'#6B3FA0'}">${e.type||'Epic'}</span>
+          <span class="k">${e.key}</span><span class="s">${_escHtml(e.summary||'')}</span>
+        </div>`).join('') : `<div class="mtg-pop-hint">No Epic/Milestone matches in ${task.project}${q ? ' for "' + _escHtml(q) + '"' : ''}.</div>`}
+        <div class="mtg-pop-create" onclick="mtgOpenCreateEpic('${task.id}')">＋ Create new Epic in ${task.project}…</div>
+      </div>`;
+    }
+    if (kind === 'assignee') {
+      const remote = mtgPickerResults || [];
+      const seeded = (teamMembers || []).filter(m => !mtgPickerQuery || m.toLowerCase().includes((mtgPickerQuery||'').toLowerCase())).slice(0, 8);
+      return `<div class="mtg-pill-pop" onclick="event.stopPropagation()">
+        <input class="mtg-pop-input" placeholder="Search Jira users…" value="${_escHtml(mtgPickerQuery)}" oninput="mtgSearchUsersDebounced('${task.id}',this.value)">
+        <div class="mtg-pop-row ${(!task.assigneeId && (!task.assignee||task.assignee==='Unassigned')) ? 'selected' : ''}" onclick="mtgPickAssignee('${task.id}','','Unassigned')"><span class="s">— Unassigned —</span></div>
+        ${mtgPickerLoading ? `<div class="mtg-pop-hint">${spinHtml(12)} Searching Jira…</div>` : ''}
+        ${remote.length ? remote.map(u => `<div class="mtg-pop-row ${u.accountId === task.assigneeId ? 'selected' : ''}" onclick="mtgPickAssignee('${task.id}','${u.accountId}','${(u.displayName||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')">
+          <span class="s">${_escHtml(u.displayName||'')}</span>${u.email ? '<span style="font-size:10px;opacity:.7">' + _escHtml(u.email) + '</span>' : ''}
+        </div>`).join('') : (mtgPickerQuery && !mtgPickerLoading ? '<div class="mtg-pop-hint">No matching Jira users.</div>' : '')}
+        ${(!mtgPickerQuery && seeded.length) ? `<div style="font-size:10px;color:#9EA0A4;padding:6px 10px 2px;text-transform:uppercase;letter-spacing:.04em;font-weight:700">Team</div>` + seeded.map(m => `<div class="mtg-pop-row" onclick="mtgPickAssignee('${task.id}','','${m.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><span class="s">${_escHtml(m)}</span></div>`).join('') : ''}
+      </div>`;
+    }
+    return '';
+  };
+
+  // Helper to build a pill with optional pop-up
+  const pill = (task, kind, label, value, opts) => {
+    opts = opts || {};
+    const empty = !value || value === '';
+    let cls = 'mtg-pill';
+    if (empty) cls += ' is-empty';
+    if (opts.missing) cls += ' is-missing';
+    if (opts.extraClass) cls += ' ' + opts.extraClass;
+    const display = empty ? (opts.placeholder || '—') : value;
+    return `<div class="${cls}" onclick="mtgOpenPickerFor('${task.id}','${kind}',event)" title="${opts.tooltip||label}">
+      <span class="mtg-pill-label">${label}</span>
+      <span class="mtg-pill-value">${_escHtml(display)}</span>
+      ${renderPop(task, kind)}
+    </div>`;
+  };
 
   let html = '';
   for (const task of mtgTasks) {
-    const isExpanded = mtgExpandedTask === task.id;
-    const cardClass = 'mtg-task-card'
-      + (task.duplicate?.similarity === 'high' ? ' is-dupe' : '')
-      + (task.status === 'created' ? ' is-created' : '')
-      + (!task.included ? ' is-excluded' : '');
+    const missing = mtgValidateTask(task);
+    const canPush = missing.length === 0 && task.status === 'pending' && task.included;
+    let klass = 'mtg-card2';
+    if (task.status === 'created') klass += ' is-created';
+    else if (task.status === 'creating') klass += ' is-creating';
+    else if (task.status === 'error') klass += ' is-error';
+    else if (task.duplicate?.similarity === 'high') klass += ' is-dupe';
+    else if (missing.length > 0 && task.included) klass += ' is-invalid';
 
-    const confColor = task.confidence === 'high' ? '#5E8E38' : task.confidence === 'medium' ? '#E08000' : '#9EA0A4';
-    const confBg = task.confidence === 'high' ? '#F1F7EC' : task.confidence === 'medium' ? '#FFF8E0' : '#EEF1F3';
+    const statusKey = (task.status_target || 'Backlog').replace(/ /g, '-');
+    const priClass = 'mtg-priority-' + (task.priority || 'Medium');
 
-    html += `<div class="${cardClass}" id="mtg-card-${task.id}">
-      <div class="mtg-task-main" onclick="mtgToggleExpand('${task.id}')">
-        <div class="mtg-task-check ${task.included ? 'checked' : ''}" onclick="event.stopPropagation();mtgToggleInclude('${task.id}')">
-          ${task.included ? '✓' : ''}
+    html += `<div class="${klass}" id="mtg-card-${task.id}">
+      <div class="mtg-card2-top">
+        <div class="mtg-check2 ${task.included ? 'checked' : ''}" onclick="event.stopPropagation();mtgToggleInclude('${task.id}')">${task.included ? '✓' : ''}</div>
+        <div class="mtg-card2-summary" contenteditable="true" spellcheck="true" onblur="mtgUpdateField('${task.id}','summary',this.textContent.trim())">${_escHtml(task.summary)}</div>
+        <div class="mtg-card2-actions">
+          ${task.status === 'created' ? `<span style="font-size:11px;font-weight:700;color:#2D7A2D">✓ ${task.jiraKey || 'Created'}</span>` : ''}
+          ${task.status === 'creating' ? `<span style="font-size:11px;color:#2E99CE;display:flex;align-items:center;gap:4px">${spinHtml(12, '#2E99CE')} Creating…</span>` : ''}
+          ${task.status === 'error' ? `<span style="font-size:11px;font-weight:700;color:#D6202B">✗ Failed</span>` : ''}
+          ${task.status === 'pending' ? `<button class="mtg-push-one" onclick="event.stopPropagation();mtgPushOne('${task.id}')" ${canPush ? '' : 'disabled'} title="${canPush ? 'Push this task to Jira' : 'Missing required: ' + missing.join(', ')}">⊕ Push</button>` : ''}
+          <button class="mtg-exp-btn ${task.expanded ? 'open' : ''}" onclick="event.stopPropagation();mtgToggleExpandCard('${task.id}')" title="${task.expanded ? 'Collapse' : 'Expand details'}">▾</button>
         </div>
-        <div style="flex:1;min-width:0">
-          <div class="mtg-task-summary">${_escHtml(task.summary)}</div>
-          <div class="mtg-task-badges">
-            <span class="badge" style="background:${confBg};color:${confColor}">${task.confidence}</span>
-            ${task.duplicate ? `<span class="badge" style="background:#FFF8E0;color:#854F0B">⚠ ${task.duplicate.key}</span>` : ''}
-            ${task.status === 'created' ? `<span class="badge" style="background:#E8F5E0;color:#2D7A2D">✓ ${task.jiraKey || 'Created'}</span>` : ''}
-            ${task.status === 'creating' ? `<span class="badge" style="background:#E0F0F8;color:#2E99CE">${spinHtml(10, '#2E99CE')} Creating</span>` : ''}
-            ${task.status === 'error' ? `<span class="badge" style="background:#FCEBEB;color:#D6202B">✗ Failed</span>` : ''}
-          </div>
-        </div>
-        <div class="mtg-task-fields">
-          <div class="mtg-task-field">
-            <label>Assignee</label>
-            <input value="${_escHtml(task.assignee)}" onclick="event.stopPropagation()" oninput="mtgUpdateTask('${task.id}','assignee',this.value)" placeholder="Unassigned" style="width:100px">
-          </div>
-          <div class="mtg-task-field">
-            <label>Project</label>
-            <select onclick="event.stopPropagation()" onchange="mtgUpdateTask('${task.id}','project',this.value)">
-              ${projectKeys.map(k => `<option value="${k}" ${k === task.project ? 'selected' : ''}>${k}</option>`).join('')}
-            </select>
-          </div>
-          <div class="mtg-task-field">
-            <label>Priority</label>
-            <select onclick="event.stopPropagation()" onchange="mtgUpdateTask('${task.id}','priority',this.value)">
-              ${priOpts.map(p => `<option value="${p}" ${p === task.priority ? 'selected' : ''}>${p}</option>`).join('')}
-            </select>
-          </div>
-        </div>
-        <span class="mtg-task-expand ${isExpanded ? 'open' : ''}">▾</span>
       </div>
-      <div class="mtg-task-detail ${isExpanded ? 'open' : ''}">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="mtg-fields">
+        ${pill(task, 'status', 'Status', task.status_target || 'Backlog', {extraClass: 'status-' + statusKey, missing: missing.includes('Status')})}
+        ${pill(task, 'project', 'Project', task.project, {placeholder: 'pick project', missing: missing.includes('Project')})}
+        ${pill(task, 'epic', 'Epic', task.epicKey ? task.epicKey + ' — ' + task.epicSummary : '', {placeholder: 'search epic…', missing: missing.includes('Epic')})}
+        ${pill(task, 'assignee', 'Assignee', task.assignee || '', {placeholder: 'pick assignee', missing: missing.includes('Assignee')})}
+        ${pill(task, 'priority', 'Priority', task.priority || 'Medium', {extraClass: priClass})}
+      </div>
+      ${missing.length && task.included && task.status === 'pending' ? `<div class="mtg-validate-bar"><span class="warn-icon">⚠</span><span>Missing: <b>${missing.join(', ')}</b> — required by your push settings</span></div>` : ''}
+      <div class="mtg-detail2 ${task.expanded ? 'open' : ''}">
+        <div class="mtg-detail2-grid">
           <div>
-            <label style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:3px">Description</label>
-            <textarea oninput="mtgUpdateTask('${task.id}','description',this.value)">${_escHtml(task.description)}</textarea>
+            <div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Description</div>
+            <textarea class="mtg-desc-area" oninput="mtgUpdateField('${task.id}','description',this.value)">${_escHtml(task.description)}</textarea>
           </div>
           <div>
-            <label style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:3px">Parent (Epic/Milestone)</label>
-            <input style="width:100%;padding:6px 10px;border:1px solid #E4E6E8;border-radius:6px;font-size:12px;color:#292E37;margin-bottom:8px" value="${_escHtml(task.parentSuggestion)}" oninput="mtgUpdateTask('${task.id}','parentSuggestion',this.value)" placeholder="e.g. Marketing Engine">
-            ${task.sourceQuote ? `<div class="mtg-quote">"${_escHtml(task.sourceQuote)}"</div>` : ''}
+            <div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Hierarchy</div>
+            <div class="mtg-hier-row"><span class="lbl">Legend</span><span class="val ${task.legendKey ? '' : 'muted'}">${task.legendKey ? task.legendKey + ' — ' + _escHtml(task.legendSummary) : '(auto-filled when Epic is set)'}</span></div>
+            <div class="mtg-hier-row"><span class="lbl">Initiative</span><span class="val ${task.initiativeKey ? '' : 'muted'}">${task.initiativeKey ? task.initiativeKey + ' — ' + _escHtml(task.initiativeSummary) : '(auto-filled when Epic is set)'}</span></div>
+            <div class="mtg-hier-row"><span class="lbl">Epic / MS</span><span class="val ${task.epicKey ? '' : 'muted'}">${task.epicKey ? task.epicKey + ' — ' + _escHtml(task.epicSummary) : '(none — click the Epic pill above)'}</span></div>
+            ${task.sourceQuote ? `<div style="margin-top:10px;font-size:11px;font-style:italic;color:#5D7987;padding:8px 10px;background:#fff;border-left:3px solid #2E99CE;border-radius:0 6px 6px 0;line-height:1.4">"${_escHtml(task.sourceQuote)}"</div>` : ''}
           </div>
         </div>
-        ${task.duplicate ? `<div class="mtg-dupe-warn">⚠ Possible duplicate of <b>${task.duplicate.key}</b>: "${_escHtml(task.duplicate.summary)}" <span style="color:#9EA0A4">(${task.duplicate.similarity})</span></div>` : ''}
+        ${task.duplicate ? `<div style="margin-top:10px;font-size:11px;color:#854F0B;padding:6px 10px;background:#FFF8E0;border-radius:6px;display:flex;align-items:center;gap:6px">⚠ Possible duplicate of <b>${task.duplicate.key}</b>: "${_escHtml(task.duplicate.summary)}" <span style="color:#9EA0A4">(${task.duplicate.similarity})</span></div>` : ''}
       </div>
     </div>`;
   }
@@ -7663,80 +8045,90 @@ function mtgToggleInclude(id) {
   if (t) { t.included = !t.included; renderMtgStaging('ready'); }
 }
 
-function mtgToggleExpand(id) {
-  mtgExpandedTask = mtgExpandedTask === id ? null : id;
+// Legacy alias — older code may still call mtgUpdateTask
+function mtgUpdateTask(id, field, value) { mtgUpdateField(id, field, value); }
+
+// v111: Push a single task to Jira (validates first). Used by per-task button.
+async function mtgPushOne(taskId) {
+  const task = mtgTasks.find(t => t.id === taskId);
+  if (!task || task.status !== 'pending') return;
+  const missing = mtgValidateTask(task);
+  if (missing.length) {
+    alert('Cannot push — missing required fields: ' + missing.join(', '));
+    return;
+  }
+  task.status = 'creating';
+  renderMtgStaging('ready');
+
+  try {
+    const desc = (task.description ? task.description + '\n\n' : '')
+      + '---\nExtracted from meeting "' + mtgMeetingTitle + '" by Meeting Task Extractor.';
+
+    const payload = {
+      fields: {
+        project: { key: task.project },
+        issuetype: { name: 'Task' },
+        summary: task.summary,
+        priority: { name: task.priority || 'Medium' },
+        description: {
+          type: 'doc', version: 1,
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: desc }] }]
+        }
+      }
+    };
+
+    // Resolve assignee
+    if (task.assigneeId) {
+      payload.fields.assignee = { accountId: task.assigneeId };
+    } else if (task.assignee && task.assignee !== 'Unassigned') {
+      try {
+        const users = await jiraGet('/rest/api/3/user/search?query=' + encodeURIComponent(task.assignee) + '&maxResults=5');
+        const arr = Array.isArray(users) ? users : [];
+        const pick = arr.find(u => (u.displayName || '').toLowerCase() === task.assignee.toLowerCase()) || arr[0];
+        if (pick?.accountId) {
+          payload.fields.assignee = { accountId: pick.accountId };
+          task.assigneeId = pick.accountId;
+        }
+      } catch (e) { appLogMsg('warn', 'meetings', 'Could not resolve assignee for ' + task.assignee); }
+    }
+
+    // Parent epic/milestone
+    if (task.epicKey) payload.fields.parent = { key: task.epicKey };
+
+    const result = await createIssue(payload);
+    if (result.success) {
+      task.status = 'created';
+      task.jiraKey = result.key;
+      appLogMsg('info', 'meetings', 'Created ' + result.key + ': ' + task.summary);
+      // Apply status transition if not Backlog
+      if (task.status_target && task.status_target !== 'Backlog') {
+        try {
+          const tr = await jiraGet('/rest/api/3/issue/' + result.key + '/transitions');
+          const match = (tr.transitions || []).find(t => t.name === task.status_target || t.to?.name === task.status_target);
+          if (match) await jiraPost('/rest/api/3/issue/' + result.key + '/transitions', { transition: { id: match.id } });
+        } catch (e) { appLogMsg('warn', 'meetings', 'Status transition failed for ' + result.key); }
+      }
+    } else {
+      task.status = 'error';
+      appLogMsg('error', 'meetings', 'Failed to create: ' + task.summary);
+    }
+  } catch (e) {
+    task.status = 'error';
+    appLogMsg('error', 'meetings', 'Error creating task: ' + e.message);
+  }
   renderMtgStaging('ready');
 }
 
-function mtgUpdateTask(id, field, value) {
-  const t = mtgTasks.find(t => t.id === id);
-  if (t) t[field] = value;
-  // Don't re-render on every keystroke — just update in memory
-}
-
+// v111: Push-all now respects validation — only pushes tasks that pass mtgValidateTask.
 async function mtgPushToJira() {
-  const toCreate = mtgTasks.filter(t => t.included && t.status === 'pending');
-  if (!toCreate.length) return;
-
-  for (const task of toCreate) {
-    task.status = 'creating';
-    renderMtgStaging('ready');
-
-    try {
-      // Build description with source attribution
-      const desc = (task.description ? task.description + '\n\n' : '')
-        + '---\n_Extracted from meeting "' + mtgMeetingTitle + '" by Meeting Task Extractor_';
-
-      const payload = {
-        fields: {
-          project: { key: task.project },
-          issuetype: { name: 'Task' },
-          summary: task.summary,
-          priority: { name: task.priority || 'Medium' },
-          description: {
-            type: 'doc', version: 1,
-            content: [{ type: 'paragraph', content: [{ type: 'text', text: desc }] }]
-          }
-        }
-      };
-
-      // Try to set assignee
-      if (task.assignee && task.assignee !== 'Unassigned') {
-        try {
-          const users = await jiraGet('/rest/api/3/user/search?query=' + encodeURIComponent(task.assignee) + '&maxResults=5');
-          const arr = Array.isArray(users) ? users : [];
-          const pick = arr.find(u => (u.displayName || '').toLowerCase() === task.assignee.toLowerCase()) || arr[0];
-          if (pick?.accountId) {
-            payload.fields.assignee = { accountId: pick.accountId };
-          }
-        } catch (e) {
-          appLogMsg('warn', 'meetings', 'Could not resolve assignee for ' + task.assignee);
-        }
-      }
-
-      // Try to set parent epic/milestone
-      if (task.parentKey) {
-        payload.fields.parent = { key: task.parentKey };
-      }
-
-      const result = await createIssue(payload);
-      if (result.success) {
-        task.status = 'created';
-        task.jiraKey = result.key;
-        appLogMsg('info', 'meetings', 'Created ' + result.key + ': ' + task.summary);
-      } else {
-        task.status = 'error';
-        appLogMsg('error', 'meetings', 'Failed to create: ' + task.summary);
-      }
-    } catch (e) {
-      task.status = 'error';
-      appLogMsg('error', 'meetings', 'Error creating task: ' + e.message);
-    }
-
-    renderMtgStaging('ready');
+  const valid = mtgTasks.filter(t => t.included && t.status === 'pending' && mtgValidateTask(t).length === 0);
+  if (!valid.length) {
+    alert('No tasks are ready to push. Each task needs the fields marked required in Settings → Admin → Meetings: Push requirements.');
+    return;
   }
-
-  // Refresh board data after creating issues
+  for (const task of valid) {
+    await mtgPushOne(task.id);
+  }
   setTimeout(() => doFetch(true), 2000);
 }
 
