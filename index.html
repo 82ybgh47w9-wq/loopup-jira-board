@@ -436,7 +436,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v102</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v103</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -2204,7 +2204,7 @@ function renderMyTasks(){
         <span style="font-size:13px;color:#9EA0A4;transition:.15s;display:inline-block;transform:${collapsed?"none":"rotate(90deg)"}">›</span>
         <span style="color:${sc.c};font-weight:700">${rowStatus}</span>
         <span class="badge" style="background:${sc.bg};color:${sc.c}">${rowIssues.length}</span>
-        ${rowStatus==="Done"?'<span style="font-size:10px;color:#9EA0A4">(last ${doneDays} days)</span>':""}
+        ${rowStatus==="Done"?`<span style="font-size:10px;color:#9EA0A4">(last ${doneDays} days)</span>`:""}
       </div>
     </td></tr>`;
     if(!collapsed){
@@ -2734,19 +2734,103 @@ function createDescendantFromPane(tabKey, parentKey){
   const i = openIssue;
   if(!i) return;
   try {
-    // Reuse quickAddTask for tasks; for other types, fall back to openCreate
     if(tabKey === 'tasks'){
       // Pre-fill epic = parentKey (the Epic/Milestone we're under)
       quickAddTask(parentKey, '', i.project);
     } else if(tabKey === 'subtasks'){
-      // Subtasks live under a Task — we can't create them via the standard
-      // Create modal (which only creates Tasks). Direct the user to Jira.
-      alert('Sub-tasks need to be created under a specific Task — open the parent task and use the "+ Add subtask" button on its Subtasks tab, or create one in Jira.');
+      // v103: real inline sub-task create flow. Was a placeholder alert.
+      openInlineSubtaskCreate(parentKey);
     } else {
       // For initiatives / epics, we'd need a custom flow; for now point to Settings.
       alert('To create a new '+tabKey.slice(0,-1)+' under '+parentKey+', use the "+ New" button in the Create-task modal\'s hierarchy section.');
     }
   } catch(e){ alert('Could not start create flow: '+(e.message||e)); }
+}
+
+// v103: open an inline form at the top of the Sub-tasks tab list — name
+// input + Create / Cancel. Calls createSubtaskInline() on submit which
+// POSTs the new sub-task with parent = current open issue.
+function openInlineSubtaskCreate(parentKey){
+  if(!openIssue || openIssue.key !== parentKey) return;
+  const listEl = document.getElementById('pdesc-list');
+  if(!listEl) return;
+  // Insert a small form at the very top of the list
+  const form = document.createElement('div');
+  form.id = 'inline-subtask-form';
+  form.style.cssText = 'margin-bottom:10px;padding:10px;background:#F0F9FF;border:1px solid #2E99CE;border-radius:6px';
+  form.innerHTML = `
+    <div style="font-size:11px;font-weight:700;color:#125462;margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em">New sub-task under ${parentKey}</div>
+    <input id="inline-subtask-name" class="form-input" placeholder="Sub-task name…" style="font-size:12px;margin-bottom:6px"
+      onkeydown="if(event.key==='Enter'){event.preventDefault();createSubtaskInline()}else if(event.key==='Escape'){closeInlineSubtaskCreate()}">
+    <div style="display:flex;gap:6px;justify-content:flex-end">
+      <button onclick="closeInlineSubtaskCreate()" style="font-size:11px;padding:5px 12px;border:1px solid #C9CACC;border-radius:6px;background:#fff;color:#73777C;cursor:pointer">Cancel</button>
+      <button onclick="createSubtaskInline()" class="primary-btn" style="font-size:11px;padding:5px 12px">+ Create sub-task</button>
+    </div>`;
+  // Remove any existing form first
+  const existing = document.getElementById('inline-subtask-form');
+  if(existing) existing.remove();
+  listEl.insertBefore(form, listEl.firstChild);
+  setTimeout(()=>{ const inp = document.getElementById('inline-subtask-name'); if(inp) inp.focus(); }, 30);
+}
+function closeInlineSubtaskCreate(){
+  const f = document.getElementById('inline-subtask-form');
+  if(f) f.remove();
+}
+async function createSubtaskInline(){
+  const inp = document.getElementById('inline-subtask-name');
+  if(!inp || !openIssue) return;
+  const name = (inp.value||'').trim();
+  if(!name){ inp.focus(); return; }
+  const btn = document.querySelector('#inline-subtask-form .primary-btn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Creating…'; }
+  try {
+    const fields = {
+      project: { key: openIssue.project },
+      issuetype: { name: 'Sub-task' },
+      summary: name,
+      parent: { key: openIssue.key }
+    };
+    if(currentIam){
+      try {
+        const users = await jiraGet('/rest/api/3/user/search?query=' + encodeURIComponent(currentIam) + '&maxResults=1');
+        const arr = Array.isArray(users) ? users : [];
+        if(arr.length && arr[0].accountId) fields.assignee = { accountId: arr[0].accountId };
+      } catch {}
+    }
+    appLogMsg('info','subtask','Creating sub-task under '+openIssue.key+': '+name);
+    // v103: properly handle the Response — was reading .key off the fetch
+    // Response object directly (same family bug as v88 fixed in submitCreate).
+    const r = await jiraPost('/rest/api/3/issue', { fields });
+    if(!(r && (r.ok || r.status === 201))){
+      let detail = ''; try { detail = await r.text(); } catch{}
+      throw new Error('Jira returned HTTP ' + (r?r.status:'?') + (detail?' — '+detail.slice(0,200):''));
+    }
+    const created = await r.json();
+    if(!created.key) throw new Error('Jira returned no key for the new sub-task');
+    appLogMsg('info','subtask','Created sub-task: '+created.key);
+    // Toast
+    const toast = document.createElement('div');
+    toast.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#5E8E38;color:#fff;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;z-index:9999';
+    toast.innerHTML = '✓ Sub-task <a href="'+BASE()+created.key+'" target="_blank" style="color:#fff;text-decoration:underline">'+created.key+'</a> created';
+    document.body.appendChild(toast);
+    setTimeout(()=>toast.remove(), 3000);
+    // Clear the inline form
+    closeInlineSubtaskCreate();
+    // Invalidate descendant + subtask caches and re-render the tab
+    if(descendantsCache[openIssue.key]) delete descendantsCache[openIssue.key];
+    if(subtasksCache && subtasksCache[openIssue.key]) delete subtasksCache[openIssue.key];
+    // Re-render whichever Sub-tasks view we're on (descendant tab or legacy)
+    const tabs = getPaneTabsFor(openIssue.type);
+    const spec = tabs.find(x => x.tabKey === 'subtasks');
+    if(spec) renderPaneDescendants(spec);
+    else renderPaneSubtasks();
+    // Schedule a full refresh so Jira's index catches up
+    setTimeout(()=>doFetch(true), 1500);
+  } catch(e){
+    appLogMsg('error','subtask','Inline sub-task create failed: '+(e.message||e));
+    alert('Failed to create sub-task: ' + (e.message||e));
+    if(btn){ btn.disabled = false; btn.textContent = '+ Create sub-task'; }
+  }
 }
 
 async function renderPaneMain(){
