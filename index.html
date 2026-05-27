@@ -557,7 +557,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v112</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v113</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -7535,6 +7535,20 @@ async function mtgExtract() {
       .map(i => ({ key: i.key, summary: i.summary, project: i.project, status: i.status }))
       .slice(0, 80);
 
+    // v113: Build assignee profiles from existing Jira data so the AI can infer
+    // domain expertise. For each team member, list their recent Task summaries.
+    // The AI then sees "Marcus has worked on: Custom JIRA UI, Meeting extractor,
+    // Dynamics export" and can route a "Dynamics CRM" task to whoever owns that
+    // domain. Profiles limited to 12 recent items, 80 chars each, to keep prompt small.
+    const assigneeProfiles = (teamMembers || []).map(name => {
+      const theirRecent = allIssues
+        .filter(i => i.assignee === name && (i.type === 'Task' || i.type === 'Story' || i.type === 'Sub-task'))
+        .slice(0, 12)
+        .map(i => (i.summary || '').slice(0, 80));
+      if(!theirRecent.length) return null;
+      return `${name}: ${theirRecent.join(' | ')}`;
+    }).filter(Boolean).join('\n');
+
     // Step 3: Call AI to extract tasks
     const prompt = {
       task: 'extract_meeting_tasks',
@@ -7543,7 +7557,8 @@ async function mtgExtract() {
       attendees: attendees,
       projects: projects.join(', '),
       epics: epics.map(e => `${e.key}: ${e.summary} (${e.project})`).join('\n'),
-      teamMembers: teamMembers.join(', ')
+      teamMembers: teamMembers.join(', '),
+      assigneeProfiles: assigneeProfiles
     };
 
     const r = await fetch(PROXY + '/ai', {
@@ -7632,7 +7647,9 @@ async function mtgExtract() {
         const total = score + sameProject;
         if(total > bestScore){ bestScore = total; best = ep; }
       }
-      if(best && bestScore >= 0.25){
+      // v113: Be conservative. Only auto-match if the score is high (>= 0.45).
+      // False matches are worse than leaving blank — user can search explicitly.
+      if(best && bestScore >= 0.45){
         t.epicKey = best.key;
         t.epicSummary = best.summary;
         if(best.project) t.project = best.project;
