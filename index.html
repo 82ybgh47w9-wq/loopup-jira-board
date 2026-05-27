@@ -436,7 +436,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v103</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v104</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -1567,14 +1567,17 @@ async function onDropTeamLane(e, status, targetPerson){
   const statusChanged = normStatus(issue.status) !== status;
   const assigneeChanged = !!targetPerson && issue.assignee !== targetPerson;
   // Optimistic UI updates first (status + assignee), then fire writes.
-  if(statusChanged) locStat[dragKey] = status;
+  // v104: sync the change into priIssues / priEpics / descendant caches too
+  // — was only patching allIssues, leaving Prioritise board stale.
+  if(statusChanged){
+    locStat[dragKey] = status;
+    _syncIssueCaches(dragKey, { status });
+  }
   if(assigneeChanged){
-    for(let i = 0; i < allIssues.length; i++){
-      if(allIssues[i].key === dragKey) allIssues[i].assignee = targetPerson;
-    }
+    _syncIssueCaches(dragKey, { assignee: targetPerson });
   }
   if(statusChanged || assigneeChanged){
-    saveAll(); updateStats(); renderMain();
+    saveAll(); _refreshAfterMutation();
   }
   if(statusChanged){
     try { await transitionIssue(dragKey, status); } catch(e){ appLogMsg('warn','team-drop','transition failed: '+(e.message||e)); }
@@ -1615,7 +1618,11 @@ async function onDropMatrix(e,status,priority){
   const priChanged=(locPri[dragKey]||issue.priority)!==priority;
   if(statusChanged){locStat[dragKey]=status;}
   if(priChanged){locPri[dragKey]=priority;}
-  if(statusChanged||priChanged){saveAll();updateStats();renderMain();}
+  // v104: propagate to Prioritise caches too — same reason as the team drop.
+  if(statusChanged || priChanged){
+    _syncIssueCaches(dragKey, { status: statusChanged?status:undefined, priority: priChanged?priority:undefined });
+    saveAll(); _refreshAfterMutation();
+  }
   if(statusChanged)await transitionIssue(dragKey,status);
   if(priChanged)await updatePriority(dragKey,priority);
   if(statusChanged||priChanged)setTimeout(()=>doFetch(true),1500);
@@ -3192,21 +3199,58 @@ async function renderPaneSubtasks(){
 function _syncPriCachesFromOpenIssue(){
   const k = openIssue && openIssue.key;
   if(!k) return;
-  if(typeof priIssues !== 'undefined'){
-    for(let i=0;i<priIssues.length;i++){
-      if(priIssues[i].key === k){
-        priIssues[i].status = openIssue.status;
-        priIssues[i].priority = openIssue.priority;
+  _syncIssueCaches(k, {
+    status: openIssue.status,
+    priority: openIssue.priority
+  });
+}
+
+// v104: generic cache-sync. Propagates a partial field set onto every cached
+// copy of the issue across allIssues, priIssues, priEpics, descendantsCache,
+// and subtasksCache. Use this from any mutation (title/description edit,
+// assignee change, status/priority transition, etc.) so the next renderMain
+// or renderPriBoard picks up the change instead of showing stale text. Pass
+// only the fields you actually changed — undefined keys are skipped.
+function _syncIssueCaches(key, fields){
+  if(!key || !fields) return;
+  function apply(arr){
+    if(!Array.isArray(arr)) return;
+    for(let i=0;i<arr.length;i++){
+      if(arr[i] && arr[i].key === key){
+        for(const f in fields){ if(fields[f] !== undefined) arr[i][f] = fields[f]; }
       }
     }
   }
-  if(typeof priEpics !== 'undefined'){
-    for(let i=0;i<priEpics.length;i++){
-      if(priEpics[i].key === k){
-        priEpics[i].status = openIssue.status;
-        priEpics[i].priority = openIssue.priority;
+  if(typeof allIssues !== 'undefined') apply(allIssues);
+  if(typeof priIssues !== 'undefined') apply(priIssues);
+  if(typeof priEpics !== 'undefined') apply(priEpics);
+  // descendant tab cache — patch in-place so the open tab updates without a refetch.
+  if(typeof descendantsCache !== 'undefined' && descendantsCache){
+    for(const parentKey in descendantsCache){
+      const tabs = descendantsCache[parentKey];
+      if(!tabs) continue;
+      for(const tabKey in tabs){
+        apply(tabs[tabKey]);
       }
     }
+  }
+  // sub-task cache (used by the Sub-tasks descendant tab and elsewhere).
+  if(typeof subtasksCache !== 'undefined' && subtasksCache){
+    for(const parentKey in subtasksCache){
+      apply(subtasksCache[parentKey]);
+    }
+  }
+}
+
+// v104: convenience wrapper — after a mutation, refresh whatever board the
+// user is currently looking at. Always renderMain; additionally kick off a
+// Prioritise reload if that's the active view, so cached server state stays
+// in step with the optimistic local state.
+function _refreshAfterMutation(){
+  try { renderMain(); } catch{}
+  try { updateStats(); } catch{}
+  if(currentView === 'prioritise'){
+    setTimeout(()=>{ try { loadPriBoard(true); } catch{} }, 1500);
   }
 }
 async function doPaneStatus(val){
@@ -3258,11 +3302,13 @@ async function saveEditTitle(){
     renderPaneHdr(openIssue);
     return;
   }
-  // Optimistic update
+  // v104: optimistic update across ALL caches (allIssues, priIssues,
+  // priEpics, descendant + sub-task caches) so cards re-render with the
+  // new summary on any board the user navigates to. Previously only
+  // allIssues was patched, which left the Prioritise board showing stale
+  // text under the parent epic.
   openIssue.summary = newSummary;
-  for(let i=0;i<allIssues.length;i++){
-    if(allIssues[i].key === openIssue.key) allIssues[i].summary = newSummary;
-  }
+  _syncIssueCaches(openIssue.key, { summary: newSummary });
   renderPaneHdr(openIssue);
   appLogMsg('info','edit','Saving summary for '+openIssue.key);
   try {
@@ -3270,19 +3316,20 @@ async function saveEditTitle(){
     if(!(r.ok || r.status === 204)){
       let detail=''; try { detail = await r.text(); } catch{}
       openIssue.summary = oldSummary;
-      for(let i=0;i<allIssues.length;i++){
-        if(allIssues[i].key === openIssue.key) allIssues[i].summary = oldSummary;
-      }
+      _syncIssueCaches(openIssue.key, { summary: oldSummary });
       renderPaneHdr(openIssue);
+      _refreshAfterMutation();
       alert('Could not save title change: Jira returned '+r.status+(detail?'\n'+detail.slice(0,200):''));
       appLogMsg('error','edit','Title save failed: HTTP '+r.status);
     } else {
-      renderMain();
+      _refreshAfterMutation();
       setTimeout(()=>doFetch(true), 1500);
     }
   } catch(e){
     openIssue.summary = oldSummary;
+    _syncIssueCaches(openIssue.key, { summary: oldSummary });
     renderPaneHdr(openIssue);
+    _refreshAfterMutation();
     alert('Title save error: '+(e.message||e));
   }
 }
@@ -3317,24 +3364,33 @@ async function saveEditDescription(){
   const adfBody = newDesc.trim()
     ? {type:'doc', version:1, content:[{type:'paragraph', content:[{type:'text', text: newDesc}]}]}
     : null;
-  // Optimistic update
+  // v104: optimistic update across caches so any view that surfaces the
+  // description (issue pane on hover or other surfaces) stays in step.
+  const newHtml = newDesc ? _autoLinkify(_escHtml(newDesc)) : '';
   openIssue.description = newDesc;
-  openIssue.descriptionHtml = newDesc ? _autoLinkify(_escHtml(newDesc)) : '';
+  openIssue.descriptionHtml = newHtml;
+  _syncIssueCaches(openIssue.key, { description: newDesc, descriptionHtml: newHtml });
   appLogMsg('info','edit','Saving description for '+openIssue.key);
   try {
     const r = await jiraPut('/rest/api/3/issue/'+openIssue.key, { fields: { description: adfBody } });
     if(!(r.ok || r.status === 204)){
       let detail=''; try { detail = await r.text(); } catch{}
+      const oldHtml = oldDesc ? _autoLinkify(_escHtml(oldDesc)) : '';
       openIssue.description = oldDesc;
-      openIssue.descriptionHtml = oldDesc ? _autoLinkify(_escHtml(oldDesc)) : '';
+      openIssue.descriptionHtml = oldHtml;
+      _syncIssueCaches(openIssue.key, { description: oldDesc, descriptionHtml: oldHtml });
       renderPaneMain();
       alert('Could not save description: Jira returned '+r.status+(detail?'\n'+detail.slice(0,200):''));
       return;
     }
     renderPaneMain();
+    _refreshAfterMutation();
     setTimeout(()=>doFetch(true), 1500);
   } catch(e){
+    const oldHtml = oldDesc ? _autoLinkify(_escHtml(oldDesc)) : '';
     openIssue.description = oldDesc;
+    openIssue.descriptionHtml = oldHtml;
+    _syncIssueCaches(openIssue.key, { description: oldDesc, descriptionHtml: oldHtml });
     renderPaneMain();
     alert('Description save error: '+(e.message||e));
   }
@@ -3539,15 +3595,14 @@ async function doAssignIssue(accountId, displayName) {
   try {
     const r = await jiraPut('/rest/api/3/issue/' + key, {fields: {assignee: {accountId}}});
     if(r.ok || r.status === 204) {
-      // Optimistic update
+      // v104: optimistic update across ALL caches (was just allIssues, so the
+      // Prioritise board kept rendering the old assignee initials).
       if(openIssue && openIssue.key === key) {
         openIssue = {...openIssue, assignee: displayName};
         try { renderPaneHdr(openIssue); } catch {}
         try { renderPaneMain(); } catch {}
       }
-      for(let i = 0; i < (allIssues||[]).length; i++) {
-        if(allIssues[i].key === key) allIssues[i].assignee = displayName;
-      }
+      _syncIssueCaches(key, { assignee: displayName });
       if(displayName && !teamMembers.includes(displayName)) {
         teamMembers.push(displayName);
         teamMembers.sort();
@@ -3555,8 +3610,7 @@ async function doAssignIssue(accountId, displayName) {
         try { populateIamSelector(); } catch {}
       }
       closeAssigneePicker();
-      try { renderMain(); } catch {}
-      try { updateStats(); } catch {}
+      _refreshAfterMutation();
       setTimeout(() => doFetch(true), 1200);
     } else {
       let detail = '';
@@ -3583,12 +3637,10 @@ async function unassignIssueFromPicker() {
         try { renderPaneHdr(openIssue); } catch {}
         try { renderPaneMain(); } catch {}
       }
-      for(let i = 0; i < (allIssues||[]).length; i++) {
-        if(allIssues[i].key === key) allIssues[i].assignee = 'Unassigned';
-      }
+      // v104: full cache sync — previously only allIssues was updated.
+      _syncIssueCaches(key, { assignee: 'Unassigned' });
       closeAssigneePicker();
-      try { renderMain(); } catch {}
-      try { updateStats(); } catch {}
+      _refreshAfterMutation();
       setTimeout(() => doFetch(true), 1200);
     } else {
       if(el) el.innerHTML = '<div style="font-size:12px;color:#D6202B;padding:14px;text-align:center">Failed: Jira returned ' + r.status + '</div>';
@@ -3706,24 +3758,21 @@ async function commitParent(parentKey){
       let detail=''; try { detail = await r.text(); } catch{}
       throw new Error('Jira returned HTTP '+r.status+(detail?' — '+detail.slice(0,200):''));
     }
-    // Optimistic local update
-    for(let i=0;i<allIssues.length;i++){
-      if(allIssues[i].key === childKey){
-        // Find parent in our caches to get its type/summary
-        const p = _parentPickerCtx.candidates.find(c => c.key === parentKey);
-        allIssues[i].parent_key = parentKey;
-        if(p){ allIssues[i].parent_summary = p.summary; allIssues[i].parent_type = p.type; }
-      }
-    }
+    // v104: optimistic local update — propagate parent fields across all caches
+    // (was only allIssues). Prioritise board groups tasks by parent_key so this
+    // is critical for the card to move under the new epic without a refetch.
+    const p = _parentPickerCtx.candidates.find(c => c.key === parentKey);
+    const patch = { parent_key: parentKey };
+    if(p){ patch.parent_summary = p.summary; patch.parent_type = p.type; }
+    _syncIssueCaches(childKey, patch);
     if(openIssue && openIssue.key === childKey){
-      const p = _parentPickerCtx.candidates.find(c => c.key === parentKey);
       openIssue.parent_key = parentKey;
       if(p){ openIssue.parent_summary = p.summary; openIssue.parent_type = p.type; }
     }
     closeParentPicker();
     try { renderPaneHdr(openIssue); } catch{}
     try { renderPaneMain(); } catch{}
-    try { renderMain(); } catch{}
+    _refreshAfterMutation();
     setTimeout(()=>doFetch(true), 1500);
   } catch(e){
     if(el) el.innerHTML = '<div style="padding:18px;text-align:center;color:#D6202B;font-size:12px">Failed: '+(e.message||e)+'</div>';
@@ -3744,13 +3793,8 @@ async function clearParentOfCurrent(){
       let detail=''; try { detail = await r.text(); } catch{}
       throw new Error('Jira returned HTTP '+r.status+(detail?' — '+detail.slice(0,200):''));
     }
-    for(let i=0;i<allIssues.length;i++){
-      if(allIssues[i].key === childKey){
-        allIssues[i].parent_key = null;
-        allIssues[i].parent_summary = '';
-        allIssues[i].parent_type = '';
-      }
-    }
+    // v104: clear parent across all caches, not just allIssues.
+    _syncIssueCaches(childKey, { parent_key: null, parent_summary: '', parent_type: '' });
     if(openIssue && openIssue.key === childKey){
       openIssue.parent_key = null;
       openIssue.parent_summary = '';
@@ -3759,7 +3803,7 @@ async function clearParentOfCurrent(){
     closeParentPicker();
     try { renderPaneHdr(openIssue); } catch{}
     try { renderPaneMain(); } catch{}
-    try { renderMain(); } catch{}
+    _refreshAfterMutation();
     setTimeout(()=>doFetch(true), 1500);
   } catch(e){
     if(el) el.innerHTML = '<div style="padding:18px;text-align:center;color:#D6202B;font-size:12px">Failed: '+(e.message||e)+'</div>';
