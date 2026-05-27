@@ -436,7 +436,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v101</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v102</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -876,6 +876,100 @@ function extractText(doc){
   return t.trim().slice(0,800);
 }
 
+// v102: HTML-escape a string for safe insertion into innerHTML contexts.
+function _escHtml(s){
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+// v102: derive a human-friendly label from a URL — last path segment, decoded,
+// underscores → spaces, truncated. Falls back to the URL itself if anything
+// goes wrong. SharePoint and OneDrive links typically end in the filename so
+// this surfaces "LoopUp PULL Marketing Complete Guide.docx" instead of a long
+// opaque URL token.
+function _prettyLinkLabel(url){
+  try {
+    const u = new URL(url);
+    let last = u.pathname.split('/').filter(Boolean).pop() || u.hostname;
+    try { last = decodeURIComponent(last); } catch {}
+    last = last.replace(/\+/g,' ').replace(/[_-]+/g,' ').replace(/\?.*$/,'').trim();
+    if(last.length > 60) last = last.slice(0,57) + '…';
+    return last || u.hostname;
+  } catch { return (url||'').slice(0,60); }
+}
+// v102: render ADF doc to safe HTML with clickable links. Mirrors extractText
+// for non-link nodes, but inlineCard / blockCard / link-marked text become
+// proper <a> tags, and plain-text URLs in text nodes are auto-detected and
+// linkified. Used by the Description and Comments renderers — comments and
+// descriptions are now safely-escaped HTML with proper clickable links.
+function extractRichText(doc, opts){
+  opts = opts || {};
+  const maxLen = opts.maxLen || 2000;
+  if(!doc) return '';
+  if(typeof doc === 'string') return _autoLinkify(_escHtml(doc.slice(0, maxLen)));
+  let out = '';
+  function walk(n){
+    if(!n) return;
+    if(n.type === 'text'){
+      // Look for a link mark on the text — that's how ADF marks hyperlinked text
+      const linkMark = (n.marks||[]).find(m => m.type === 'link');
+      const txt = _escHtml(n.text || '');
+      if(linkMark && linkMark.attrs && linkMark.attrs.href){
+        const href = _escHtml(linkMark.attrs.href);
+        out += `<a href="${href}" target="_blank" rel="noopener" style="color:#2E99CE;text-decoration:underline">${txt}</a>`;
+      } else {
+        out += _autoLinkify(txt);
+      }
+      return;
+    }
+    if(n.type === 'mention'){
+      const dn = (n.attrs && (n.attrs.text || ('@' + (n.attrs.displayName || 'user')))) || '@user';
+      out += '<span style="color:#2E99CE;font-weight:600">' + _escHtml(dn) + '</span>';
+      return;
+    }
+    if(n.type === 'emoji'){
+      out += _escHtml((n.attrs && n.attrs.shortName) || '');
+      return;
+    }
+    if(n.type === 'inlineCard' && n.attrs && n.attrs.url){
+      const href = _escHtml(n.attrs.url);
+      const label = _escHtml(_prettyLinkLabel(n.attrs.url));
+      out += `<a href="${href}" target="_blank" rel="noopener" style="color:#2E99CE;text-decoration:underline" title="${href}">🔗 ${label}</a>`;
+      return;
+    }
+    if(n.type === 'blockCard' && n.attrs && n.attrs.url){
+      const href = _escHtml(n.attrs.url);
+      const label = _escHtml(_prettyLinkLabel(n.attrs.url));
+      out += `<div style="margin:4px 0"><a href="${href}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid #E4E6E8;border-radius:6px;background:#F7F8F9;color:#2E99CE;text-decoration:none;font-size:12px" title="${href}">🔗 <span style="color:#292E37;font-weight:600">${label}</span></a></div>`;
+      return;
+    }
+    if(n.type === 'mediaInline' || n.type === 'media'){
+      out += '<span style="color:#9EA0A4;font-style:italic">[media]</span>';
+      return;
+    }
+    if(n.type === 'hardBreak'){ out += '<br>'; return; }
+    if(n.content) n.content.forEach(walk);
+    if(['paragraph','heading','listItem','bulletList','orderedList'].includes(n.type)){
+      out += '<br>';
+    }
+  }
+  walk(doc);
+  // Collapse any over-long output and strip trailing <br>
+  if(out.length > maxLen) out = out.slice(0, maxLen) + '…';
+  return out.replace(/(<br>)+$/,'');
+}
+// v102: detect bare URLs in plain text and turn them into <a> tags. The
+// returned string is safe to drop into innerHTML — the input must already
+// be HTML-escaped before this is called (we don't escape; we only add
+// anchor tags around URL matches).
+function _autoLinkify(safeText){
+  if(!safeText) return '';
+  // Match http(s):// URLs and www.* — be tolerant of paths, queries, anchors.
+  const urlRe = /(https?:\/\/[^\s<>"]+|www\.[^\s<>"]+)/gi;
+  return safeText.replace(urlRe, function(m){
+    const href = m.startsWith('www.') ? 'https://' + m : m;
+    return `<a href="${href}" target="_blank" rel="noopener" style="color:#2E99CE;text-decoration:underline">${m}</a>`;
+  });
+}
+
 function findMentionsInBody(doc) {
   const mentions = [];
   if(!doc) return mentions;
@@ -1173,7 +1267,7 @@ function buildADFFromTextarea(textareaId) {
 
 
 
-function parseIssue(i){const f=i.fields;return{key:i.key,summary:f.summary||"",type:f.issuetype?.name||"Task",status:f.status?.name||"Backlog",assignee:f.assignee?.displayName||"Unassigned",assigneeEmail:f.assignee?.emailAddress||"",priority:f.priority?.name||"Medium",updated:(f.updated||"").slice(0,10),parent_key:f.parent?.key||null,parent_summary:f.parent?.fields?.summary||"",parent_type:f.parent?.fields?.issuetype?.name||"",description:extractText(f.description),project:f.project?.key||i.key.split("-")[0],projectName:f.project?.name||"",subtasks:(f.subtasks||[]).map(s=>({key:s.key,summary:s.fields?.summary||"",status:s.fields?.status?.name||"",type:s.fields?.issuetype?.name||"Sub-task"})),epicLink:f.customfield_10014||null,commentCount:(f.comment?.total||0)};}
+function parseIssue(i){const f=i.fields;return{key:i.key,summary:f.summary||"",type:f.issuetype?.name||"Task",status:f.status?.name||"Backlog",assignee:f.assignee?.displayName||"Unassigned",assigneeEmail:f.assignee?.emailAddress||"",priority:f.priority?.name||"Medium",updated:(f.updated||"").slice(0,10),parent_key:f.parent?.key||null,parent_summary:f.parent?.fields?.summary||"",parent_type:f.parent?.fields?.issuetype?.name||"",description:extractText(f.description),descriptionHtml: f.description ? extractRichText(f.description, {maxLen: 4000}) : '',project:f.project?.key||i.key.split("-")[0],projectName:f.project?.name||"",subtasks:(f.subtasks||[]).map(s=>({key:s.key,summary:s.fields?.summary||"",status:s.fields?.status?.name||"",type:s.fields?.issuetype?.name||"Sub-task"})),epicLink:f.customfield_10014||null,commentCount:(f.comment?.total||0)};}
 
 async function fetchAllTeamIssues(){
   // v79: team list is auto-discovered from results — no more `assignee in (team)` pre-filter.
@@ -1232,6 +1326,9 @@ async function fetchComments(key){
     id:c.id,
     author:c.author?.displayName||"Unknown",
     body:extractText(c.body),
+    // v102: also capture the rich HTML rendering so the renderer can show
+    // clickable links (inlineCard/blockCard/link-marked text) properly.
+    bodyHtml: extractRichText(c.body, {maxLen: 4000}),
     created:(c.created||"").slice(0,16).replace("T"," "),
     createdRaw:c.created||""
   })).sort((a,b)=>(b.createdRaw||"").localeCompare(a.createdRaw||""));
@@ -2444,7 +2541,15 @@ function renderPaneHdr(i){
           <span style="font-size:10px;font-weight:700;color:#fff;background:rgba(255,255,255,.18);padding:3px 9px;border-radius:10px;text-transform:uppercase;letter-spacing:.06em;display:inline-flex;align-items:center;gap:4px">${typeIcon(i.type||'Task')}<span>${(i.type||'Task')}</span></span>
           <a href="${BASE()}${i.key}" target="_blank" style="font-size:15px;font-weight:700;color:#fff;font-family:monospace">${i.key} ↗</a>
         </div>
-        <div style="font-size:14px;font-weight:700;color:#fff;line-height:1.35;margin-bottom:7px">${i.summary}</div>
+        <div style="font-size:14px;font-weight:700;color:#fff;line-height:1.35;margin-bottom:7px;display:flex;align-items:flex-start;gap:6px">
+          <span id="pane-hdr-summary" style="flex:1">${i.summary}</span>
+          <!-- v102: edit pencil for the title (summary). Click → inline input
+               in this same spot → Enter to save, Esc to cancel. -->
+          <a href="#" onclick="event.preventDefault();event.stopPropagation();openEditTitle('${i.key}')" title="Edit title"
+            style="color:rgba(255,255,255,.55);text-decoration:none;padding:1px 5px;border-radius:4px;font-size:13px;line-height:1;cursor:pointer;flex-shrink:0"
+            onmouseover="this.style.color='#fff';this.style.background='rgba(255,255,255,.18)'"
+            onmouseout="this.style.color='rgba(255,255,255,.55)';this.style.background='transparent'">✎</a>
+        </div>
         <div style="display:flex;gap:5px;flex-wrap:wrap">${spill(i.status)}${pbadge(i.priority)}</div>
       </div>
       <button onclick="closePaneOverlay()" style="background:rgba(255,255,255,.15);border:none;color:#fff;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:16px">✕</button>
@@ -2738,8 +2843,18 @@ async function renderPaneMain(){
       </div>
     </div>
     <div class="pane-section">
-      <div class="pane-section-title">Description</div>
-      ${i.description?`<div class="desc-box">${i.description}</div>`:`<div style="font-size:13px;color:#9EA0A4;font-style:italic">No description.</div>`}
+      <div class="pane-section-title" style="display:flex;align-items:center">
+        <span style="flex:1">Description</span>
+        <!-- v102: edit pencil — same affordance as the parent-row pencils.
+             Opens an inline textarea for description editing. -->
+        <a href="#" onclick="event.preventDefault();event.stopPropagation();openEditDescription('${i.key}')" title="Edit description"
+          style="color:#9EA0A4;text-decoration:none;padding:2px 6px;border-radius:4px;font-size:13px;line-height:1;cursor:pointer;display:inline-flex;align-items:center"
+          onmouseover="this.style.color='#2E99CE';this.style.background='#E0F0F8'"
+          onmouseout="this.style.color='#9EA0A4';this.style.background='transparent'">✎</a>
+      </div>
+      <div id="desc-box-wrap">
+        ${i.descriptionHtml?`<div class="desc-box">${i.descriptionHtml}</div>`:(i.description?`<div class="desc-box">${_autoLinkify(_escHtml(i.description))}</div>`:`<div style="font-size:13px;color:#9EA0A4;font-style:italic">No description.</div>`)}
+      </div>
     </div>
     <!-- v92: Attachments section. We lazy-load the attachment field rather
          than including it in the bulk fetch, because attachments aren't on
@@ -2748,7 +2863,17 @@ async function renderPaneMain(){
          actually be downloaded (attachment-content URLs require Atlassian
          auth that we can't proxy through here in the browser). -->
     <div class="pane-section" id="attachments-section">
-      <div class="pane-section-title">Attachments <span id="att-count" style="font-size:11px;color:#9EA0A4;font-weight:600"></span></div>
+      <div class="pane-section-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="flex:1">Attachments <span id="att-count" style="font-size:11px;color:#9EA0A4;font-weight:600"></span></span>
+        <!-- v102: upload + paste-link affordances. Upload runs a multipart POST
+             to /attachments. Paste-link uses /remotelink so SharePoint, OneDrive,
+             Confluence, Google Doc URLs all become first-class linked refs. -->
+        <label style="font-size:11px;color:#2E99CE;background:#E0F0F8;padding:4px 10px;border-radius:6px;cursor:pointer;font-weight:700;border:1px solid #C8E6F7;display:inline-flex;align-items:center;gap:4px">
+          📎 Upload file
+          <input type="file" style="display:none" onchange="if(this.files&&this.files[0]){uploadAttachmentFor('${i.key}', this.files[0]); this.value='';}">
+        </label>
+        <button onclick="promptForRemoteLink('${i.key}')" style="font-size:11px;color:#125462;background:#fff;padding:4px 10px;border-radius:6px;cursor:pointer;font-weight:700;border:1px solid #C8E6F7;display:inline-flex;align-items:center;gap:4px">🔗 Paste link</button>
+      </div>
       <div id="att-list" style="display:flex;flex-direction:column;gap:4px">
         <div style="font-size:12px;color:#9EA0A4;display:flex;align-items:center;gap:6px">${spinHtml(13)} Checking attachments…</div>
       </div>
@@ -2794,17 +2919,30 @@ async function loadPaneAttachments(key){
   const countEl = document.getElementById('att-count');
   if(!listEl) return;
   try {
+    // v102: fetch both real attachments AND remote links (Atlassian treats
+    // them as separate concepts). Run in parallel, merge, dedupe by URL.
     if(!attachmentsCache[key]){
-      const d = await jiraGet('/rest/api/3/issue/' + key + '?fields=attachment');
-      attachmentsCache[key] = (d.fields?.attachment) || [];
+      const [d, rl] = await Promise.all([
+        jiraGet('/rest/api/3/issue/' + key + '?fields=attachment').catch(()=>({fields:{attachment:[]}})),
+        jiraGet('/rest/api/3/issue/' + key + '/remotelink').catch(()=>([]))
+      ]);
+      const attsRaw = (d.fields?.attachment) || [];
+      const remotes = Array.isArray(rl) ? rl : [];
+      attachmentsCache[key] = {
+        attachments: attsRaw,
+        remoteLinks: remotes
+      };
     }
-    const atts = attachmentsCache[key];
-    if(countEl) countEl.textContent = atts.length ? '('+atts.length+')' : '';
-    if(!atts.length){
-      listEl.innerHTML = '<div style="font-size:12px;color:#9EA0A4;font-style:italic">No attachments on this issue.</div>';
+    const data = attachmentsCache[key];
+    const atts = data.attachments || [];
+    const rls = data.remoteLinks || [];
+    const total = atts.length + rls.length;
+    if(countEl) countEl.textContent = total ? '('+total+')' : '';
+    if(!total){
+      listEl.innerHTML = '<div style="font-size:12px;color:#9EA0A4;font-style:italic">No attachments on this issue. Use the buttons above to upload a file or paste a link.</div>';
       return;
     }
-    listEl.innerHTML = atts.map(a => {
+    const attRows = atts.map(a => {
       const sz = a.size || 0;
       const sizeStr = sz < 1024 ? sz+' B' : sz < 1024*1024 ? Math.round(sz/1024)+' KB' : (sz/(1024*1024)).toFixed(1)+' MB';
       const mime = a.mimeType || '';
@@ -2817,19 +2955,36 @@ async function loadPaneAttachments(key){
       const icon = isImage?'🖼️':isPdf?'📕':isDoc?'📄':isSheet?'📊':isSlide?'📺':isArchive?'🗜️':'📎';
       const created = (a.created||'').slice(0,10);
       const author = a.author?.displayName || '';
-      const safeName = (a.filename||'Unnamed').replace(/</g,'&lt;');
+      const safeName = _escHtml(a.filename||'Unnamed');
       const ext = (a.filename||'').split('.').pop().toUpperCase();
-      return `<a href="${BASE()}${key}" target="_blank" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;background:#F7F8F9;border:1px solid #EEF1F3;text-decoration:none;color:inherit;cursor:pointer" title="Open ${a.filename||''} in Jira">
+      return `<a href="${BASE()}${key}" target="_blank" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;background:#F7F8F9;border:1px solid #EEF1F3;text-decoration:none;color:inherit;cursor:pointer" title="Open ${_escHtml(a.filename||'')} in Jira">
         <span style="font-size:22px;line-height:1;flex-shrink:0">${icon}</span>
         <div style="flex:1;min-width:0">
           <div style="font-size:12px;font-weight:600;color:#292E37;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${safeName}</div>
-          <div style="font-size:10px;color:#9EA0A4">${ext||mime.split('/').pop()||''} · ${sizeStr}${author?' · '+author:''}${created?' · '+created:''}</div>
+          <div style="font-size:10px;color:#9EA0A4">${_escHtml(ext||mime.split('/').pop()||'')} · ${sizeStr}${author?' · '+_escHtml(author):''}${created?' · '+created:''}</div>
         </div>
         <span style="font-size:11px;color:#2E99CE;font-weight:700;white-space:nowrap;flex-shrink:0">Open in Jira ↗</span>
       </a>`;
-    }).join('');
+    });
+    // v102: render remote links — clickable directly (since they're external
+    // URLs the user pasted, no auth required). Distinguishable with 🔗 icon.
+    const rlRows = rls.map(r => {
+      const url = (r.object && r.object.url) || '';
+      const title = (r.object && r.object.title) || _prettyLinkLabel(url);
+      const safeUrl = _escHtml(url);
+      const safeTitle = _escHtml(title);
+      return `<a href="${safeUrl}" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;background:#FCFCFD;border:1px solid #C8E6F7;text-decoration:none;color:inherit;cursor:pointer" title="${safeUrl}">
+        <span style="font-size:22px;line-height:1;flex-shrink:0">🔗</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:600;color:#292E37;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${safeTitle}</div>
+          <div style="font-size:10px;color:#9EA0A4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">External link · ${safeUrl}</div>
+        </div>
+        <span style="font-size:11px;color:#2E99CE;font-weight:700;white-space:nowrap;flex-shrink:0">Open ↗</span>
+      </a>`;
+    });
+    listEl.innerHTML = [...attRows, ...rlRows].join('');
   } catch(e) {
-    listEl.innerHTML = '<div style="font-size:12px;color:#D6202B">Could not load attachments: '+((e.message||e)+'').slice(0,160)+'</div>';
+    listEl.innerHTML = '<div style="font-size:12px;color:#D6202B">Could not load attachments: '+_escHtml(((e.message||e)+'').slice(0,160))+'</div>';
     appLogMsg('warn','attachments','loadPaneAttachments failed for '+key+': '+(e.message||e));
   }
 }
@@ -2840,8 +2995,21 @@ function renderPaneCommentList(key){
   const listEl = document.getElementById("cmt-list");
   if(!countEl || !listEl) return;
   countEl.textContent = `(${cmts.length})`;
+  // v102: use bodyHtml (extractRichText output) which carries proper <a> tags
+  // for inline/block cards, link-marked text, and auto-detected plain URLs.
+  // Fall back to body (plain text) for optimistic comments posted in-session
+  // that haven't been re-fetched yet.
   listEl.innerHTML = cmts.length
-    ? cmts.map(c=>`<div class="comment-item"><div style="display:flex;align-items:center;gap:7px;margin-bottom:5px">${ava(c.author,20)}<span style="font-size:12px;font-weight:700">${c.author}</span><span style="font-size:11px;color:#C9CACC;margin-left:auto">${c.created}</span></div><div style="font-size:13px;line-height:1.55;white-space:pre-wrap">${c.body}</div></div>`).join("")
+    ? cmts.map(c => {
+        const html = c.bodyHtml || _autoLinkify(_escHtml(c.body || ''));
+        return `<div class="comment-item">
+          <div style="display:flex;align-items:center;gap:7px;margin-bottom:5px">
+            ${ava(c.author,20)}<span style="font-size:12px;font-weight:700">${c.author}</span>
+            <span style="font-size:11px;color:#C9CACC;margin-left:auto">${c.created}</span>
+          </div>
+          <div style="font-size:13px;line-height:1.55;word-wrap:break-word">${html}</div>
+        </div>`;
+      }).join('')
     : `<div style="font-size:13px;color:#9EA0A4;font-style:italic">No comments yet.</div>`;
 }
 
@@ -2979,6 +3147,177 @@ async function doPanePriority(val){
   setTimeout(()=>doFetch(true),1500);
   if(currentView === 'prioritise'){
     setTimeout(()=>{ try { loadPriBoard(true); } catch{} }, 1800);
+  }
+}
+
+/* ══ v102: TITLE + DESCRIPTION EDITORS ═══════════════════════════════
+   Inline edit affordances on the pane header (title) and Description
+   section. Each opens a small editor in place; on save, PUT to Jira and
+   update openIssue + allIssues caches optimistically. */
+function openEditTitle(key){
+  if(!openIssue || openIssue.key !== key) return;
+  const span = document.getElementById('pane-hdr-summary');
+  if(!span) return;
+  const current = openIssue.summary || '';
+  span.innerHTML = `<input id="title-edit-input" value="${_escHtml(current)}"
+    style="width:100%;padding:6px 10px;font-size:14px;font-weight:700;border:2px solid #fff;border-radius:6px;background:rgba(255,255,255,.95);color:#292E37;outline:none"
+    onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditTitle()}else if(event.key==='Escape'){renderPaneHdr(openIssue)}"
+    onblur="saveEditTitle()">`;
+  setTimeout(()=>{ const inp = document.getElementById('title-edit-input'); if(inp){ inp.focus(); inp.select(); } }, 30);
+}
+async function saveEditTitle(){
+  const inp = document.getElementById('title-edit-input');
+  if(!inp || !openIssue) return;
+  const newSummary = (inp.value || '').trim();
+  const oldSummary = openIssue.summary || '';
+  if(!newSummary || newSummary === oldSummary){
+    renderPaneHdr(openIssue);
+    return;
+  }
+  // Optimistic update
+  openIssue.summary = newSummary;
+  for(let i=0;i<allIssues.length;i++){
+    if(allIssues[i].key === openIssue.key) allIssues[i].summary = newSummary;
+  }
+  renderPaneHdr(openIssue);
+  appLogMsg('info','edit','Saving summary for '+openIssue.key);
+  try {
+    const r = await jiraPut('/rest/api/3/issue/'+openIssue.key, { fields: { summary: newSummary } });
+    if(!(r.ok || r.status === 204)){
+      let detail=''; try { detail = await r.text(); } catch{}
+      openIssue.summary = oldSummary;
+      for(let i=0;i<allIssues.length;i++){
+        if(allIssues[i].key === openIssue.key) allIssues[i].summary = oldSummary;
+      }
+      renderPaneHdr(openIssue);
+      alert('Could not save title change: Jira returned '+r.status+(detail?'\n'+detail.slice(0,200):''));
+      appLogMsg('error','edit','Title save failed: HTTP '+r.status);
+    } else {
+      renderMain();
+      setTimeout(()=>doFetch(true), 1500);
+    }
+  } catch(e){
+    openIssue.summary = oldSummary;
+    renderPaneHdr(openIssue);
+    alert('Title save error: '+(e.message||e));
+  }
+}
+
+function openEditDescription(key){
+  if(!openIssue || openIssue.key !== key) return;
+  const wrap = document.getElementById('desc-box-wrap');
+  if(!wrap) return;
+  const current = openIssue.description || '';
+  wrap.innerHTML = `<textarea id="desc-edit-input"
+    style="width:100%;min-height:120px;padding:10px 12px;border:2px solid #2E99CE;border-radius:6px;font-size:13px;font-family:inherit;line-height:1.55;resize:vertical;box-sizing:border-box"
+    placeholder="Add a description…">${_escHtml(current)}</textarea>
+    <div style="display:flex;gap:8px;margin-top:6px;justify-content:flex-end">
+      <button onclick="cancelEditDescription()" style="font-size:12px;padding:6px 14px;border:1px solid #C9CACC;border-radius:6px;background:#fff;color:#73777C;cursor:pointer">Cancel</button>
+      <button onclick="saveEditDescription()" class="primary-btn" style="font-size:12px;padding:6px 14px">Save description</button>
+    </div>`;
+  setTimeout(()=>{ const t = document.getElementById('desc-edit-input'); if(t){ t.focus(); t.setSelectionRange(t.value.length, t.value.length); } }, 30);
+}
+function cancelEditDescription(){
+  if(!openIssue) return;
+  renderPaneMain();
+}
+async function saveEditDescription(){
+  const t = document.getElementById('desc-edit-input');
+  if(!t || !openIssue) return;
+  const newDesc = t.value || '';
+  const oldDesc = openIssue.description || '';
+  if(newDesc === oldDesc){
+    renderPaneMain();
+    return;
+  }
+  const adfBody = newDesc.trim()
+    ? {type:'doc', version:1, content:[{type:'paragraph', content:[{type:'text', text: newDesc}]}]}
+    : null;
+  // Optimistic update
+  openIssue.description = newDesc;
+  openIssue.descriptionHtml = newDesc ? _autoLinkify(_escHtml(newDesc)) : '';
+  appLogMsg('info','edit','Saving description for '+openIssue.key);
+  try {
+    const r = await jiraPut('/rest/api/3/issue/'+openIssue.key, { fields: { description: adfBody } });
+    if(!(r.ok || r.status === 204)){
+      let detail=''; try { detail = await r.text(); } catch{}
+      openIssue.description = oldDesc;
+      openIssue.descriptionHtml = oldDesc ? _autoLinkify(_escHtml(oldDesc)) : '';
+      renderPaneMain();
+      alert('Could not save description: Jira returned '+r.status+(detail?'\n'+detail.slice(0,200):''));
+      return;
+    }
+    renderPaneMain();
+    setTimeout(()=>doFetch(true), 1500);
+  } catch(e){
+    openIssue.description = oldDesc;
+    renderPaneMain();
+    alert('Description save error: '+(e.message||e));
+  }
+}
+
+/* ══ v102: ATTACHMENT UPLOAD + REMOTE-LINK ═══════════════════════════
+   Two ways to attach a reference to an issue: upload a real file via
+   /rest/api/3/issue/{key}/attachments (multipart), or paste a URL that
+   becomes a Jira "remote link" via /rest/api/3/issue/{key}/remotelink. */
+async function uploadAttachmentFor(issueKey, file){
+  if(!issueKey || !file) return;
+  const listEl = document.getElementById('att-list');
+  if(listEl) listEl.innerHTML = '<div style="font-size:12px;color:#9EA0A4;padding:14px;display:flex;align-items:center;gap:6px">'+spinHtml(14)+' Uploading '+_escHtml(file.name)+'…</div>';
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    // Jira requires X-Atlassian-Token: no-check for attachments.
+    const target = encodeURIComponent(cfg.url + '/rest/api/3/issue/' + issueKey + '/attachments');
+    const r = await fetch(PROXY + '?target=' + target, {
+      method: 'POST',
+      headers: { 'Authorization': auth(), 'X-Atlassian-Token': 'no-check' },
+      body: fd
+    });
+    if(!(r.ok || r.status === 200 || r.status === 201)){
+      let detail=''; try { detail = await r.text(); } catch{}
+      throw new Error('HTTP ' + r.status + (detail?' — '+detail.slice(0,200):''));
+    }
+    appLogMsg('info','attach','Uploaded '+file.name+' to '+issueKey);
+    // Force re-fetch attachments
+    delete attachmentsCache[issueKey];
+    await loadPaneAttachments(issueKey);
+  } catch(e){
+    if(listEl) listEl.innerHTML = '<div style="font-size:12px;color:#D6202B;padding:10px">Upload failed: '+_escHtml(e.message||e)+'</div>';
+    appLogMsg('error','attach','Upload failed: '+(e.message||e));
+  }
+}
+function promptForRemoteLink(issueKey){
+  if(!issueKey) return;
+  const url = prompt('Paste a URL to link (SharePoint, OneDrive, Confluence, Google Doc, etc.):');
+  if(!url) return;
+  const trimmed = url.trim();
+  if(!trimmed.match(/^https?:\/\//i)){
+    alert('Please paste a full URL starting with http:// or https://');
+    return;
+  }
+  const title = prompt('Optional label for this link (press Cancel to use the URL):') || _prettyLinkLabel(trimmed);
+  addRemoteLink(issueKey, trimmed, title);
+}
+async function addRemoteLink(issueKey, url, title){
+  const listEl = document.getElementById('att-list');
+  if(listEl) listEl.innerHTML = '<div style="font-size:12px;color:#9EA0A4;padding:14px;display:flex;align-items:center;gap:6px">'+spinHtml(14)+' Adding link…</div>';
+  appLogMsg('info','attach','Adding remote link for '+issueKey+': '+url);
+  try {
+    const r = await jiraPost('/rest/api/3/issue/'+issueKey+'/remotelink', {
+      object: { url: url, title: title || url }
+    });
+    if(!(r.ok || r.status === 200 || r.status === 201)){
+      let detail=''; try { detail = await r.text(); } catch{}
+      throw new Error('HTTP ' + r.status + (detail?' — '+detail.slice(0,200):''));
+    }
+    // Remote links don't show in /issue/{key}?fields=attachment — they're a
+    // separate endpoint. We re-fetch them too.
+    delete attachmentsCache[issueKey];
+    await loadPaneAttachments(issueKey);
+  } catch(e){
+    if(listEl) listEl.innerHTML = '<div style="font-size:12px;color:#D6202B;padding:10px">Link add failed: '+_escHtml(e.message||e)+'</div>';
+    appLogMsg('error','attach','Remote link failed: '+(e.message||e));
   }
 }
 
