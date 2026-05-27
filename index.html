@@ -5655,6 +5655,16 @@ function renderSettings(){
           <button onclick="showLogViewer()" style="font-size:11px;padding:5px 12px;border-radius:6px;border:1px solid #E4E6E8;background:#fff;color:#292E37;cursor:pointer">View Log</button>
         </div>
       </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:#F7F8F9;border-radius:8px;margin-bottom:14px">
+        <div>
+          <div style="font-size:12px;font-weight:700">Meetings tab (beta)</div>
+          <div style="font-size:11px;color:#9EA0A4">Show the Meeting Task Extractor in the top tab bar (this browser only)</div>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:#292E37">
+          <input type="checkbox" ${localStorage.getItem('meetings_beta')==='1'?'checked':''} onchange="toggleMeetingsBeta(this.checked)">
+          <span>Enabled</span>
+        </label>
+      </div>
       <div style="font-size:12px;color:#9EA0A4;margin-bottom:10px">Users with Manager board access:</div>
       <div id="admin-list" style="display:flex;flex-direction:column;gap:5px;margin-bottom:12px"></div>
       <div style="display:flex;gap:8px">
@@ -5786,6 +5796,14 @@ function addTeamMember(name){if(!teamMembers.includes(name)){teamMembers.push(na
 function removeTeamMember(i){teamMembers.splice(i,1);saveAll();renderTeamList();populateIamSelector();}
 function grantAdmin(){const e=(document.getElementById("admin-email-input").value||"").trim();if(!e||adminUsers.includes(e))return;adminUsers.push(e);saveAll();renderAdminList();}
 function revokeAdmin(i){if(adminUsers[i]===ADMIN_EMAIL)return;adminUsers.splice(i,1);saveAll();renderAdminList();}
+// v110: Meetings tab beta toggle. Persists per-browser via localStorage so
+// each admin can opt their own browser in or out. Calls updateManagerVisibility
+// to apply the change immediately without requiring a refresh.
+function toggleMeetingsBeta(enabled){
+  if(enabled) localStorage.setItem('meetings_beta','1');
+  else localStorage.removeItem('meetings_beta');
+  updateManagerVisibility();
+}
 function updateCredentials(){
   cfg.url=(document.getElementById("cfg-url2").value||"").trim().replace(/\/$/,"");
   cfg.email=(document.getElementById("cfg-email2").value||"").trim();
