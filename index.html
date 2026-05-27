@@ -255,6 +255,62 @@ button,select,textarea,input{font-family:inherit}
 .pri-drop-zone{min-height:50px;border-radius:6px;transition:.15s}
 .pri-drop-zone.drag-over{background:#E0F0F8;border:2px dashed #2E99CE}
 .pri-rank-num{font-size:9px;font-weight:700;color:#C9CACC;margin-right:4px;min-width:16px}
+
+/* ══ MEETING INTAKE ══ */
+#page-meetings{flex-direction:column;flex:1;min-height:0;overflow:hidden}
+.mtg-layout{display:flex;flex:1;min-height:0;overflow:hidden}
+.mtg-left{width:380px;border-right:1px solid #E4E6E8;display:flex;flex-direction:column;flex-shrink:0;overflow:hidden}
+.mtg-left-hdr{padding:12px 16px;border-bottom:1px solid #E4E6E8;background:#fff}
+.mtg-left-hdr h3{font-size:14px;font-weight:700;color:#125462;margin-bottom:4px}
+.mtg-left-hdr p{font-size:11px;color:#9EA0A4;margin:0}
+.mtg-source-tabs{display:flex;gap:1px;background:#EEF1F3;border-radius:7px;padding:2px;margin:10px 16px 0}
+.mtg-source-tabs button{flex:1;padding:5px 10px;font-size:11px;font-weight:700;border:none;background:transparent;color:#9EA0A4;border-radius:5px;cursor:pointer}
+.mtg-source-tabs button.active{background:#fff;color:#125462;box-shadow:0 1px 3px rgba(0,0,0,.09)}
+.mtg-paste-area{flex:1;padding:12px 16px;overflow-y:auto}
+.mtg-paste-area textarea{width:100%;min-height:200px;padding:10px 12px;border:1px solid #C9CACC;border-radius:8px;font-size:12px;font-family:inherit;resize:vertical;color:#292E37;line-height:1.5}
+.mtg-paste-area textarea:focus{border-color:#2E99CE;outline:none}
+.mtg-attendees-input{width:100%;padding:8px 11px;border:1px solid #C9CACC;border-radius:7px;font-size:12px;color:#292E37;margin-top:8px}
+.mtg-attendees-input:focus{border-color:#2E99CE;outline:none}
+.mtg-extract-btn{width:100%;padding:10px;border-radius:7px;border:none;background:#125462;color:#fff;cursor:pointer;font-size:13px;font-weight:700;margin-top:12px;display:flex;align-items:center;justify-content:center;gap:8px}
+.mtg-extract-btn:disabled{opacity:.5;cursor:default}
+.mtg-extract-btn:hover:not(:disabled){background:#0E4450}
+.mtg-right{flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.mtg-right-hdr{padding:12px 16px;border-bottom:1px solid #E4E6E8;background:#fff;display:flex;align-items:center;justify-content:space-between}
+.mtg-right-hdr h3{font-size:14px;font-weight:700;color:#125462}
+.mtg-staging{flex:1;overflow-y:auto;padding:10px 16px}
+.mtg-task-card{background:#fff;border:1px solid #E4E6E8;border-radius:8px;margin-bottom:8px;overflow:hidden;transition:border-color .15s}
+.mtg-task-card:hover{border-color:#2E99CE40}
+.mtg-task-card.is-dupe{border-color:#E08000;background:#FFFCF5}
+.mtg-task-card.is-created{border-color:#5E8E38;background:#F7FBF3}
+.mtg-task-card.is-excluded{opacity:.45}
+.mtg-task-main{display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer}
+.mtg-task-check{width:20px;height:20px;border-radius:5px;border:2px solid #C9CACC;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;font-size:11px;color:#fff;transition:.15s}
+.mtg-task-check.checked{background:#125462;border-color:#125462}
+.mtg-task-summary{flex:1;font-size:13px;font-weight:600;color:#292E37;line-height:1.3}
+.mtg-task-badges{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
+.mtg-task-fields{display:flex;gap:8px;flex-shrink:0;align-items:center}
+.mtg-task-field{min-width:0}
+.mtg-task-field label{display:block;font-size:9px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px}
+.mtg-task-field select,.mtg-task-field input{padding:4px 8px;border:1px solid #E4E6E8;border-radius:6px;font-size:11px;font-family:inherit;color:#292E37;background:#F7F8F9;min-width:80px;max-width:130px}
+.mtg-task-field select:focus,.mtg-task-field input:focus{border-color:#2E99CE;outline:none;background:#fff}
+.mtg-task-expand{font-size:11px;color:#9EA0A4;cursor:pointer;padding:4px;transition:transform .15s}
+.mtg-task-expand.open{transform:rotate(180deg)}
+.mtg-task-detail{padding:0 12px 12px;border-top:1px solid #F7F8F9;display:none}
+.mtg-task-detail.open{display:block;padding-top:10px}
+.mtg-task-detail textarea{width:100%;min-height:50px;padding:8px 10px;border:1px solid #E4E6E8;border-radius:6px;font-size:12px;font-family:inherit;resize:vertical;color:#292E37}
+.mtg-task-detail textarea:focus{border-color:#2E99CE;outline:none}
+.mtg-quote{font-size:11px;color:#5D7987;font-style:italic;padding:8px 10px;background:#F7F8F9;border-radius:6px;border-left:3px solid #2E99CE;margin-top:8px;line-height:1.4}
+.mtg-dupe-warn{font-size:11px;color:#854F0B;padding:6px 10px;background:#FFF8E0;border-radius:6px;margin-top:8px;display:flex;align-items:center;gap:6px}
+.mtg-progress{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;gap:16px}
+.mtg-progress-step{display:flex;align-items:center;gap:10px;font-size:12px;width:260px}
+.mtg-progress-dot{width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px}
+.mtg-step-done{background:#E8F5E0;color:#2D7A2D;border:1px solid #5E8E3830}
+.mtg-step-active{background:#E0F0F8;color:#2E99CE;border:1px solid #2E99CE30}
+.mtg-step-pending{background:#F7F8F9;color:#C9CACC;border:1px solid #E4E6E8}
+.mtg-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;color:#9EA0A4;text-align:center}
+.mtg-empty svg{margin-bottom:12px;opacity:.5}
+.mtg-create-log{background:#F7F8F9;border-radius:8px;padding:12px 16px;margin-top:12px}
+.mtg-create-log-row{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px}
 </style>
 </head>
 <body>
@@ -552,6 +608,7 @@ button,select,textarea,input{font-family:inherit}
     <button onclick="setView('prioritise')">Prioritise</button>
     <button onclick="setView('manager')" id="btn-manager">Team</button>
     <button onclick="setView('activity')">Comments</button>
+    <button onclick="setView('meetings')" id="btn-meetings" style="display:none">Meetings</button>
   </div>
 </div>
 
@@ -647,6 +704,41 @@ button,select,textarea,input{font-family:inherit}
     </div>
     <div id="pri-board" style="flex:1;overflow:auto;display:flex;min-height:0">
       <div style="flex:1;display:flex;align-items:center;justify-content:center;color:#9EA0A4;font-size:13px">Select a project to load the prioritisation board</div>
+    </div>
+  </div>
+  <div id="page-meetings" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden">
+    <div class="mtg-layout">
+      <!-- LEFT: Input panel -->
+      <div class="mtg-left">
+        <div class="mtg-left-hdr">
+          <h3>Meeting Task Extractor</h3>
+          <p>Extract action items from Teams meetings and stage for Jira</p>
+          <div class="mtg-source-tabs" id="mtg-source-tabs">
+            <button class="active" onclick="setMtgSource('paste')">Paste Transcript</button>
+            <button onclick="setMtgSource('auto')">Auto-fetch</button>
+          </div>
+        </div>
+        <div class="mtg-paste-area" id="mtg-input-area">
+          <!-- Populated by setMtgSource / renderMtgInputArea -->
+        </div>
+      </div>
+      <!-- RIGHT: Staging area -->
+      <div class="mtg-right">
+        <div class="mtg-right-hdr">
+          <h3 id="mtg-staging-title">Staging Area</h3>
+          <div style="display:flex;gap:6px;align-items:center">
+            <span id="mtg-count-badge" style="font-size:11px;color:#9EA0A4"></span>
+            <button class="primary-btn" id="mtg-push-btn" onclick="mtgPushToJira()" disabled style="font-size:12px">Push to Jira →</button>
+          </div>
+        </div>
+        <div class="mtg-staging" id="mtg-staging">
+          <div class="mtg-empty">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#C9CACC" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 12l2 2 4-4"/></svg>
+            <div style="font-size:13px;font-weight:600;color:#5D7987;margin-bottom:4px">No tasks extracted yet</div>
+            <div style="font-size:12px">Paste a meeting transcript on the left and click Extract Tasks</div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -1633,7 +1725,7 @@ async function onDropMatrix(e,status,priority){
 
 /* ══ INIT & FETCH ══ */
 function showPage(name){
-  ["welcome","loading","error","mytasks","myepics","manager","people","done","prioritise","activity"].forEach(p=>{
+  ["welcome","loading","error","mytasks","myepics","manager","people","done","prioritise","activity","meetings"].forEach(p=>{
     const el=document.getElementById("page-"+p);
     if(el) el.style.display="none";
   });
@@ -1785,7 +1877,19 @@ function populateGroupSelector(){
   }).join("");
   if(wrap) wrap.style.display=keys.length?"flex":"none";
 }
-function updateManagerVisibility(){document.getElementById("btn-manager").style.display="inline-block";}
+function updateManagerVisibility(){
+  document.getElementById("btn-manager").style.display="inline-block";
+  // v107: gate the Meetings tab to admins only during the beta rollout.
+  // Reuses the same admin check pattern used elsewhere in the app
+  // (owner email + any user in adminUsers). To open Meetings to everyone,
+  // replace this block with: mb.style.display="inline-block".
+  const mb = document.getElementById("btn-meetings");
+  if(mb){
+    const email = (cfg && cfg.email) || "";
+    const isAdmin = email===ADMIN_EMAIL || (adminUsers||[]).includes(email);
+    mb.style.display = isAdmin ? "inline-block" : "none";
+  }
+}
 
 /* ══ STATS ══ */
 // v82: stats bar is now scoped by current view. Previously the four status
@@ -2119,6 +2223,7 @@ function setView(v){
   const isPri = v==="prioritise";
   const isMT = v==="mytasks";
   const isAct = v==="activity";
+  const isMtg = v==="meetings";
   // v83: Team dropdown persists across all views. populateGroupSelector()
   // is the single source of truth for visibility — it hides the wrap only
   // when there are zero teams. The previous view-based hide rule had no
@@ -2131,7 +2236,7 @@ function setView(v){
   // Hidden on Done (always shows Done items) and Comments (different semantics).
   const sd = document.getElementById("show-done-wrap");
   if(sd) {
-    const hideOnViews = ['done','activity'];
+    const hideOnViews = ['done','activity','meetings'];
     sd.style.display = hideOnViews.includes(v) ? 'none' : 'flex';
     if(!hideOnViews.includes(v)) syncGlobalShowDoneCheckbox();
   }
@@ -2143,14 +2248,14 @@ function setView(v){
   //   - hidden on Prioritise (has its own Project picker + status pills below the tabs)
   // This keeps the shared bar showing only filters that actually do something.
   const ctrlProj=document.getElementById("ctrl-proj-filter")?.parentElement;
-  if(ctrlProj) ctrlProj.style.display=(isPri||isAct)?"none":"flex";
+  if(ctrlProj) ctrlProj.style.display=(isPri||isAct||isMtg)?"none":"flex";
   const ctrlPri=document.getElementById("priority-filter")?.parentElement;
-  if(ctrlPri) ctrlPri.style.display=(isPri||isAct)?"none":"flex";
+  if(ctrlPri) ctrlPri.style.display=(isPri||isAct||isMtg)?"none":"flex";
   const ctrlStat=document.getElementById("status-filter-ctrl")?.parentElement;
-  if(ctrlStat) ctrlStat.style.display=(isPri||isAct)?"none":"flex";
-  // Search: hide on Activity
+  if(ctrlStat) ctrlStat.style.display=(isPri||isAct||isMtg)?"none":"flex";
+  // Search: hide on Activity and Meetings (neither uses the global search box)
   const searchBox=document.querySelector(".search-box");
-  if(searchBox) searchBox.style.display=isAct?"none":"flex";
+  if(searchBox) searchBox.style.display=(isAct||isMtg)?"none":"flex";
   saveAll();
   renderMain();
   // v101: auto-refresh stale data on view change. Skipped for the very first
@@ -2174,6 +2279,9 @@ function setLevel(l){currentLevel=l;document.querySelectorAll("#level-seg button
 // tab change when the data is stale.
 let _lastSetViewAt = 0;
 function renderMain(){
+  // Meetings view is functional without any Jira issues loaded — render it first
+  // so users can paste a transcript even before the board has fetched data.
+  if(currentView==="meetings"){showPage("meetings");renderMeetings();updateStats();return;}
   if(!allIssues.length)return;
   if(currentView==="mytasks"){showPage("mytasks");renderMyTasks();}
   else if(currentView==="myepics"){showPage("myepics");renderMyEpics();}
@@ -7185,6 +7293,436 @@ function installAutoRefreshHooks(){
   }, REFRESH_BG_POLL_MS);
 
   appLogMsg('info','refresh','Auto-refresh hooks installed (poll '+(REFRESH_BG_POLL_MS/1000)+'s, stale '+(REFRESH_STALE_ON_VIEW_MS/1000)+'s on view, '+(REFRESH_STALE_ON_FOCUS_MS/1000)+'s on focus)');
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   MEETING TASK EXTRACTOR (v1)
+   Extracts action items from Teams meeting transcripts using AI,
+   stages them for review, and creates Jira issues.
+   ══════════════════════════════════════════════════════════════════ */
+
+let mtgSource = 'paste';     // 'paste' or 'auto'
+let mtgTasks = [];           // extracted tasks array
+let mtgExtracting = false;   // loading state
+let mtgExpandedTask = null;  // which task detail is open
+let mtgMeetingTitle = '';    // meeting subject
+let mtgMeetingDate = '';     // meeting date
+
+function setMtgSource(src) {
+  mtgSource = src;
+  document.querySelectorAll('#mtg-source-tabs button').forEach((b, i) => {
+    b.classList.toggle('active', (i === 0 && src === 'paste') || (i === 1 && src === 'auto'));
+  });
+  renderMtgInputArea();
+}
+
+function renderMtgInputArea() {
+  const area = document.getElementById('mtg-input-area');
+  if (!area) return;
+
+  if (mtgSource === 'paste') {
+    area.innerHTML = `
+      <div style="margin-bottom:10px">
+        <label style="font-size:11px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.04em">Meeting title</label>
+        <input id="mtg-title" class="mtg-attendees-input" placeholder="e.g. Marketing Engine" value="${_escHtml(mtgMeetingTitle)}" oninput="mtgMeetingTitle=this.value">
+      </div>
+      <div style="margin-bottom:10px">
+        <label style="font-size:11px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.04em">Attendees <span style="font-weight:400;color:#9EA0A4">(comma-separated)</span></label>
+        <input id="mtg-attendees" class="mtg-attendees-input" placeholder="e.g. Marcus Greensit, Steve Flavell, Harry Newman" value="">
+      </div>
+      <div>
+        <label style="font-size:11px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.04em">Transcript / meeting notes</label>
+        <textarea id="mtg-transcript" placeholder="Paste the meeting transcript here. WebVTT format (from Teams) works best, but plain text notes are fine too.&#10;&#10;The AI will identify action items, who they're assigned to, and suggest Jira placement." style="min-height:300px"></textarea>
+      </div>
+      <button class="mtg-extract-btn" id="mtg-extract-btn" onclick="mtgExtract()" ${mtgExtracting ? 'disabled' : ''}>
+        ${mtgExtracting ? spinHtml(16, '#fff') + ' Extracting…' : '⚡ Extract Tasks'}
+      </button>
+      <div style="margin-top:10px;font-size:10px;color:#9EA0A4;text-align:center">
+        Tip: In Teams, click ••• on a past meeting → Get recap → Copy transcript
+      </div>`;
+  } else {
+    // Auto-fetch placeholder — requires Microsoft Graph integration (Phase 2)
+    area.innerHTML = `
+      <div style="padding:30px 20px;text-align:center">
+        <div style="font-size:32px;margin-bottom:12px;opacity:.5">🔌</div>
+        <div style="font-size:13px;font-weight:600;color:#5D7987;margin-bottom:8px">Auto-fetch coming soon</div>
+        <div style="font-size:12px;color:#9EA0A4;line-height:1.5;max-width:280px;margin:0 auto">
+          This will connect to Microsoft Graph API to automatically pull meeting transcripts from your Teams calendar.
+          <br><br>
+          For now, use <b>Paste Transcript</b> to get started.
+        </div>
+        <button onclick="setMtgSource('paste')" style="margin-top:16px;padding:8px 20px;border-radius:6px;border:1px solid #2E99CE;background:#E0F0F8;color:#125462;cursor:pointer;font-size:12px;font-weight:700">
+          Switch to Paste
+        </button>
+      </div>`;
+  }
+}
+
+async function mtgExtract() {
+  const transcript = document.getElementById('mtg-transcript')?.value?.trim();
+  const attendees = document.getElementById('mtg-attendees')?.value?.trim();
+  mtgMeetingTitle = document.getElementById('mtg-title')?.value?.trim() || 'Untitled meeting';
+
+  if (!transcript || transcript.length < 30) {
+    alert('Please paste a meeting transcript (at least a few sentences).');
+    return;
+  }
+
+  mtgExtracting = true;
+  mtgTasks = [];
+  renderMtgInputArea();
+  renderMtgStaging('extracting');
+
+  try {
+    // Step 1: Get available projects for context
+    const projects = allIssues.length > 0
+      ? [...new Set(allIssues.map(i => i.project))].sort()
+      : [];
+
+    // Step 2: Get epics/milestones for hierarchy context
+    const epics = allIssues
+      .filter(i => isEpicLevel(i.type))
+      .map(i => ({ key: i.key, summary: i.summary, project: i.project, status: i.status }))
+      .slice(0, 80);
+
+    // Step 3: Call AI to extract tasks
+    const prompt = {
+      task: 'extract_meeting_tasks',
+      transcript: transcript.substring(0, 15000),
+      meetingTitle: mtgMeetingTitle,
+      attendees: attendees,
+      projects: projects.join(', '),
+      epics: epics.map(e => `${e.key}: ${e.summary} (${e.project})`).join('\n'),
+      teamMembers: teamMembers.join(', ')
+    };
+
+    const r = await fetch(PROXY + '/ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(prompt)
+    });
+
+    let tasks = [];
+    if (r.ok) {
+      const result = await r.json();
+      tasks = result.tasks || result.suggestions || [];
+    }
+
+    // If AI endpoint failed or returned nothing, try the fallback
+    if (!tasks.length) {
+      tasks = await mtgExtractFallback(transcript, attendees, projects, epics);
+    }
+
+    // Step 4: Enrich tasks with IDs and defaults
+    mtgTasks = tasks.map((t, i) => ({
+      id: 'mtg_' + Date.now() + '_' + i,
+      summary: t.summary || 'Untitled task',
+      description: t.description || '',
+      assignee: t.assignee || 'Unassigned',
+      project: t.project || (projects[0] || 'COPS'),
+      parentKey: t.parentKey || '',
+      parentSuggestion: t.parentSuggestion || '',
+      priority: t.priority || 'Medium',
+      type: 'Task',
+      sourceQuote: t.sourceQuote || '',
+      confidence: t.confidence || 'medium',
+      duplicate: null,
+      included: true,
+      status: 'pending',  // pending | creating | created | error
+      jiraKey: null
+    }));
+
+    // Step 5: Check for duplicates
+    await mtgCheckDuplicates();
+
+    mtgExtracting = false;
+    renderMtgInputArea();
+    renderMtgStaging('ready');
+
+  } catch (e) {
+    mtgExtracting = false;
+    renderMtgInputArea();
+    renderMtgStaging('error', e.message);
+  }
+}
+
+// Fallback extraction using the proxy /ai endpoint with a simpler prompt.
+// Adjust if your Cloudflare Worker /ai route uses a different request shape.
+async function mtgExtractFallback(transcript, attendees, projects, epics) {
+  try {
+    const r = await fetch(PROXY + '/ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemPrompt: 'You extract action items from meeting transcripts. Return ONLY a JSON array of task objects with: summary, description, assignee, project, parentSuggestion, priority (High/Medium/Low), sourceQuote, confidence (high/medium/low). No markdown.',
+        prompt: `Extract ALL action items from this meeting transcript.
+MEETING: ${mtgMeetingTitle}
+ATTENDEES: ${attendees}
+JIRA PROJECTS: ${projects.join(', ')}
+EXISTING EPICS:\n${epics.slice(0, 40).map(e => e.key + ': ' + e.summary).join('\n')}
+TEAM MEMBERS: ${teamMembers.join(', ')}
+
+TRANSCRIPT:\n${transcript.substring(0, 12000)}
+
+Look for: "can you", "I'll", "we need to", "let's", "action", "follow up", "TODO", "will do", commitments, decisions needing follow-up.
+Return ONLY the JSON array.`
+      })
+    });
+    if (r.ok) {
+      const d = await r.json();
+      const text = d.text || d.content || JSON.stringify(d);
+      const match = text.match(/\[[\s\S]*\]/);
+      if (match) return JSON.parse(match[0]);
+    }
+  } catch (e) {
+    appLogMsg('warn', 'meetings', 'AI fallback failed: ' + e.message);
+  }
+  return [];
+}
+
+async function mtgCheckDuplicates() {
+  if (!mtgTasks.length) return;
+  try {
+    // Search for similar existing issues (first 5 tasks' keywords)
+    const searchTerms = mtgTasks.slice(0, 5).map(t =>
+      t.summary.split(/\s+/).slice(0, 4).join(' ')
+    );
+    const jql = searchTerms.map(s => 'summary ~ "' + s.replace(/"/g, '') + '"').join(' OR ');
+    const d = await jiraGet('/rest/api/3/search/jql?jql=' + encodeURIComponent(jql + ' ORDER BY updated DESC') + '&fields=summary,status,project&maxResults=30');
+    const existing = (d.issues || []).map(i => ({
+      key: i.key,
+      summary: i.fields.summary,
+      project: i.fields.project?.key
+    }));
+
+    if (!existing.length) return;
+
+    // Simple fuzzy match: compare word overlap
+    for (const task of mtgTasks) {
+      const tWords = new Set(task.summary.toLowerCase().split(/\s+/).filter(w => w.length > 3));
+      for (const ex of existing) {
+        const eWords = new Set(ex.summary.toLowerCase().split(/\s+/).filter(w => w.length > 3));
+        const overlap = [...tWords].filter(w => eWords.has(w)).length;
+        const similarity = tWords.size > 0 ? overlap / tWords.size : 0;
+        if (similarity >= 0.5) {
+          task.duplicate = { key: ex.key, summary: ex.summary, similarity: similarity >= 0.75 ? 'high' : 'medium' };
+          if (similarity >= 0.75) task.included = false;
+          break;
+        }
+      }
+    }
+  } catch (e) {
+    appLogMsg('warn', 'meetings', 'Dupe check failed: ' + e.message);
+  }
+}
+
+function renderMtgStaging(state, errorMsg) {
+  const staging = document.getElementById('mtg-staging');
+  const titleEl = document.getElementById('mtg-staging-title');
+  const countEl = document.getElementById('mtg-count-badge');
+  const pushBtn = document.getElementById('mtg-push-btn');
+  if (!staging) return;
+
+  if (state === 'extracting') {
+    staging.innerHTML = `<div class="mtg-progress">
+      <div style="font-size:14px;font-weight:700;color:#125462">${_escHtml(mtgMeetingTitle)}</div>
+      <div class="mtg-progress-step"><div class="mtg-progress-dot mtg-step-active">${spinHtml(12, '#2E99CE')}</div><span style="color:#292E37;font-weight:600">Analysing transcript…</span></div>
+      <div class="mtg-progress-step"><div class="mtg-progress-dot mtg-step-pending">2</div><span style="color:#9EA0A4">Matching to Jira projects</span></div>
+      <div class="mtg-progress-step"><div class="mtg-progress-dot mtg-step-pending">3</div><span style="color:#9EA0A4">Checking for duplicates</span></div>
+    </div>`;
+    if (pushBtn) pushBtn.disabled = true;
+    if (countEl) countEl.textContent = '';
+    return;
+  }
+
+  if (state === 'error') {
+    staging.innerHTML = `<div class="mtg-empty">
+      <div style="font-size:28px;margin-bottom:8px">⚠</div>
+      <div style="font-size:13px;font-weight:600;color:#D6202B;margin-bottom:4px">Extraction failed</div>
+      <div style="font-size:12px;color:#9EA0A4">${_escHtml(errorMsg || 'Unknown error')}</div>
+    </div>`;
+    if (pushBtn) pushBtn.disabled = true;
+    return;
+  }
+
+  if (!mtgTasks.length) {
+    staging.innerHTML = `<div class="mtg-empty">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#C9CACC" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 12l2 2 4-4"/></svg>
+      <div style="font-size:13px;font-weight:600;color:#5D7987;margin-bottom:4px">No tasks extracted</div>
+      <div style="font-size:12px">The AI didn't find any action items in this transcript.</div>
+    </div>`;
+    if (pushBtn) pushBtn.disabled = true;
+    return;
+  }
+
+  // Build project options from allIssues
+  const projectKeys = [...new Set(allIssues.map(i => i.project))].sort();
+  const priOpts = ['Highest', 'High', 'Medium', 'Low'];
+  const includedCount = mtgTasks.filter(t => t.included && t.status === 'pending').length;
+  const createdCount = mtgTasks.filter(t => t.status === 'created').length;
+
+  if (titleEl) titleEl.textContent = mtgMeetingTitle || 'Staging Area';
+  if (countEl) countEl.textContent = `${mtgTasks.length} tasks · ${createdCount} created`;
+  if (pushBtn) {
+    pushBtn.disabled = includedCount === 0;
+    pushBtn.innerHTML = mtgTasks.some(t => t.status === 'creating')
+      ? spinHtml(14, '#fff') + ' Creating…'
+      : `Push ${includedCount} to Jira →`;
+  }
+
+  let html = '';
+  for (const task of mtgTasks) {
+    const isExpanded = mtgExpandedTask === task.id;
+    const cardClass = 'mtg-task-card'
+      + (task.duplicate?.similarity === 'high' ? ' is-dupe' : '')
+      + (task.status === 'created' ? ' is-created' : '')
+      + (!task.included ? ' is-excluded' : '');
+
+    const confColor = task.confidence === 'high' ? '#5E8E38' : task.confidence === 'medium' ? '#E08000' : '#9EA0A4';
+    const confBg = task.confidence === 'high' ? '#F1F7EC' : task.confidence === 'medium' ? '#FFF8E0' : '#EEF1F3';
+
+    html += `<div class="${cardClass}" id="mtg-card-${task.id}">
+      <div class="mtg-task-main" onclick="mtgToggleExpand('${task.id}')">
+        <div class="mtg-task-check ${task.included ? 'checked' : ''}" onclick="event.stopPropagation();mtgToggleInclude('${task.id}')">
+          ${task.included ? '✓' : ''}
+        </div>
+        <div style="flex:1;min-width:0">
+          <div class="mtg-task-summary">${_escHtml(task.summary)}</div>
+          <div class="mtg-task-badges">
+            <span class="badge" style="background:${confBg};color:${confColor}">${task.confidence}</span>
+            ${task.duplicate ? `<span class="badge" style="background:#FFF8E0;color:#854F0B">⚠ ${task.duplicate.key}</span>` : ''}
+            ${task.status === 'created' ? `<span class="badge" style="background:#E8F5E0;color:#2D7A2D">✓ ${task.jiraKey || 'Created'}</span>` : ''}
+            ${task.status === 'creating' ? `<span class="badge" style="background:#E0F0F8;color:#2E99CE">${spinHtml(10, '#2E99CE')} Creating</span>` : ''}
+            ${task.status === 'error' ? `<span class="badge" style="background:#FCEBEB;color:#D6202B">✗ Failed</span>` : ''}
+          </div>
+        </div>
+        <div class="mtg-task-fields">
+          <div class="mtg-task-field">
+            <label>Assignee</label>
+            <input value="${_escHtml(task.assignee)}" onclick="event.stopPropagation()" oninput="mtgUpdateTask('${task.id}','assignee',this.value)" placeholder="Unassigned" style="width:100px">
+          </div>
+          <div class="mtg-task-field">
+            <label>Project</label>
+            <select onclick="event.stopPropagation()" onchange="mtgUpdateTask('${task.id}','project',this.value)">
+              ${projectKeys.map(k => `<option value="${k}" ${k === task.project ? 'selected' : ''}>${k}</option>`).join('')}
+            </select>
+          </div>
+          <div class="mtg-task-field">
+            <label>Priority</label>
+            <select onclick="event.stopPropagation()" onchange="mtgUpdateTask('${task.id}','priority',this.value)">
+              ${priOpts.map(p => `<option value="${p}" ${p === task.priority ? 'selected' : ''}>${p}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <span class="mtg-task-expand ${isExpanded ? 'open' : ''}">▾</span>
+      </div>
+      <div class="mtg-task-detail ${isExpanded ? 'open' : ''}">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <label style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:3px">Description</label>
+            <textarea oninput="mtgUpdateTask('${task.id}','description',this.value)">${_escHtml(task.description)}</textarea>
+          </div>
+          <div>
+            <label style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:3px">Parent (Epic/Milestone)</label>
+            <input style="width:100%;padding:6px 10px;border:1px solid #E4E6E8;border-radius:6px;font-size:12px;color:#292E37;margin-bottom:8px" value="${_escHtml(task.parentSuggestion)}" oninput="mtgUpdateTask('${task.id}','parentSuggestion',this.value)" placeholder="e.g. Marketing Engine">
+            ${task.sourceQuote ? `<div class="mtg-quote">"${_escHtml(task.sourceQuote)}"</div>` : ''}
+          </div>
+        </div>
+        ${task.duplicate ? `<div class="mtg-dupe-warn">⚠ Possible duplicate of <b>${task.duplicate.key}</b>: "${_escHtml(task.duplicate.summary)}" <span style="color:#9EA0A4">(${task.duplicate.similarity})</span></div>` : ''}
+      </div>
+    </div>`;
+  }
+
+  staging.innerHTML = html;
+}
+
+function mtgToggleInclude(id) {
+  const t = mtgTasks.find(t => t.id === id);
+  if (t) { t.included = !t.included; renderMtgStaging('ready'); }
+}
+
+function mtgToggleExpand(id) {
+  mtgExpandedTask = mtgExpandedTask === id ? null : id;
+  renderMtgStaging('ready');
+}
+
+function mtgUpdateTask(id, field, value) {
+  const t = mtgTasks.find(t => t.id === id);
+  if (t) t[field] = value;
+  // Don't re-render on every keystroke — just update in memory
+}
+
+async function mtgPushToJira() {
+  const toCreate = mtgTasks.filter(t => t.included && t.status === 'pending');
+  if (!toCreate.length) return;
+
+  for (const task of toCreate) {
+    task.status = 'creating';
+    renderMtgStaging('ready');
+
+    try {
+      // Build description with source attribution
+      const desc = (task.description ? task.description + '\n\n' : '')
+        + '---\n_Extracted from meeting "' + mtgMeetingTitle + '" by Meeting Task Extractor_';
+
+      const payload = {
+        fields: {
+          project: { key: task.project },
+          issuetype: { name: 'Task' },
+          summary: task.summary,
+          priority: { name: task.priority || 'Medium' },
+          description: {
+            type: 'doc', version: 1,
+            content: [{ type: 'paragraph', content: [{ type: 'text', text: desc }] }]
+          }
+        }
+      };
+
+      // Try to set assignee
+      if (task.assignee && task.assignee !== 'Unassigned') {
+        try {
+          const users = await jiraGet('/rest/api/3/user/search?query=' + encodeURIComponent(task.assignee) + '&maxResults=5');
+          const arr = Array.isArray(users) ? users : [];
+          const pick = arr.find(u => (u.displayName || '').toLowerCase() === task.assignee.toLowerCase()) || arr[0];
+          if (pick?.accountId) {
+            payload.fields.assignee = { accountId: pick.accountId };
+          }
+        } catch (e) {
+          appLogMsg('warn', 'meetings', 'Could not resolve assignee for ' + task.assignee);
+        }
+      }
+
+      // Try to set parent epic/milestone
+      if (task.parentKey) {
+        payload.fields.parent = { key: task.parentKey };
+      }
+
+      const result = await createIssue(payload);
+      if (result.success) {
+        task.status = 'created';
+        task.jiraKey = result.key;
+        appLogMsg('info', 'meetings', 'Created ' + result.key + ': ' + task.summary);
+      } else {
+        task.status = 'error';
+        appLogMsg('error', 'meetings', 'Failed to create: ' + task.summary);
+      }
+    } catch (e) {
+      task.status = 'error';
+      appLogMsg('error', 'meetings', 'Error creating task: ' + e.message);
+    }
+
+    renderMtgStaging('ready');
+  }
+
+  // Refresh board data after creating issues
+  setTimeout(() => doFetch(true), 2000);
+}
+
+function renderMeetings() {
+  renderMtgInputArea();
+  if (mtgTasks.length) {
+    renderMtgStaging('ready');
+  }
 }
 </script>
 </body>
