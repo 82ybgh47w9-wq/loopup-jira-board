@@ -377,6 +377,47 @@ button,select,textarea,input{font-family:inherit}
 .mtg-bulk-bar .stat{color:#5D7987}
 .mtg-bulk-bar .stat strong{color:#292E37}
 
+/* ══ LABELS BOARD v120 ══ */
+#page-labels{flex-direction:column;flex:1;min-height:0;overflow:hidden}
+.lbl-controls{display:flex;align-items:center;gap:10px;padding:8px 15px;background:#fff;border-bottom:1px solid #E4E6E8;flex-shrink:0;flex-wrap:wrap}
+.lbl-controls label{font-size:11px;color:#5D7987;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+.lbl-search-wrap{position:relative;min-width:260px}
+.lbl-search{width:100%;padding:8px 12px;border:1px solid #C9CACC;border-radius:7px;font-size:13px;color:#292E37;font-family:inherit;box-sizing:border-box}
+.lbl-search:focus{border-color:#2E99CE;outline:none}
+.lbl-search.has-label{background:#E0F0F8;border-color:#2E99CE;font-weight:700}
+.lbl-clear-x{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:transparent;border:none;color:#9EA0A4;cursor:pointer;font-size:14px;padding:2px 6px;border-radius:4px}
+.lbl-clear-x:hover{background:#F7F8F9;color:#D6202B}
+.lbl-dropdown{position:absolute;top:calc(100% + 4px);left:0;right:0;background:#fff;border:1px solid #C9CACC;border-radius:7px;box-shadow:0 4px 16px rgba(0,0,0,.12);max-height:280px;overflow-y:auto;z-index:50}
+.lbl-dropdown-row{padding:7px 12px;font-size:12px;color:#292E37;cursor:pointer;border-bottom:1px solid #F7F8F9}
+.lbl-dropdown-row:last-child{border-bottom:none}
+.lbl-dropdown-row:hover{background:#E0F0F8;color:#125462}
+.lbl-dropdown-row.current{background:#125462;color:#fff}
+.lbl-dropdown-empty{padding:14px;text-align:center;color:#9EA0A4;font-size:12px}
+.lbl-board{flex:1;overflow-y:auto;padding:10px 15px}
+.lbl-empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;color:#9EA0A4;text-align:center;font-size:13px}
+.lbl-empty-state svg{margin-bottom:12px;opacity:.5}
+.lbl-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid #E4E6E8;background:#fff;border-radius:8px;margin-bottom:6px;cursor:grab;transition:.12s}
+.lbl-row:hover{border-color:#C9CACC;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.lbl-row.dragging{opacity:.4;cursor:grabbing}
+.lbl-row.drag-over{border-top:3px solid #2E99CE;padding-top:6px}
+.lbl-handle{color:#C9CACC;font-size:16px;cursor:grab;flex-shrink:0;user-select:none}
+.lbl-rank{font-size:10px;font-weight:700;color:#9EA0A4;min-width:20px;text-align:right;flex-shrink:0;font-variant-numeric:tabular-nums}
+.lbl-key{font-size:11px;font-weight:700;color:#257AA5;font-family:monospace;flex-shrink:0;min-width:80px}
+.lbl-summary{flex:1;font-size:13px;color:#292E37;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.lbl-meta{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.lbl-pill{font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+.lbl-status-Backlog{background:#EEF1F3;color:#5D7987}
+.lbl-status-Selected{background:#F1F7EC;color:#3D6B1E}
+.lbl-status-Selected-for-Development{background:#F1F7EC;color:#3D6B1E}
+.lbl-status-In-Progress{background:#E0F0F8;color:#125462}
+.lbl-status-Done{background:#E8F5E0;color:#2D7A2D}
+.lbl-priority-Highest{background:#FCEBEB;color:#A11820}
+.lbl-priority-High{background:#FAEEDA;color:#945200}
+.lbl-priority-Medium{background:#E0F0F8;color:#125462}
+.lbl-priority-Low{background:#EAF3DE;color:#3D6B1E}
+.lbl-assignee{font-size:11px;color:#5D7987;white-space:nowrap}
+.lbl-stats{font-size:11px;color:#5D7987;margin-left:auto}
+
 /* ══ MEETING INTAKE v117 — duplicate banner ══ */
 .mtg-dup-banner{display:flex;align-items:center;gap:10px;padding:8px 12px 8px 42px;background:#FFF8E0;border-bottom:1px solid #F0DC9A;font-size:12px;color:#854F0B}
 .mtg-dup-banner.is-closed{background:#EEF1F3;color:#5D7987;border-bottom-color:#D8DADE}
@@ -613,7 +654,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v119</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v120</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -729,6 +770,7 @@ button,select,textarea,input{font-family:inherit}
     <button onclick="setView('prioritise')">Prioritise</button>
     <button onclick="setView('manager')" id="btn-manager">Team</button>
     <button onclick="setView('activity')">Comments</button>
+    <button onclick="setView('labels')">Labels</button>
     <button onclick="setView('meetings')" id="btn-meetings" style="display:none">Meetings</button>
   </div>
 </div>
@@ -825,6 +867,43 @@ button,select,textarea,input{font-family:inherit}
     </div>
     <div id="pri-board" style="flex:1;overflow:auto;display:flex;min-height:0">
       <div style="flex:1;display:flex;align-items:center;justify-content:center;color:#9EA0A4;font-size:13px">Select a project to load the prioritisation board</div>
+    </div>
+  </div>
+  <div id="page-labels" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden">
+    <div class="lbl-controls">
+      <div class="lbl-search-wrap">
+        <input class="lbl-search" id="lbl-search-input" placeholder="Search labels…" oninput="lblOnSearchInput(this.value)" onfocus="lblShowDropdown()" onblur="setTimeout(lblHideDropdown,200)" autocomplete="off">
+        <button class="lbl-clear-x" id="lbl-clear-btn" onclick="lblClearLabel()" style="display:none" title="Clear label">✕</button>
+        <div class="lbl-dropdown" id="lbl-dropdown" style="display:none"></div>
+      </div>
+      <select id="lbl-project" onchange="lblProjectFilter=this.value;lblSaveSession();lblReload()" style="padding:7px 10px;border:1px solid #C9CACC;border-radius:7px;font-size:12px;background:#fff">
+        <option value="">All projects</option>
+      </select>
+      <select id="lbl-status" onchange="lblStatusFilter=this.value;lblSaveSession();lblReload()" style="padding:7px 10px;border:1px solid #C9CACC;border-radius:7px;font-size:12px;background:#fff">
+        <option value="">All statuses</option>
+        <option value="Backlog">Backlog</option>
+        <option value="Selected for Development">Selected</option>
+        <option value="In Progress">In Progress</option>
+        <option value="Done">Done</option>
+      </select>
+      <select id="lbl-priority" onchange="lblPriorityFilter=this.value;lblSaveSession();lblReload()" style="padding:7px 10px;border:1px solid #C9CACC;border-radius:7px;font-size:12px;background:#fff">
+        <option value="">All priorities</option>
+        <option value="Highest">Highest</option>
+        <option value="High">High</option>
+        <option value="Medium">Medium</option>
+        <option value="Low">Low</option>
+      </select>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#292E37;cursor:pointer;text-transform:none;letter-spacing:0;font-weight:400">
+        <input type="checkbox" id="lbl-include-done" onchange="lblIncludeDone=this.checked;lblSaveSession();lblReload()"> Include Done
+      </label>
+      <span id="lbl-stats-text" class="lbl-stats"></span>
+    </div>
+    <div class="lbl-board" id="lbl-board">
+      <div class="lbl-empty-state">
+        <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="#C9CACC" stroke-width="1.5"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+        <div style="font-size:13px;font-weight:600;color:#5D7987;margin-bottom:4px">Pick a label to get started</div>
+        <div style="font-size:12px">Type into the search above. Your last label and filters are remembered between sessions.</div>
+      </div>
     </div>
   </div>
   <div id="page-meetings" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden">
@@ -1846,7 +1925,7 @@ async function onDropMatrix(e,status,priority){
 
 /* ══ INIT & FETCH ══ */
 function showPage(name){
-  ["welcome","loading","error","mytasks","myepics","manager","people","done","prioritise","activity","meetings"].forEach(p=>{
+  ["welcome","loading","error","mytasks","myepics","manager","people","done","prioritise","activity","meetings","labels"].forEach(p=>{
     const el=document.getElementById("page-"+p);
     if(el) el.style.display="none";
   });
@@ -2349,6 +2428,7 @@ function setView(v){
   const isMT = v==="mytasks";
   const isAct = v==="activity";
   const isMtg = v==="meetings";
+  const isLbl = v==="labels";
   // v83: Team dropdown persists across all views. populateGroupSelector()
   // is the single source of truth for visibility — it hides the wrap only
   // when there are zero teams. The previous view-based hide rule had no
@@ -2361,7 +2441,7 @@ function setView(v){
   // Hidden on Done (always shows Done items) and Comments (different semantics).
   const sd = document.getElementById("show-done-wrap");
   if(sd) {
-    const hideOnViews = ['done','activity','meetings'];
+    const hideOnViews = ['done','activity','meetings','labels'];
     sd.style.display = hideOnViews.includes(v) ? 'none' : 'flex';
     if(!hideOnViews.includes(v)) syncGlobalShowDoneCheckbox();
   }
@@ -2373,14 +2453,14 @@ function setView(v){
   //   - hidden on Prioritise (has its own Project picker + status pills below the tabs)
   // This keeps the shared bar showing only filters that actually do something.
   const ctrlProj=document.getElementById("ctrl-proj-filter")?.parentElement;
-  if(ctrlProj) ctrlProj.style.display=(isPri||isAct||isMtg)?"none":"flex";
+  if(ctrlProj) ctrlProj.style.display=(isPri||isAct||isMtg||isLbl)?"none":"flex";
   const ctrlPri=document.getElementById("priority-filter")?.parentElement;
-  if(ctrlPri) ctrlPri.style.display=(isPri||isAct||isMtg)?"none":"flex";
+  if(ctrlPri) ctrlPri.style.display=(isPri||isAct||isMtg||isLbl)?"none":"flex";
   const ctrlStat=document.getElementById("status-filter-ctrl")?.parentElement;
-  if(ctrlStat) ctrlStat.style.display=(isPri||isAct||isMtg)?"none":"flex";
-  // Search: hide on Activity and Meetings (neither uses the global search box)
+  if(ctrlStat) ctrlStat.style.display=(isPri||isAct||isMtg||isLbl)?"none":"flex";
+  // Search: hide on Activity, Meetings, Labels (each has its own filter bar)
   const searchBox=document.querySelector(".search-box");
-  if(searchBox) searchBox.style.display=(isAct||isMtg)?"none":"flex";
+  if(searchBox) searchBox.style.display=(isAct||isMtg||isLbl)?"none":"flex";
   saveAll();
   renderMain();
   // v101: auto-refresh stale data on view change. Skipped for the very first
@@ -2407,6 +2487,7 @@ function renderMain(){
   // Meetings view is functional without any Jira issues loaded — render it first
   // so users can paste a transcript even before the board has fetched data.
   if(currentView==="meetings"){showPage("meetings");renderMeetings();updateStats();return;}
+  if(currentView==="labels"){showPage("labels");renderLabels();updateStats();return;}
   if(!allIssues.length)return;
   if(currentView==="mytasks"){showPage("mytasks");renderMyTasks();}
   else if(currentView==="myepics"){showPage("myepics");renderMyEpics();}
@@ -8781,6 +8862,306 @@ function mtgRestoreTask(id) {
   delete t._preIgnoreStatus;
   delete t._preIgnoreIncluded;
   renderMtgStaging('ready');
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   LABELS BOARD (v120)
+   Filter Jira issues by label. Standard filters + drag-drop ordering
+   stored locally in localStorage per label. Remembers last session.
+   ══════════════════════════════════════════════════════════════════ */
+
+let lblAllLabels = [];        // all labels from Jira (cached)
+let lblLabelsFetched = false; // whether we've called /rest/api/3/label yet
+let lblCurrentLabel = '';     // active label filter
+let lblProjectFilter = '';
+let lblStatusFilter = '';
+let lblPriorityFilter = '';
+let lblIncludeDone = false;
+let lblIssues = [];           // current results (already in local order)
+let lblLoading = false;
+let lblSearchQuery = '';      // typed query for dropdown filtering
+
+async function lblFetchAllLabels(){
+  if (lblLabelsFetched) return;
+  lblLabelsFetched = true;
+  try {
+    // /rest/api/3/label returns { values: [...], total, isLast }
+    // Some Jira instances have thousands of labels — pull up to 2000.
+    const out = [];
+    let startAt = 0;
+    for (let i = 0; i < 5; i++){ // up to 5 pages of 1000 = 5000 max
+      const d = await jiraGet('/rest/api/3/label?startAt=' + startAt + '&maxResults=1000');
+      const vals = d.values || [];
+      out.push(...vals);
+      if (d.isLast || vals.length < 1000) break;
+      startAt += vals.length;
+    }
+    lblAllLabels = [...new Set(out)].sort();
+    appLogMsg('info','labels','Loaded ' + lblAllLabels.length + ' labels');
+  } catch(e){
+    lblAllLabels = [];
+    appLogMsg('warn','labels','Failed to load labels: ' + e.message);
+  }
+}
+
+function lblSaveSession(){
+  try {
+    localStorage.setItem('lbl-last', JSON.stringify({
+      label: lblCurrentLabel,
+      projectFilter: lblProjectFilter,
+      statusFilter: lblStatusFilter,
+      priorityFilter: lblPriorityFilter,
+      includeDone: lblIncludeDone
+    }));
+  } catch(e){}
+}
+
+function lblLoadSession(){
+  try {
+    const last = JSON.parse(localStorage.getItem('lbl-last') || '{}');
+    lblCurrentLabel = last.label || '';
+    lblProjectFilter = last.projectFilter || '';
+    lblStatusFilter = last.statusFilter || '';
+    lblPriorityFilter = last.priorityFilter || '';
+    lblIncludeDone = !!last.includeDone;
+  } catch(e){}
+}
+
+function lblPopulateProjectSelect(){
+  const sel = document.getElementById('lbl-project');
+  if (!sel) return;
+  const projects = [...new Set(allIssues.map(i => i.project))].sort();
+  sel.innerHTML = '<option value="">All projects</option>' +
+    projects.map(p => `<option value="${p}" ${p === lblProjectFilter ? 'selected' : ''}>${p}</option>`).join('');
+  // Restore the other selects from session state
+  const stSel = document.getElementById('lbl-status'); if (stSel) stSel.value = lblStatusFilter;
+  const prSel = document.getElementById('lbl-priority'); if (prSel) prSel.value = lblPriorityFilter;
+  const incDone = document.getElementById('lbl-include-done'); if (incDone) incDone.checked = lblIncludeDone;
+  const search = document.getElementById('lbl-search-input');
+  if (search) {
+    search.value = lblCurrentLabel || '';
+    search.classList.toggle('has-label', !!lblCurrentLabel);
+  }
+  const clr = document.getElementById('lbl-clear-btn');
+  if (clr) clr.style.display = lblCurrentLabel ? 'block' : 'none';
+}
+
+function lblShowDropdown(){
+  const dd = document.getElementById('lbl-dropdown');
+  if (!dd) return;
+  dd.style.display = 'block';
+  lblRenderDropdown();
+}
+
+function lblHideDropdown(){
+  const dd = document.getElementById('lbl-dropdown');
+  if (dd) dd.style.display = 'none';
+}
+
+function lblOnSearchInput(value){
+  lblSearchQuery = value;
+  lblRenderDropdown();
+}
+
+function lblRenderDropdown(){
+  const dd = document.getElementById('lbl-dropdown');
+  if (!dd) return;
+  if (!lblLabelsFetched){
+    dd.innerHTML = `<div class="lbl-dropdown-empty">${spinHtml(14)} Loading labels…</div>`;
+    return;
+  }
+  const q = (lblSearchQuery || '').toLowerCase();
+  const filtered = q
+    ? lblAllLabels.filter(l => l.toLowerCase().includes(q)).slice(0, 80)
+    : lblAllLabels.slice(0, 80);
+  if (!filtered.length){
+    dd.innerHTML = `<div class="lbl-dropdown-empty">No matching labels${q ? ' for "' + _escHtml(q) + '"' : ''}</div>`;
+    return;
+  }
+  dd.innerHTML = filtered.map(l =>
+    `<div class="lbl-dropdown-row ${l === lblCurrentLabel ? 'current' : ''}" onmousedown="lblPickLabel('${l.replace(/'/g,"\\'")}')">${_escHtml(l)}</div>`
+  ).join('');
+}
+
+function lblPickLabel(label){
+  lblCurrentLabel = label;
+  lblSearchQuery = '';
+  lblSaveSession();
+  const search = document.getElementById('lbl-search-input');
+  if (search) { search.value = label; search.classList.add('has-label'); search.blur(); }
+  const clr = document.getElementById('lbl-clear-btn'); if (clr) clr.style.display = 'block';
+  lblHideDropdown();
+  lblReload();
+}
+
+function lblClearLabel(){
+  lblCurrentLabel = '';
+  lblSaveSession();
+  const search = document.getElementById('lbl-search-input');
+  if (search) { search.value = ''; search.classList.remove('has-label'); }
+  const clr = document.getElementById('lbl-clear-btn'); if (clr) clr.style.display = 'none';
+  lblIssues = [];
+  lblRenderBoard();
+}
+
+async function lblReload(){
+  if (!lblCurrentLabel) { lblIssues = []; lblRenderBoard(); return; }
+  lblLoading = true;
+  lblRenderBoard();
+  try {
+    const clauses = ['labels = "' + lblCurrentLabel.replace(/"/g,'') + '"'];
+    if (lblProjectFilter) clauses.push('project = "' + lblProjectFilter + '"');
+    if (lblStatusFilter)  clauses.push('status = "' + lblStatusFilter.replace(/"/g,'') + '"');
+    if (lblPriorityFilter) clauses.push('priority = "' + lblPriorityFilter + '"');
+    if (!lblIncludeDone && !lblStatusFilter) clauses.push('status != Done');
+    const jql = clauses.join(' AND ') + ' ORDER BY priority DESC, updated DESC';
+    const d = await jiraGet('/rest/api/3/search/jql?jql=' + encodeURIComponent(jql) + '&fields=summary,status,priority,project,assignee,issuetype,parent&maxResults=150');
+    lblIssues = (d.issues||[]).map(i => ({
+      key: i.key,
+      summary: i.fields.summary,
+      status: i.fields.status?.name || '',
+      priority: i.fields.priority?.name || '',
+      project: i.fields.project?.key || '',
+      assignee: i.fields.assignee?.displayName || '',
+      type: i.fields.issuetype?.name || '',
+      parentKey: i.fields.parent?.key || ''
+    }));
+    lblApplyLocalOrder();
+  } catch(e){
+    lblIssues = [];
+    appLogMsg('warn','labels','Reload failed: ' + e.message);
+  }
+  lblLoading = false;
+  lblRenderBoard();
+}
+
+function lblApplyLocalOrder(){
+  try {
+    const saved = JSON.parse(localStorage.getItem('lbl-order:' + lblCurrentLabel) || '[]');
+    if (!saved.length) return;
+    const keyToIssue = new Map(lblIssues.map(i => [i.key, i]));
+    const ordered = [];
+    for (const k of saved){
+      if (keyToIssue.has(k)){ ordered.push(keyToIssue.get(k)); keyToIssue.delete(k); }
+    }
+    // Append issues not in saved order (newly arrived)
+    for (const i of keyToIssue.values()) ordered.push(i);
+    lblIssues = ordered;
+  } catch(e){}
+}
+
+function lblSaveLocalOrder(){
+  if (!lblCurrentLabel) return;
+  try { localStorage.setItem('lbl-order:' + lblCurrentLabel, JSON.stringify(lblIssues.map(i => i.key))); } catch(e){}
+}
+
+function lblRenderBoard(){
+  const board = document.getElementById('lbl-board');
+  const statsEl = document.getElementById('lbl-stats-text');
+  if (!board) return;
+
+  if (statsEl) statsEl.textContent = lblCurrentLabel
+    ? (lblLoading ? 'Loading…' : (lblIssues.length + (lblIssues.length === 1 ? ' issue' : ' issues')))
+    : '';
+
+  if (!lblCurrentLabel){
+    board.innerHTML = `<div class="lbl-empty-state">
+      <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="#C9CACC" stroke-width="1.5"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+      <div style="font-size:13px;font-weight:600;color:#5D7987;margin-bottom:4px">Pick a label to get started</div>
+      <div style="font-size:12px">Type into the search above. Your last label and filters are remembered between sessions.</div>
+    </div>`;
+    return;
+  }
+
+  if (lblLoading){
+    board.innerHTML = `<div class="lbl-empty-state">${spinHtml(20)}<div style="margin-top:10px">Fetching issues with label <b>${_escHtml(lblCurrentLabel)}</b>…</div></div>`;
+    return;
+  }
+
+  if (!lblIssues.length){
+    board.innerHTML = `<div class="lbl-empty-state">
+      <div style="font-size:28px;margin-bottom:8px;opacity:.4">∅</div>
+      <div style="font-size:13px;font-weight:600;color:#5D7987;margin-bottom:4px">No issues match these filters</div>
+      <div style="font-size:12px">Try clearing a filter, or pick a different label.</div>
+    </div>`;
+    return;
+  }
+
+  const rows = lblIssues.map((iss, idx) => {
+    const statusKey = (iss.status || 'Backlog').replace(/ /g, '-');
+    const priKey = (iss.priority || 'Medium').replace(/ /g, '-');
+    return `<div class="lbl-row" draggable="true"
+      ondragstart="lblOnDragStart(event,'${iss.key}')"
+      ondragend="lblOnDragEnd(event)"
+      ondragover="lblOnDragOver(event,'${iss.key}')"
+      ondragleave="lblOnDragLeave(event)"
+      ondrop="lblOnDrop(event,'${iss.key}')"
+      onclick="openIssueKey('${iss.key}')"
+      data-key="${iss.key}">
+      <span class="lbl-handle" title="Drag to reorder">⋮⋮</span>
+      <span class="lbl-rank">${idx + 1}</span>
+      <span class="lbl-key">${iss.key}</span>
+      <span class="lbl-summary">${_escHtml(iss.summary || '')}</span>
+      <div class="lbl-meta">
+        ${iss.assignee ? `<span class="lbl-assignee">${_escHtml(iss.assignee)}</span>` : '<span class="lbl-assignee" style="color:#9EA0A4;font-style:italic">Unassigned</span>'}
+        <span class="lbl-pill lbl-priority-${priKey}">${iss.priority || 'Medium'}</span>
+        <span class="lbl-pill lbl-status-${statusKey}">${iss.status || 'Backlog'}</span>
+      </div>
+    </div>`;
+  }).join('');
+  board.innerHTML = rows;
+}
+
+// Drag-drop handlers (HTML5 native)
+function lblOnDragStart(e, key){
+  e.dataTransfer.setData('text/plain', key);
+  e.dataTransfer.effectAllowed = 'move';
+  e.currentTarget.classList.add('dragging');
+}
+function lblOnDragEnd(e){
+  e.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('.lbl-row.drag-over').forEach(el => el.classList.remove('drag-over'));
+}
+function lblOnDragOver(e, targetKey){
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  // Visual: highlight target
+  e.currentTarget.classList.add('drag-over');
+}
+function lblOnDragLeave(e){
+  e.currentTarget.classList.remove('drag-over');
+}
+function lblOnDrop(e, targetKey){
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  const sourceKey = e.dataTransfer.getData('text/plain');
+  if (!sourceKey || sourceKey === targetKey) return;
+  const sourceIdx = lblIssues.findIndex(i => i.key === sourceKey);
+  const targetIdx = lblIssues.findIndex(i => i.key === targetKey);
+  if (sourceIdx < 0 || targetIdx < 0) return;
+  const [moved] = lblIssues.splice(sourceIdx, 1);
+  lblIssues.splice(targetIdx, 0, moved);
+  lblSaveLocalOrder();
+  lblRenderBoard();
+}
+
+// Try to open the issue detail pane (existing app function)
+function openIssueKey(key){
+  if (typeof openPane === 'function'){
+    const issue = (allIssues || []).find(i => i.key === key);
+    if (issue) { openPane(issue); return; }
+  }
+  // Fallback: open in Jira
+  window.open('https://loopup.atlassian.net/browse/' + key, '_blank');
+}
+
+async function renderLabels(){
+  // First entry: load session + fetch labels
+  lblLoadSession();
+  await lblFetchAllLabels();
+  lblPopulateProjectSelect();
+  if (lblCurrentLabel) await lblReload();
+  else lblRenderBoard();
 }
 
 // Legacy alias — older code may still call mtgUpdateTask
