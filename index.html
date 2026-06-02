@@ -418,6 +418,24 @@ button,select,textarea,input{font-family:inherit}
 .lbl-assignee{font-size:11px;color:#5D7987;white-space:nowrap}
 .lbl-stats{font-size:11px;color:#5D7987;margin-left:auto}
 
+/* ══ PANE LABELS v122 — chips on the issue detail card ══ */
+.pane-lbl-wrap{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.pane-lbl-chip{display:inline-flex;align-items:center;gap:5px;background:#E0F0F8;color:#125462;border:1px solid #7CB7DA;border-radius:14px;padding:3px 4px 3px 10px;font-size:11px;font-weight:700;line-height:1}
+.pane-lbl-chip .pane-lbl-x{background:transparent;border:none;color:#125462;cursor:pointer;font-size:13px;padding:1px 5px;border-radius:50%;line-height:1;opacity:.6}
+.pane-lbl-chip .pane-lbl-x:hover{opacity:1;background:#fff;color:#D6202B}
+.pane-lbl-chip.is-busy{opacity:.5;pointer-events:none}
+.pane-lbl-empty{color:#9EA0A4;font-size:12px;font-style:italic}
+.pane-lbl-addbtn{padding:3px 10px;border-radius:12px;border:1px dashed #C9CACC;background:#fff;color:#5D7987;font-size:11px;font-weight:700;cursor:pointer}
+.pane-lbl-addbtn:hover{border-color:#2E99CE;color:#125462;background:#E0F0F8}
+.pane-lbl-input-wrap{position:relative;display:inline-block}
+.pane-lbl-input{padding:3px 8px;border:1px solid #2E99CE;border-radius:6px;font-size:11px;font-family:inherit;outline:none;min-width:160px}
+.pane-lbl-pop{position:absolute;top:calc(100% + 4px);left:0;background:#fff;border:1px solid #C9CACC;border-radius:7px;box-shadow:0 4px 16px rgba(0,0,0,.12);min-width:200px;max-width:300px;max-height:260px;overflow-y:auto;z-index:60}
+.pane-lbl-pop-row{padding:6px 10px;font-size:12px;color:#292E37;cursor:pointer;border-bottom:1px solid #F7F8F9}
+.pane-lbl-pop-row:last-child{border-bottom:none}
+.pane-lbl-pop-row:hover{background:#E0F0F8;color:#125462}
+.pane-lbl-pop-row .pane-lbl-pop-new{color:#125462;font-weight:700}
+
+
 /* ══ MEETING INTAKE v117 — duplicate banner ══ */
 .mtg-dup-banner{display:flex;align-items:center;gap:10px;padding:8px 12px 8px 42px;background:#FFF8E0;border-bottom:1px solid #F0DC9A;font-size:12px;color:#854F0B}
 .mtg-dup-banner.is-closed{background:#EEF1F3;color:#5D7987;border-bottom-color:#D8DADE}
@@ -654,7 +672,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v121</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v122</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -1573,7 +1591,7 @@ function buildADFFromTextarea(textareaId) {
 
 
 
-function parseIssue(i){const f=i.fields;return{key:i.key,summary:f.summary||"",type:f.issuetype?.name||"Task",status:f.status?.name||"Backlog",assignee:f.assignee?.displayName||"Unassigned",assigneeEmail:f.assignee?.emailAddress||"",priority:f.priority?.name||"Medium",updated:(f.updated||"").slice(0,10),parent_key:f.parent?.key||null,parent_summary:f.parent?.fields?.summary||"",parent_type:f.parent?.fields?.issuetype?.name||"",description:extractText(f.description),descriptionHtml: f.description ? extractRichText(f.description, {maxLen: 4000}) : '',project:f.project?.key||i.key.split("-")[0],projectName:f.project?.name||"",subtasks:(f.subtasks||[]).map(s=>({key:s.key,summary:s.fields?.summary||"",status:s.fields?.status?.name||"",type:s.fields?.issuetype?.name||"Sub-task"})),epicLink:f.customfield_10014||null,commentCount:(f.comment?.total||0)};}
+function parseIssue(i){const f=i.fields;return{key:i.key,summary:f.summary||"",type:f.issuetype?.name||"Task",status:f.status?.name||"Backlog",assignee:f.assignee?.displayName||"Unassigned",assigneeEmail:f.assignee?.emailAddress||"",priority:f.priority?.name||"Medium",updated:(f.updated||"").slice(0,10),parent_key:f.parent?.key||null,parent_summary:f.parent?.fields?.summary||"",parent_type:f.parent?.fields?.issuetype?.name||"",description:extractText(f.description),descriptionHtml: f.description ? extractRichText(f.description, {maxLen: 4000}) : '',project:f.project?.key||i.key.split("-")[0],projectName:f.project?.name||"",subtasks:(f.subtasks||[]).map(s=>({key:s.key,summary:s.fields?.summary||"",status:s.fields?.status?.name||"",type:s.fields?.issuetype?.name||"Sub-task"})),epicLink:f.customfield_10014||null,commentCount:(f.comment?.total||0),labels:Array.isArray(f.labels)?f.labels.slice():[]};}
 
 async function fetchAllTeamIssues(){
   // v79: team list is auto-discovered from results — no more `assignee in (team)` pre-filter.
@@ -2799,7 +2817,7 @@ function openPane(key){
     document.getElementById("pane-hdr").innerHTML = `<div style="padding:14px;color:#fff;font-size:13px">${spinHtml(14,'#fff')} Loading ${key}…</div>`;
     document.getElementById("pane-body").innerHTML = '';
     document.getElementById("pane-tabs").innerHTML = '';
-    jiraGet('/rest/api/3/issue/'+key+'?fields=summary,status,assignee,priority,issuetype,updated,parent,description,project,subtasks,customfield_10014,comment').then(d=>{
+    jiraGet('/rest/api/3/issue/'+key+'?fields=summary,status,assignee,priority,issuetype,updated,parent,description,project,subtasks,customfield_10014,comment,labels').then(d=>{
       const parsed = parseIssue(d);
       openIssue = parsed; paneTab = 'main';
       renderPaneHdr(parsed); renderPaneTabs(); renderPaneMain();
@@ -3250,6 +3268,10 @@ async function renderPaneMain(){
         ${Object.keys(PC).map(p=>{const c=PC[p];return`<button class="edit-option" style="${i.priority===p?`border:2px solid ${c.d};background:${c.bg};color:${c.c}`:""}" onclick="doPanePriority('${p}')">${p}</button>`;}).join("")}
       </div>
     </div>
+    <div class="pane-section" id="pane-labels-section">
+      <div class="pane-section-title">Labels</div>
+      ${renderPaneLabels(i)}
+    </div>
     <div class="pane-section">
       <div class="pane-section-title" style="display:flex;align-items:center">
         <span style="flex:1">Description</span>
@@ -3593,6 +3615,155 @@ async function doPanePriority(val){
   if(currentView === 'prioritise'){
     setTimeout(()=>{ try { loadPriBoard(true); } catch{} }, 1800);
   }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   PANE LABELS (v122)
+   Render the issue's labels as removable chips on the detail pane,
+   plus an inline "Add" affordance with typeahead from the cached
+   label list (lblAllLabels from v120). Updates Jira atomically using
+   the `update` operations form so we don't race on concurrent edits.
+   ══════════════════════════════════════════════════════════════════ */
+
+function renderPaneLabels(issue){
+  const labels = Array.isArray(issue.labels) ? issue.labels : [];
+  const chips = labels.length
+    ? labels.map(l => `<span class="pane-lbl-chip" data-label="${_escHtml(l)}">${_escHtml(l)}<button class="pane-lbl-x" title="Remove" onclick="event.stopPropagation();paneRemoveLabel('${issue.key}','${(l||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')">✕</button></span>`).join('')
+    : '<span class="pane-lbl-empty">No labels yet.</span>';
+  return `<div class="pane-lbl-wrap" id="pane-lbl-wrap">
+    ${chips}
+    <span id="pane-lbl-addslot">
+      <button class="pane-lbl-addbtn" onclick="event.stopPropagation();paneOpenLabelInput('${issue.key}')">＋ Add label</button>
+    </span>
+  </div>`;
+}
+
+function paneOpenLabelInput(key){
+  const slot = document.getElementById('pane-lbl-addslot');
+  if (!slot) return;
+  // Ensure the label cache is populated (best effort; works without it too)
+  if (typeof lblFetchAllLabels === 'function') lblFetchAllLabels();
+  slot.innerHTML = `<span class="pane-lbl-input-wrap">
+    <input class="pane-lbl-input" id="pane-lbl-input" placeholder="Type a label…" autocomplete="off"
+      oninput="paneLabelInputChanged('${key}',this.value)"
+      onkeydown="if(event.key==='Enter'){event.preventDefault();paneCommitLabelFromInput('${key}',this.value)} else if(event.key==='Escape'){paneCancelLabelInput('${key}')}"
+      onblur="setTimeout(()=>paneCancelLabelInput('${key}'),200)">
+    <div class="pane-lbl-pop" id="pane-lbl-pop"></div>
+  </span>`;
+  setTimeout(() => { const inp = document.getElementById('pane-lbl-input'); if (inp) inp.focus(); }, 0);
+  paneLabelInputChanged(key, '');
+}
+
+function paneCancelLabelInput(key){
+  const slot = document.getElementById('pane-lbl-addslot');
+  if (slot) slot.innerHTML = `<button class="pane-lbl-addbtn" onclick="event.stopPropagation();paneOpenLabelInput('${key}')">＋ Add label</button>`;
+}
+
+function paneLabelInputChanged(key, val){
+  const pop = document.getElementById('pane-lbl-pop');
+  if (!pop) return;
+  const q = (val || '').trim();
+  const qLower = q.toLowerCase();
+  const cache = Array.isArray(lblAllLabels) ? lblAllLabels : [];
+  const current = (openIssue && Array.isArray(openIssue.labels)) ? openIssue.labels.map(l => l.toLowerCase()) : [];
+  const matches = (q
+    ? cache.filter(l => l.toLowerCase().includes(qLower))
+    : cache.slice()
+  ).filter(l => !current.includes(l.toLowerCase())).slice(0, 30);
+  const exactExists = q && cache.some(l => l.toLowerCase() === qLower);
+  const alreadyOnIssue = q && current.includes(qLower);
+  let html = '';
+  if (alreadyOnIssue){
+    html += `<div class="pane-lbl-pop-row" style="color:#9EA0A4;font-style:italic">"${_escHtml(q)}" is already on this issue</div>`;
+  } else if (q && !exactExists){
+    html += `<div class="pane-lbl-pop-row" onmousedown="paneAddLabel('${key}','${q.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><span class="pane-lbl-pop-new">＋ Create new label "${_escHtml(q)}"</span></div>`;
+  }
+  if (matches.length){
+    html += matches.map(l => `<div class="pane-lbl-pop-row" onmousedown="paneAddLabel('${key}','${l.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')">${_escHtml(l)}</div>`).join('');
+  } else if (!q){
+    html += '<div class="pane-lbl-pop-row" style="color:#9EA0A4;font-style:italic">Type to search labels…</div>';
+  }
+  pop.innerHTML = html;
+}
+
+function paneCommitLabelFromInput(key, val){
+  const v = (val || '').trim();
+  if (!v) { paneCancelLabelInput(key); return; }
+  paneAddLabel(key, v);
+}
+
+async function paneAddLabel(key, label){
+  if (!openIssue || openIssue.key !== key) return;
+  const clean = (label || '').trim();
+  if (!clean) return;
+  // Jira labels can't contain spaces — convert to hyphens just in case
+  const safe = clean.replace(/\s+/g, '-');
+  const current = Array.isArray(openIssue.labels) ? openIssue.labels.slice() : [];
+  if (current.some(l => l.toLowerCase() === safe.toLowerCase())) {
+    paneCancelLabelInput(key);
+    return;
+  }
+  // Optimistic update
+  openIssue.labels = current.concat([safe]);
+  _syncLabelsToAllIssues(key, openIssue.labels);
+  renderPaneMain();
+  try {
+    const r = await jiraPut('/rest/api/3/issue/' + key, { update: { labels: [{ add: safe }] } });
+    if (!r.ok) {
+      appLogMsg('warn', 'labels', 'Failed to add label "' + safe + '" to ' + key);
+      // Revert
+      openIssue.labels = current;
+      _syncLabelsToAllIssues(key, current);
+      renderPaneMain();
+      alert('Failed to add label. The change was reverted.');
+    } else {
+      // Refresh the cached label list so the new label is searchable everywhere
+      if (typeof lblAllLabels !== 'undefined' && !lblAllLabels.includes(safe)){
+        lblAllLabels.push(safe);
+        lblAllLabels.sort();
+      }
+    }
+  } catch (e) {
+    appLogMsg('warn', 'labels', 'Add label error: ' + e.message);
+    openIssue.labels = current;
+    _syncLabelsToAllIssues(key, current);
+    renderPaneMain();
+  }
+}
+
+async function paneRemoveLabel(key, label){
+  if (!openIssue || openIssue.key !== key) return;
+  const current = Array.isArray(openIssue.labels) ? openIssue.labels.slice() : [];
+  const idx = current.findIndex(l => l.toLowerCase() === (label || '').toLowerCase());
+  if (idx < 0) return;
+  const actual = current[idx];
+  // Optimistic update
+  const updated = current.slice(0, idx).concat(current.slice(idx + 1));
+  openIssue.labels = updated;
+  _syncLabelsToAllIssues(key, updated);
+  renderPaneMain();
+  try {
+    const r = await jiraPut('/rest/api/3/issue/' + key, { update: { labels: [{ remove: actual }] } });
+    if (!r.ok) {
+      appLogMsg('warn', 'labels', 'Failed to remove label "' + actual + '" from ' + key);
+      openIssue.labels = current;
+      _syncLabelsToAllIssues(key, current);
+      renderPaneMain();
+      alert('Failed to remove label. The change was reverted.');
+    }
+  } catch (e) {
+    appLogMsg('warn', 'labels', 'Remove label error: ' + e.message);
+    openIssue.labels = current;
+    _syncLabelsToAllIssues(key, current);
+    renderPaneMain();
+  }
+}
+
+function _syncLabelsToAllIssues(key, labels){
+  try {
+    const idx = (allIssues || []).findIndex(i => i.key === key);
+    if (idx >= 0) allIssues[idx] = { ...allIssues[idx], labels: labels.slice() };
+  } catch (e) {}
 }
 
 /* ══ v102: TITLE + DESCRIPTION EDITORS ═══════════════════════════════
