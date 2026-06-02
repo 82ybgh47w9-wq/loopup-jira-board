@@ -704,7 +704,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v134</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v135</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -8201,10 +8201,14 @@ async function msFetchAdhocFromChats(existingByJoinUrl, sinceIso){
         const chat = chats[cursor++];
         if (!chat) break;
         try {
-          // Pull recent messages from this chat — most-recent-first, top 30
-          const msgFilter = "createdDateTime ge " + sinceIso;
-          const msgData = await msGraphFetch('/me/chats/' + chat.id + '/messages?$top=30&$filter=' + encodeURIComponent(msgFilter));
-          const messages = msgData.value || [];
+          // Pull recent messages from this chat. v135: /me/chats/{id}/messages
+          // does NOT support $filter (returns 400). Fetch top 30 and filter
+          // client-side. Messages are returned newest-first by default.
+          const msgData = await msGraphFetch('/me/chats/' + chat.id + '/messages?$top=30');
+          const messages = (msgData.value || []).filter(m => {
+            const t = new Date(m.createdDateTime || 0).getTime();
+            return t >= new Date(sinceIso).getTime();
+          });
           // v133: track chats that had at least one call event for diagnostic
           let chatHadEvent = false;
 
@@ -8458,31 +8462,29 @@ async function msFetchMeetingChat(meetingObj){
     }
     if (!threadId) return null;
 
-    // 2) v128: Time-window the chat fetch to ±1 hour around the meeting.
+    // 2) Time-window the chat fetch to ±1 hour around the meeting.
     //    Critical for ad-hoc calls in long-running chat threads where the
     //    chat history could span years. We only want messages contextually
     //    related to this specific recording.
+    // v135: /me/chats/{id}/messages does NOT support $filter or $orderby
+    //    (returns 400). Fetch top 200 (newest-first by default) and
+    //    filter client-side to the time window.
     const WINDOW_MS = 60 * 60 * 1000; // 1 hour
     const startMs = meetingObj._startMs || Date.now();
     const endMs = meetingObj._endMs || startMs;
-    const winStart = new Date(startMs - WINDOW_MS).toISOString();
-    const winEnd = new Date(endMs + WINDOW_MS).toISOString();
-    // Note: chat-messages $filter on createdDateTime is supported via ge/le
-    const msgFilter = "createdDateTime ge " + winStart + " and createdDateTime le " + winEnd;
     const r = await fetch('https://graph.microsoft.com/v1.0/me/chats/' + encodeURIComponent(threadId) +
-                          '/messages?$top=200&$orderby=createdDateTime asc&$filter=' + encodeURIComponent(msgFilter), {
+                          '/messages?$top=200', {
       headers: { 'Authorization': 'Bearer ' + chatToken, 'Accept': 'application/json' }
     });
     if (!r.ok) {
-      // If filter is rejected by the tenant, fall back to top-100 with no filter
-      // (cap is still bounded by $top to avoid pulling years of history)
+      // Bounded smaller fallback (some tenants cap message reads)
       const r2 = await fetch('https://graph.microsoft.com/v1.0/me/chats/' + encodeURIComponent(threadId) +
-                             '/messages?$top=100&$orderby=createdDateTime desc', {
+                             '/messages?$top=50', {
         headers: { 'Authorization': 'Bearer ' + chatToken, 'Accept': 'application/json' }
       });
       if (!r2.ok) return null;
       const d2 = await r2.json();
-      // Filter client-side to the time window
+      // Filter client-side to the time window, sort oldest-first for readability
       const messages = (d2.value || []).filter(m => {
         const t = new Date(m.createdDateTime || 0).getTime();
         return t >= (startMs - WINDOW_MS) && t <= (endMs + WINDOW_MS);
@@ -8490,7 +8492,13 @@ async function msFetchMeetingChat(meetingObj){
       return msFormatChatMessages(messages);
     }
     const data = await r.json();
-    const messages = data.value || [];
+    // v135: client-side filter to the ±1hr window, then sort oldest-first
+    const messages = (data.value || [])
+      .filter(m => {
+        const t = new Date(m.createdDateTime || 0).getTime();
+        return t >= (startMs - WINDOW_MS) && t <= (endMs + WINDOW_MS);
+      })
+      .sort((a, b) => new Date(a.createdDateTime || 0) - new Date(b.createdDateTime || 0));
     if (!messages.length) return null;
     return msFormatChatMessages(messages);
   } catch(e){
