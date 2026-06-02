@@ -491,7 +491,28 @@ button,select,textarea,input{font-family:inherit}
 .mtg-detail-actions{display:flex;gap:8px;margin-top:8px}
 .mtg-list-empty{padding:40px 20px;text-align:center;color:#9EA0A4;font-size:12px}
 .mtg-attendee-chip{display:inline-block;font-size:10px;background:#EEF1F3;color:#5D7987;padding:2px 7px;border-radius:8px;margin:2px 3px 2px 0}
+
+/* ══ MS GRAPH SIGN-IN (v124) ══ */
+.ms-signin-panel{padding:40px 20px;text-align:center;max-width:340px;margin:0 auto}
+.ms-signin-panel h4{font-size:14px;font-weight:700;color:#125462;margin-bottom:8px}
+.ms-signin-panel p{font-size:12px;color:#5D7987;line-height:1.5;margin-bottom:18px}
+.ms-signin-btn{display:inline-flex;align-items:center;gap:10px;padding:10px 18px;background:#fff;border:1px solid #C9CACC;border-radius:6px;color:#292E37;cursor:pointer;font-size:13px;font-weight:600;text-decoration:none}
+.ms-signin-btn:hover{background:#F7F8F9;border-color:#5D7987}
+.ms-signin-btn svg{width:18px;height:18px;flex-shrink:0}
+.ms-account-bar{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#F7F8F9;border-bottom:1px solid #E4E6E8;font-size:11px;color:#5D7987}
+.ms-account-bar .ms-account-email{flex:1;font-weight:700;color:#125462;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ms-account-bar .ms-signout{color:#9EA0A4;cursor:pointer;text-decoration:underline;font-size:11px}
+.ms-account-bar .ms-signout:hover{color:#D6202B}
+.ms-error{background:#FCEBEB;border:1px solid #E89696;color:#A11820;padding:10px 12px;border-radius:6px;margin:10px 14px;font-size:12px;line-height:1.4}
+.ms-fetch-transcript{padding:8px 12px;border-radius:7px;border:1px solid #2E99CE;background:#E0F0F8;color:#125462;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.ms-fetch-transcript:hover:not(:disabled){background:#CFE5F1}
+.ms-fetch-transcript:disabled{opacity:.5;cursor:default}
+.ms-transcript-info{font-size:11px;color:#5D7987;margin:6px 0;font-style:italic}
 </style>
+<!-- v124: Microsoft Authentication Library (MSAL.js) for browser SPAs.
+     Used for OAuth2 + PKCE sign-in to Microsoft Graph. Required scopes
+     are granted via the LoopUp Meeting Task Extractor app registration. -->
+<script src="https://alcdn.msauth.net/browser/3.27.0/js/msal-browser.min.js"></script>
 </head>
 <body>
 
@@ -672,7 +693,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v123</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v124</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -7827,20 +7848,330 @@ function mtgFormatDate(dateStr){
   } catch(e){ return dateStr; }
 }
 
+/* ══════════════════════════════════════════════════════════════════
+   MICROSOFT GRAPH INTEGRATION (v124)
+   OAuth2 + PKCE via MSAL.js. Fetches live calendar events and Teams
+   meeting transcripts. Replaces the static MTG_REAL_MEETINGS snapshot.
+   ══════════════════════════════════════════════════════════════════ */
+
+const MS_CLIENT_ID = '422e01ef-e107-49a7-8c7b-4e04ce772bad';
+const MS_TENANT_ID = '2e905e36-dc9a-4abd-b156-82dffe6b3944';
+const MS_REDIRECT_URI = window.location.origin + window.location.pathname;
+const MS_SCOPES = ['User.Read', 'Calendars.Read', 'OnlineMeetings.Read', 'OnlineMeetingTranscript.Read.All'];
+
+let msalInstance = null;
+let msalReady = null;        // a Promise that resolves once init + redirect-handling is done
+let msAccount = null;        // active signed-in account, if any
+let msSignedIn = false;
+let msMeetings = [];         // live meetings cache
+let msMeetingsFetchedAt = 0;
+let msAuthError = null;      // last auth/graph error message
+
+function msInit(){
+  if (msalReady) return msalReady;
+  msalReady = (async () => {
+    if (typeof msal === 'undefined' || !msal.PublicClientApplication){
+      throw new Error('MSAL library not loaded');
+    }
+    msalInstance = new msal.PublicClientApplication({
+      auth: {
+        clientId: MS_CLIENT_ID,
+        authority: 'https://login.microsoftonline.com/' + MS_TENANT_ID,
+        redirectUri: MS_REDIRECT_URI
+      },
+      cache: {
+        cacheLocation: 'sessionStorage',
+        storeAuthStateInCookie: false
+      }
+    });
+    await msalInstance.initialize();
+    // Handle redirect response on page load (no-op if popup flow was used)
+    try { await msalInstance.handleRedirectPromise(); } catch(e) {}
+    // Restore existing account from cache, if any
+    const accounts = msalInstance.getAllAccounts();
+    if (accounts.length){
+      msAccount = accounts[0];
+      msalInstance.setActiveAccount(msAccount);
+      msSignedIn = true;
+    }
+  })();
+  return msalReady;
+}
+
+async function msSignIn(){
+  await msInit();
+  msAuthError = null;
+  try {
+    const result = await msalInstance.loginPopup({
+      scopes: MS_SCOPES,
+      prompt: 'select_account'
+    });
+    msAccount = result.account;
+    msalInstance.setActiveAccount(result.account);
+    msSignedIn = true;
+    appLogMsg('info', 'graph', 'Signed in as ' + (result.account?.username || 'unknown'));
+    renderMtgInputArea();
+    // Auto-load meetings once signed in
+    msLoadMeetings();
+  } catch(e){
+    msAuthError = e.message || String(e);
+    appLogMsg('warn', 'graph', 'Sign-in failed: ' + msAuthError);
+    renderMtgInputArea();
+  }
+}
+
+async function msSignOut(){
+  if (!msalInstance) return;
+  try {
+    await msalInstance.logoutPopup({ account: msAccount });
+  } catch(e) { /* user closed popup — that's fine */ }
+  msAccount = null;
+  msSignedIn = false;
+  msMeetings = [];
+  renderMtgInputArea();
+}
+
+async function msAcquireToken(){
+  await msInit();
+  const acc = msalInstance.getActiveAccount();
+  if (!acc) throw new Error('Not signed in');
+  try {
+    const result = await msalInstance.acquireTokenSilent({ account: acc, scopes: MS_SCOPES });
+    return result.accessToken;
+  } catch(e) {
+    // Silent failed — fall back to popup
+    const result = await msalInstance.acquireTokenPopup({ scopes: MS_SCOPES });
+    return result.accessToken;
+  }
+}
+
+async function msGraphFetch(path, opts){
+  const token = await msAcquireToken();
+  const url = path.startsWith('http') ? path : ('https://graph.microsoft.com/v1.0' + path);
+  const r = await fetch(url, {
+    method: (opts && opts.method) || 'GET',
+    headers: Object.assign({ 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' }, (opts && opts.headers) || {}),
+    body: (opts && opts.body) || undefined
+  });
+  if (!r.ok){
+    const text = await r.text().catch(() => '');
+    throw new Error('Graph ' + r.status + ': ' + text.slice(0, 200));
+  }
+  // /content endpoints return non-JSON
+  if (opts && opts.asText) return await r.text();
+  return await r.json();
+}
+
+async function msLoadMeetings(force){
+  if (!msSignedIn) return;
+  // Cache for 60s unless force-refreshed
+  if (!force && msMeetings.length && (Date.now() - msMeetingsFetchedAt) < 60_000) return;
+  try {
+    const since = new Date();
+    since.setDate(since.getDate() - 14);
+    const startStr = since.toISOString();
+    const endStr = new Date().toISOString();
+    // Use $filter for date range + online-meeting flag
+    const filter = "start/dateTime ge '" + startStr + "' and start/dateTime le '" + endStr + "' and isOnlineMeeting eq true";
+    const select = 'id,subject,start,end,organizer,attendees,onlineMeeting,webLink,isOrganizer,isCancelled';
+    const path = '/me/events?$filter=' + encodeURIComponent(filter) +
+                 '&$top=100&$orderby=start/dateTime desc&$select=' + encodeURIComponent(select);
+    const data = await msGraphFetch(path);
+    const events = (data.value || []).filter(e => !e.isCancelled);
+    msMeetings = events.map(e => ({
+      id: 'm_' + e.id,
+      _msEventId: e.id,
+      _joinUrl: e.onlineMeeting?.joinUrl || '',
+      _webLink: e.webLink || '',
+      title: e.subject || '(no subject)',
+      date: (e.start?.dateTime || '').slice(0, 10),
+      start: (e.start?.dateTime || '').slice(11, 16),
+      end: (e.end?.dateTime || '').slice(11, 16),
+      organizer: e.organizer?.emailAddress?.name || e.organizer?.emailAddress?.address || 'Unknown',
+      isOrganizer: !!e.isOrganizer,
+      attendees: (e.attendees || []).map(a => a.emailAddress?.name || a.emailAddress?.address).filter(Boolean)
+    }));
+    msMeetingsFetchedAt = Date.now();
+    appLogMsg('info', 'graph', 'Loaded ' + msMeetings.length + ' meetings from Graph');
+    msAuthError = null;
+    renderMtgInputArea();
+  } catch(e){
+    msAuthError = 'Failed to load meetings: ' + (e.message || e);
+    appLogMsg('warn', 'graph', msAuthError);
+    renderMtgInputArea();
+  }
+}
+
+// Fetch the transcript for a meeting. Two-step: find onlineMeeting by joinUrl,
+// then list transcripts, then download the VTT content.
+async function msFetchTranscript(meetingObj){
+  if (!meetingObj || !meetingObj._joinUrl) throw new Error('This meeting has no Teams join URL — transcript unavailable.');
+  // Step 1: find the online meeting
+  const filterEncoded = encodeURIComponent("joinWebUrl eq '" + meetingObj._joinUrl + "'");
+  const lookup = await msGraphFetch('/me/onlineMeetings?$filter=' + filterEncoded);
+  const onlineMeeting = (lookup.value || [])[0];
+  if (!onlineMeeting) throw new Error('No online meeting record found in Graph. The meeting may not have been recorded.');
+  // Step 2: list transcripts
+  const list = await msGraphFetch('/me/onlineMeetings/' + onlineMeeting.id + '/transcripts');
+  const transcripts = list.value || [];
+  if (!transcripts.length) throw new Error('No transcript exists for this meeting (it may not have been recorded with transcription enabled).');
+  // Use the most recent transcript
+  const transcript = transcripts.sort((a,b) => (b.createdDateTime||'').localeCompare(a.createdDateTime||''))[0];
+  // Step 3: download VTT content
+  const token = await msAcquireToken();
+  const vttUrl = 'https://graph.microsoft.com/v1.0/me/onlineMeetings/' + onlineMeeting.id +
+                 '/transcripts/' + transcript.id + '/content?$format=text/vtt';
+  const r = await fetch(vttUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'text/vtt' } });
+  if (!r.ok) throw new Error('Failed to download transcript: ' + r.status);
+  const vtt = await r.text();
+  return msParseVTT(vtt);
+}
+
+// Parse WebVTT format to readable plain text. Teams transcripts include
+// speaker names via <v Speaker Name>...</v> tags. Group consecutive lines
+// from the same speaker into paragraphs prefixed by the speaker name.
+function msParseVTT(vtt){
+  const lines = (vtt || '').split(/\r?\n/);
+  const out = [];
+  let lastSpeaker = '';
+  for (const raw of lines){
+    const line = raw.trim();
+    if (!line) continue;
+    if (/^WEBVTT/i.test(line)) continue;
+    if (/^\d{2}:\d{2}:\d{2}/.test(line)) continue;  // timestamp lines
+    if (/^[a-f0-9]{8}-[a-f0-9]{4}/.test(line)) continue;  // UUID cue identifiers
+    if (/^NOTE\s/.test(line)) continue;
+    if (/^STYLE/.test(line)) continue;
+    // Speaker tag: <v Speaker Name>text</v>
+    const m = line.match(/<v\s+([^>]+)>(.*?)(?:<\/v>)?\s*$/);
+    if (m){
+      const speaker = m[1].trim();
+      const text = m[2].trim();
+      if (speaker !== lastSpeaker){
+        if (out.length) out.push('');
+        out.push(speaker + ':');
+        lastSpeaker = speaker;
+      }
+      if (text) out.push(text);
+      continue;
+    }
+    // Plain line (no speaker tag) — append
+    out.push(line);
+  }
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+// Called when user clicks the "Fetch transcript" button on a meeting card
+// v124: Optionally fetch chat messages for a Teams meeting. Chat.Read isn't
+// part of the initial sign-in scopes — it's requested separately and silently.
+// If the admin hasn't added/consented to Chat.Read, this returns null and
+// chat is skipped. Once the permission is granted in the app registration,
+// chat content starts appearing automatically with no client changes.
+async function msTryAcquireChatToken(){
+  if (!msalInstance) return null;
+  const acc = msalInstance.getActiveAccount();
+  if (!acc) return null;
+  try {
+    const result = await msalInstance.acquireTokenSilent({ account: acc, scopes: ['Chat.Read'] });
+    return result.accessToken;
+  } catch(e) {
+    return null; // not consented — caller decides what to do (we skip silently)
+  }
+}
+
+async function msFetchMeetingChat(meetingObj){
+  if (!meetingObj || !meetingObj._joinUrl) return null;
+  const chatToken = await msTryAcquireChatToken();
+  if (!chatToken) return null;
+  try {
+    // 1) Find the online meeting to get the chatInfo.threadId
+    const filterEncoded = encodeURIComponent("joinWebUrl eq '" + meetingObj._joinUrl + "'");
+    const lookup = await msGraphFetch('/me/onlineMeetings?$filter=' + filterEncoded);
+    const onlineMeeting = (lookup.value || [])[0];
+    const threadId = onlineMeeting?.chatInfo?.threadId;
+    if (!threadId) return null;
+    // 2) Fetch messages from that chat (use the chat-scoped token)
+    const r = await fetch('https://graph.microsoft.com/v1.0/me/chats/' + encodeURIComponent(threadId) +
+                          '/messages?$top=100&$orderby=createdDateTime asc', {
+      headers: { 'Authorization': 'Bearer ' + chatToken, 'Accept': 'application/json' }
+    });
+    if (!r.ok) return null;
+    const data = await r.json();
+    const messages = data.value || [];
+    if (!messages.length) return null;
+    // 3) Format as a readable log
+    const out = ['--- Meeting chat ---'];
+    for (const m of messages){
+      if (m.messageType && m.messageType !== 'message') continue; // skip system messages
+      const ts = m.createdDateTime ? m.createdDateTime.slice(11, 16) : '';
+      const from = m.from?.user?.displayName ||
+                   m.from?.application?.displayName ||
+                   'Unknown';
+      const raw = m.body?.content || '';
+      const text = raw.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+      if (!text) continue;
+      out.push((ts ? '['+ts+'] ' : '') + from + ': ' + text);
+    }
+    return out.length > 1 ? out.join('\n') : null;
+  } catch(e){
+    appLogMsg('warn', 'graph', 'Chat fetch failed: ' + (e.message || e));
+    return null;
+  }
+}
+
+async function msFetchTranscriptIntoPaste(meetingId){
+  const m = msMeetings.find(x => x.id === meetingId);
+  if (!m) return;
+  const ta = document.getElementById('mtg-detail-paste');
+  if (ta) {
+    ta.value = '';
+    ta.placeholder = 'Fetching transcript via Microsoft Graph…';
+    ta.disabled = true;
+  }
+  const btn = document.getElementById('ms-fetch-transcript-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = spinHtml(12, '#125462') + ' Fetching transcript…'; }
+  try {
+    const text = await msFetchTranscript(m);
+    // Try to enrich with chat — graceful no-op if Chat.Read not granted
+    if (btn) btn.innerHTML = spinHtml(12, '#125462') + ' Fetching chat messages…';
+    const chatLog = await msFetchMeetingChat(m);
+    const combined = chatLog ? (text + '\n\n' + chatLog) : text;
+    if (ta) {
+      ta.value = combined;
+      ta.disabled = false;
+    }
+    if (btn) {
+      btn.innerHTML = chatLog
+        ? '✓ Transcript + chat loaded — review and click Extract Tasks'
+        : '✓ Transcript loaded — review and click Extract Tasks';
+    }
+  } catch(e){
+    if (ta) {
+      ta.disabled = false;
+      ta.placeholder = 'Paste the meeting transcript here…';
+    }
+    if (btn) { btn.disabled = false; btn.innerHTML = '↻ Try again'; }
+    alert('Could not fetch transcript:\n\n' + (e.message || e) + '\n\nYou can still paste the transcript manually.');
+  }
+}
+
 function mtgRenderMeetingList(){
+  // v124: data source is now live msMeetings (from Microsoft Graph).
+  // Falls back to the static MTG_REAL_MEETINGS snapshot if no live data yet.
+  const source = (msMeetings && msMeetings.length) ? msMeetings : MTG_REAL_MEETINGS;
   // Filter by search query (title or attendee name)
   const q = (mtgListFilter || '').toLowerCase().trim();
   const filtered = q
-    ? MTG_REAL_MEETINGS.filter(m =>
+    ? source.filter(m =>
         m.title.toLowerCase().includes(q) ||
         m.organizer.toLowerCase().includes(q) ||
         m.attendees.some(a => a.toLowerCase().includes(q))
       )
-    : MTG_REAL_MEETINGS;
+    : source;
 
   if(!filtered.length){
     return `<input class="mtg-list-search" placeholder="Search meetings, organizer, or attendee…" value="${_escHtml(mtgListFilter)}" oninput="mtgListFilter=this.value;document.getElementById('mtg-input-area').innerHTML=mtgRenderMeetingList()">
-      <div class="mtg-list-empty">No meetings match "${_escHtml(q)}"</div>`;
+      <div class="mtg-list-empty">${msSignedIn && msMeetings.length === 0 ? `${spinHtml(14)} Loading meetings from Microsoft 365…` : `No meetings match "${_escHtml(q)}"`}</div>`;
   }
 
   // Group by date
@@ -7899,10 +8230,20 @@ function mtgRenderDetailPanel(m, proc){
       <div style="margin-top:4px"><span class="lbl">Attendees</span> ${attendeeChips}</div>
     </div>
     ${procBlock}
-    <div style="font-size:11px;color:#5D7987;margin:8px 0 4px">
-      <b>Paste transcript</b> — Teams transcripts will auto-fetch in Phase 2b once OAuth is wired up. For now, paste the transcript content here:
-    </div>
-    <textarea class="mtg-detail-paste" id="mtg-detail-paste" placeholder="Paste the Teams transcript here. Copy from Teams → past meeting ··· menu → Get recap → transcript section.">${proc ? '' : ''}</textarea>
+    ${(msSignedIn && m._joinUrl) ? `
+      <div style="font-size:11px;color:#5D7987;margin:8px 0 6px">
+        <b>Transcript</b> — fetch via Microsoft Graph, or paste manually below:
+      </div>
+      <button class="ms-fetch-transcript" id="ms-fetch-transcript-btn" onclick="msFetchTranscriptIntoPaste('${m.id}')">
+        ⚡ Fetch transcript from Teams
+      </button>
+      <div class="ms-transcript-info">Pulls the meeting transcript (and chat messages if available). May fail if the meeting wasn't recorded with transcription enabled.</div>
+    ` : `
+      <div style="font-size:11px;color:#5D7987;margin:8px 0 4px">
+        <b>Paste transcript</b> below${msSignedIn ? ' (this meeting has no Teams join URL — auto-fetch unavailable)' : ' — or sign in with Microsoft to auto-fetch'}:
+      </div>
+    `}
+    <textarea class="mtg-detail-paste" id="mtg-detail-paste" placeholder="Paste the Teams transcript here. Copy from Teams → past meeting ··· menu → Get recap → transcript section." style="margin-top:8px"></textarea>
     <div class="mtg-detail-actions">
       <button class="mtg-extract-btn" onclick="mtgExtractFromList('${m.id}')" style="flex:1;margin-top:0">⚡ Extract Tasks from this meeting</button>
       <button onclick="mtgSelectMeeting('${m.id}')" style="padding:10px 14px;border-radius:7px;border:1px solid #C9CACC;background:#fff;color:#5D7987;cursor:pointer;font-size:12px">Cancel</button>
@@ -8029,12 +8370,38 @@ function renderMtgInputArea() {
         Tip: In Teams, click ••• on a past meeting → Get recap → Copy transcript
       </div>`;
   } else {
-    // v114: Auto-fetch — currently using a static snapshot of the user's
-    // real last-14-days meetings (baked at Cowork build time via Microsoft
-    // Graph access). Will swap for live OAuth/Graph fetch in Phase 2b.
-    area.innerHTML = mtgRenderMeetingList();
-    // Load processed status from Cloudflare KV on first render
-    mtgLoadProcessedStatus();
+    // v124: Auto-fetch — live Microsoft Graph integration.
+    // - Not signed in: show "Sign in with Microsoft" button
+    // - Signed in: show account bar, fetch meetings from Graph, render list
+    msInit().then(() => {
+      if (!msSignedIn) {
+        area.innerHTML = `<div class="ms-signin-panel">
+          <h4>Connect Microsoft 365</h4>
+          <p>Sign in with your LoopUp account to load your last 14 days of Teams meetings. Transcripts and chat are fetched on-demand when you pick a meeting.</p>
+          <button class="ms-signin-btn" onclick="msSignIn()">
+            <svg viewBox="0 0 23 23" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="10" height="10" fill="#F25022"/><rect x="12" y="1" width="10" height="10" fill="#7FBA00"/><rect x="1" y="12" width="10" height="10" fill="#00A4EF"/><rect x="12" y="12" width="10" height="10" fill="#FFB900"/></svg>
+            Sign in with Microsoft
+          </button>
+          ${msAuthError ? `<div class="ms-error" style="margin-top:14px">${_escHtml(msAuthError)}</div>` : ''}
+        </div>`;
+      } else {
+        // Show account bar + meeting list
+        const acctEmail = (msAccount && (msAccount.username || msAccount.name)) || 'signed in';
+        area.innerHTML = `<div class="ms-account-bar">
+          <span style="font-size:11px;color:#5D7987">Microsoft 365</span>
+          <span class="ms-account-email">${_escHtml(acctEmail)}</span>
+          <a class="ms-signout" onclick="msSignOut()">Sign out</a>
+        </div>
+        ${msAuthError ? `<div class="ms-error">${_escHtml(msAuthError)}</div>` : ''}
+        <div id="ms-meeting-list-host">${mtgRenderMeetingList()}</div>`;
+        // Kick off the meetings fetch (cached for 60s)
+        msLoadMeetings();
+      }
+      // Load processed status from Cloudflare KV either way
+      mtgLoadProcessedStatus();
+    }).catch(e => {
+      area.innerHTML = `<div class="ms-error">Microsoft sign-in unavailable: ${_escHtml(e.message || e)}</div>`;
+    });
   }
 }
 
