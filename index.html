@@ -696,7 +696,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v131</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v132</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -8132,9 +8132,22 @@ async function msLoadMeetings(force){
       });
     }
 
+    // ── Source C (v132): scan chat threads for recordings of calls the
+    //     user joined but didn't organise (e.g. someone else started the
+    //     call from a group chat). Requires Chat.Read (now granted). ──
+    let chatDiscovered = [];
+    try {
+      chatDiscovered = await msFetchAdhocFromChats(byJoinUrl, since.toISOString());
+      for (const m of chatDiscovered){
+        if (!byJoinUrl.has(m._joinUrl)) byJoinUrl.set(m._joinUrl, m);
+      }
+    } catch(e){
+      appLogMsg('warn', 'graph', 'Chat scan failed (continuing): ' + (e.message || e));
+    }
+
     msMeetings = [...byJoinUrl.values()].sort((a, b) => (b._startMs || 0) - (a._startMs || 0));
     msMeetingsFetchedAt = Date.now();
-    appLogMsg('info', 'graph', 'Loaded ' + msMeetings.length + ' meetings (calendar: ' + events.length + ', ad-hoc organized: ' + organized.length + ')');
+    appLogMsg('info', 'graph', 'Loaded ' + msMeetings.length + ' meetings (calendar: ' + events.length + ', organised ad-hoc: ' + organized.length + ', chat-discovered: ' + chatDiscovered.length + ')');
     msAuthError = null;
     msScanTranscripts();
     renderMtgInputArea();
@@ -8143,6 +8156,116 @@ async function msLoadMeetings(force){
     appLogMsg('warn', 'graph', msAuthError);
     renderMtgInputArea();
   }
+}
+
+// v132: discover calls the user joined but didn't organise — by scanning
+// the user's recent chats for callRecordingEventMessageDetail system events.
+// Returns an array of meeting objects (same shape as the main fetch).
+async function msFetchAdhocFromChats(existingByJoinUrl, sinceIso){
+  const found = [];
+
+  // Step 1: list recently-active chats. lastUpdatedDateTime filter avoids
+  // pulling years of stale chats.
+  let chats = [];
+  try {
+    const filter = "lastUpdatedDateTime ge " + sinceIso;
+    const data = await msGraphFetch('/me/chats?$top=50&$filter=' + encodeURIComponent(filter) + '&$orderby=lastUpdatedDateTime desc');
+    chats = data.value || [];
+  } catch(e){
+    appLogMsg('warn', 'graph', 'List chats failed: ' + (e.message || e));
+    return found;
+  }
+  if (!chats.length) return found;
+
+  // Step 2: scan each chat for recording event messages. Concurrency-limited
+  // so we don't trip Graph throttling.
+  const seenCallIds = new Set();
+  const CONCURRENCY = 4;
+  let cursor = 0;
+  const workers = [];
+
+  for (let w = 0; w < CONCURRENCY; w++){
+    workers.push((async () => {
+      while (cursor < chats.length){
+        const chat = chats[cursor++];
+        if (!chat) break;
+        try {
+          // Pull recent messages from this chat — most-recent-first, top 30
+          const msgFilter = "createdDateTime ge " + sinceIso;
+          const msgData = await msGraphFetch('/me/chats/' + chat.id + '/messages?$top=30&$filter=' + encodeURIComponent(msgFilter));
+          const messages = msgData.value || [];
+
+          // Look for system event messages that announce a recording
+          for (const msg of messages){
+            const event = msg.eventDetail;
+            if (!event) continue;
+            const type = event['@odata.type'] || '';
+            // We care about recording events specifically (proves a
+            // transcript may exist). Could also catch callTranscript events.
+            if (!/callRecording/i.test(type)) continue;
+
+            const callId = event.callId;
+            if (!callId || seenCallIds.has(callId)) continue;
+            seenCallIds.add(callId);
+
+            // Step 3: try to resolve the callId to an onlineMeeting. This
+            // works when the user was a participant.
+            let om = null;
+            try {
+              om = await msGraphFetch('/me/onlineMeetings/' + callId);
+            } catch(e){
+              // Some Graph tenants reject this for non-organiser users.
+              // We still surface the meeting using event data alone.
+            }
+
+            const joinUrl = om?.joinWebUrl || ('chatcall://' + chat.id + '/' + callId);
+            if (existingByJoinUrl.has(joinUrl)) continue;
+
+            const initiatorName = event.initiator?.user?.displayName ||
+                                  event.meetingOrganizer?.user?.displayName ||
+                                  'Unknown';
+            const recordingDuration = event.callRecordingDuration || '';
+            const startIso = msg.createdDateTime || '';
+            // Parse PT20M47S → end = start + duration
+            let endMs = new Date(startIso || 0).getTime();
+            const durMatch = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?$/.exec(recordingDuration);
+            if (durMatch){
+              const hrs = parseFloat(durMatch[1] || '0');
+              const mins = parseFloat(durMatch[2] || '0');
+              const secs = parseFloat(durMatch[3] || '0');
+              endMs += (hrs*3600 + mins*60 + secs) * 1000;
+            }
+
+            found.push({
+              id: msMeetingFingerprint(joinUrl),
+              _source: 'chat',
+              _msEventId: null,
+              _joinUrl: joinUrl,
+              _webLink: '',
+              _chatThreadId: chat.id,
+              title: om?.subject || event.callRecordingDisplayName || ('Call in ' + (chat.topic || 'chat')),
+              date: msDateLocal(startIso),
+              start: msTimeLocal(startIso),
+              end: msTimeLocal(new Date(endMs).toISOString()),
+              _startMs: new Date(startIso || 0).getTime(),
+              _endMs: endMs,
+              organizer: initiatorName,
+              isOrganizer: false,
+              attendees: om
+                ? (om.participants?.attendees || []).map(a => a.identity?.user?.displayName).filter(Boolean)
+                : [],
+              transcriptStatus: om ? 'unknown' : 'has', // we have a recording event → transcript likely exists
+              _omId: om?.id || null
+            });
+          }
+        } catch(e){
+          // skip this chat
+        }
+      }
+    })());
+  }
+  await Promise.all(workers);
+  return found;
 }
 
 // Fetch the transcript for a meeting. Two-step: find onlineMeeting by joinUrl,
@@ -8511,13 +8634,21 @@ function mtgRenderMeetingList(){
       } else if (m.transcriptStatus === 'error'){
         transcriptPill = `<span class="mtg-status-pill" style="background:#FCEBEB;color:#A11820" title="Scan failed for this meeting">scan ✗</span>`;
       }
+      // v132: source badge — calendar / organised ad-hoc / chat-discovered
+      let sourcePill = '';
+      if (m._source === 'chat'){
+        sourcePill = `<span class="mtg-status-pill" style="background:#F3EEFF;color:#6B3FA0" title="Discovered via chat thread (you weren't the organiser)">💬 From chat</span>`;
+      } else if (m._source === 'onlineMeeting'){
+        sourcePill = `<span class="mtg-status-pill" style="background:#FFF8E0;color:#854F0B" title="Ad-hoc call you organised (no calendar entry)">🎙️ Ad-hoc</span>`;
+      }
+      // (calendar source needs no badge — it's the default expected source)
       html += `<div class="mtg-row ${selected?'selected':''} ${proc?'is-processed':''}" onclick="mtgSelectMeeting('${m.id}')">
         <div class="mtg-row-time">${m.start}</div>
         <div class="mtg-row-content">
           <div class="mtg-row-title">${_escHtml(m.title)}</div>
           <div class="mtg-row-meta">${_escHtml(m.organizer)} · ${m.attendees.length} attendee${m.attendees.length===1?'':'s'}</div>
         </div>
-        <div class="mtg-row-status">${transcriptPill}${primaryPill}</div>
+        <div class="mtg-row-status">${sourcePill}${transcriptPill}${primaryPill}</div>
       </div>`;
       if(selected){
         html += mtgRenderDetailPanel(m, proc);
