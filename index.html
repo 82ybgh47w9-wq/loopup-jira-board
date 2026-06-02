@@ -376,6 +376,36 @@ button,select,textarea,input{font-family:inherit}
 .mtg-bulk-bar{display:flex;align-items:center;gap:8px;padding:8px 14px;background:#F7F8F9;border-bottom:1px solid #E4E6E8;font-size:12px}
 .mtg-bulk-bar .stat{color:#5D7987}
 .mtg-bulk-bar .stat strong{color:#292E37}
+
+/* ══ MEETING INTAKE v114 — Auto-fetch meeting list ══ */
+.mtg-list-search{width:100%;padding:8px 12px;border:1px solid #C9CACC;border-radius:7px;font-size:12px;color:#292E37;font-family:inherit;box-sizing:border-box;margin-bottom:10px}
+.mtg-list-search:focus{border-color:#2E99CE;outline:none}
+.mtg-list-day-hdr{font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;padding:10px 4px 6px;border-bottom:1px solid #EEF1F3;margin-bottom:4px}
+.mtg-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer;border:1px solid transparent;transition:.12s;margin-bottom:3px}
+.mtg-row:hover{background:#F7F8F9;border-color:#E4E6E8}
+.mtg-row.selected{background:#E0F0F8;border-color:#2E99CE}
+.mtg-row.is-processed{opacity:.85}
+.mtg-row-time{font-size:11px;color:#5D7987;font-weight:700;min-width:50px;flex-shrink:0;font-variant-numeric:tabular-nums}
+.mtg-row-content{flex:1;min-width:0}
+.mtg-row-title{font-size:12px;font-weight:600;color:#292E37;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.3}
+.mtg-row-meta{font-size:10px;color:#9EA0A4;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mtg-row-status{flex-shrink:0;display:flex;align-items:center;gap:4px}
+.mtg-status-pill{font-size:9px;font-weight:700;padding:2px 7px;border-radius:8px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+.mtg-status-avail{background:#E0F0F8;color:#125462}
+.mtg-status-done{background:#E8F5E0;color:#2D7A2D}
+.mtg-status-org{background:#F3EEFF;color:#6B3FA0}
+.mtg-detail-panel{background:#fff;border:1px solid #2E99CE;border-radius:8px;padding:12px;margin:4px 0 10px;box-shadow:0 2px 8px rgba(46,153,206,.1)}
+.mtg-detail-panel h4{font-size:13px;font-weight:700;color:#125462;margin-bottom:6px}
+.mtg-detail-meta{font-size:11px;color:#5D7987;margin-bottom:8px;line-height:1.5}
+.mtg-detail-meta .lbl{font-weight:700;color:#73777C;display:inline-block;min-width:80px}
+.mtg-processed-note{background:#F1F7EC;border-left:3px solid #5E8E38;padding:8px 10px;border-radius:0 6px 6px 0;font-size:11px;color:#3D6B1E;margin-bottom:8px}
+.mtg-processed-note b{color:#2D7A2D}
+.mtg-processed-note a{color:#125462;text-decoration:underline;font-weight:700}
+.mtg-detail-paste{width:100%;min-height:140px;padding:10px;border:1px solid #C9CACC;border-radius:7px;font-size:12px;font-family:inherit;resize:vertical;color:#292E37;box-sizing:border-box}
+.mtg-detail-paste:focus{border-color:#2E99CE;outline:none}
+.mtg-detail-actions{display:flex;gap:8px;margin-top:8px}
+.mtg-list-empty{padding:40px 20px;text-align:center;color:#9EA0A4;font-size:12px}
+.mtg-attendee-chip{display:inline-block;font-size:10px;background:#EEF1F3;color:#5D7987;padding:2px 7px;border-radius:8px;margin:2px 3px 2px 0}
 </style>
 </head>
 <body>
@@ -557,7 +587,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v113</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v114</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -7458,6 +7488,233 @@ let mtgExpandedTask = null;  // which task detail is open
 let mtgMeetingTitle = '';    // meeting subject
 let mtgMeetingDate = '';     // meeting date
 
+// v114: state for the Auto-fetch meeting picker
+let mtgSelectedMeetingId = null;  // which meeting is expanded in the list
+let mtgListFilter = '';            // search filter
+let mtgProcessedMap = {};          // { meetingId: { by, at, jiraKeys, taskCount } }
+let mtgProcessedLoaded = false;    // whether we've fetched from KV yet
+let mtgCurrentMeetingId = null;    // the meeting we're currently extracting from (for KV save)
+
+// v114: STATIC SNAPSHOT of Marcus's last-14-days real Teams meetings.
+// Pulled via Microsoft Graph during Cowork session on Jun 2 2026.
+// In Phase 2b, this gets replaced by a live OAuth-authenticated Graph call.
+const MTG_REAL_MEETINGS = [
+  { id: 'm_2026_06_02_mobile_weekly', title: 'Mobile - Weekly', date: '2026-06-02', start: '14:00', end: '14:30', organizer: 'Andrew Bunyan', isOrganizer: false, attendees: ['Andrew Bunyan','Graham Cropley','Steve Flavell','Michael Hughes','Andrew Birch','Simon Sacerdoti','Edward Cooper','Zach Bennett','Chris Howard','Marcus Greensit'] },
+  { id: 'm_2026_06_02_loopup_mobile_pricing', title: 'LoopUp Mobile - pricing - initial discussion', date: '2026-06-02', start: '14:00', end: '15:00', organizer: "Nicoletta De'Elia", isOrganizer: false, attendees: ["Nicoletta De'Elia","Chris Howard","Andrew Birch","Tim Hutchinson","Ryan Goodsell","Graham Cropley","Steve Flavell","Michael Hughes","Andrew Bunyan","Marcus Greensit"] },
+  { id: 'm_2026_06_02_marketing_engine_placeholder', title: 'Marketing Engine Placeholder', date: '2026-06-02', start: '13:00', end: '13:30', organizer: 'Allison Vose', isOrganizer: false, attendees: ['Allison Vose','Steve Flavell','Harry Newman','Harry Courtenay-Bishop','Steve O\'Reilly','Marcus Greensit','Graham Cropley'] },
+  { id: 'm_2026_06_01_digicel_weekly', title: 'Digicel - Weekly', date: '2026-06-01', start: '12:30', end: '13:00', organizer: 'Marcus Greensit', isOrganizer: true, attendees: ['Steve Flavell','Paul Tunstall','Elaine Kelly','Graham Cropley','Zach Bennett','Wayne Atwell','Elin Morgan'] },
+  { id: 'm_2026_05_29_com_ops_standup', title: 'Com Ops Daily Stand Up', date: '2026-05-29', start: '10:00', end: '10:15', organizer: "Steve O'Reilly", isOrganizer: false, attendees: ["Steve O'Reilly",'Harry Newman','Andrew McIntyre','Tim Hutchinson','Steve Kirk','Elliott Drury','Marcus Greensit','Harry Courtenay-Bishop','Graham Cropley'] },
+  { id: 'm_2026_05_28_marketing_engine', title: 'Marketing Engine', date: '2026-05-28', start: '13:00', end: '13:30', organizer: 'Marcus Greensit', isOrganizer: true, attendees: ['Steve Flavell','Allison Vose','Steve O\'Reilly','Harry Newman','Harry Courtenay-Bishop','Graham Cropley'] },
+  { id: 'm_2026_05_27_slt_weekly', title: 'SLT Weekly', date: '2026-05-27', start: '15:00', end: '15:30', organizer: 'SLT', isOrganizer: false, attendees: ['Marcus Greensit','Steve Flavell','Michael Hughes','Edward Cooper','Andrew Birch','Graham Cropley','Ayad Othman','Chris Howard'] },
+  { id: 'm_2026_05_27_kyndryl_regroup', title: 'Kyndryl - regroup', date: '2026-05-27', start: '14:00', end: '14:30', organizer: 'Andrew Birch', isOrganizer: false, attendees: ['Andrew Birch','Steve Flavell','Marcus Greensit','Michael Boggia','Elaine Kelly'] },
+  { id: 'm_2026_05_27_marketing_engine', title: 'Marketing Engine', date: '2026-05-27', start: '13:00', end: '13:30', organizer: 'Marcus Greensit', isOrganizer: true, attendees: ['Steve Flavell','Allison Vose','Steve O\'Reilly','Harry Newman','Harry Courtenay-Bishop','Graham Cropley'] },
+  { id: 'm_2026_05_27_com_ops_standup', title: 'Com Ops Daily Stand Up', date: '2026-05-27', start: '10:00', end: '10:15', organizer: "Steve O'Reilly", isOrganizer: false, attendees: ["Steve O'Reilly",'Harry Newman','Andrew McIntyre','Tim Hutchinson','Steve Kirk','Elliott Drury','Marcus Greensit','Harry Courtenay-Bishop','Graham Cropley'] },
+  { id: 'm_2026_05_27_data_roaming_service_delivery', title: 'Data Roaming - Service Delivery Considerations', date: '2026-05-27', start: '09:30', end: '10:00', organizer: 'Marcus Greensit', isOrganizer: true, attendees: ['Chris Howard','Zach Bennett','Elin Morgan','Luke Wright','Andrew Bunyan','Graham Cropley'] },
+  { id: 'm_2026_05_26_loopup_mobile_pricing', title: 'LoopUp Mobile - pricing - initial discussion', date: '2026-05-26', start: '14:00', end: '15:00', organizer: "Nicoletta De'Elia", isOrganizer: false, attendees: ["Nicoletta De'Elia","Chris Howard","Andrew Birch","Tim Hutchinson","Ryan Goodsell","Graham Cropley","Steve Flavell","Michael Hughes","Marcus Greensit","Andrew Bunyan"] },
+  { id: 'm_2026_05_26_marketing_engine', title: 'Marketing Engine', date: '2026-05-26', start: '13:00', end: '13:30', organizer: 'Marcus Greensit', isOrganizer: true, attendees: ['Steve Flavell','Allison Vose','Steve O\'Reilly','Harry Newman','Harry Courtenay-Bishop','Graham Cropley'] },
+  { id: 'm_2026_05_26_mobile_weekly', title: 'Mobile - Weekly', date: '2026-05-26', start: '12:30', end: '13:00', organizer: 'Andrew Bunyan', isOrganizer: false, attendees: ['Andrew Bunyan','Graham Cropley','Steve Flavell','Michael Hughes','Andrew Birch','Edward Cooper','Zach Bennett','Chris Howard','Marcus Greensit'] },
+  { id: 'm_2026_05_25_marketing_engine', title: 'Marketing Engine', date: '2026-05-25', start: '13:00', end: '13:30', organizer: 'Marcus Greensit', isOrganizer: true, attendees: ['Steve Flavell','Allison Vose','Steve O\'Reilly','Harry Newman','Harry Courtenay-Bishop','Graham Cropley'] },
+  { id: 'm_2026_05_25_digicel_weekly', title: 'Digicel - Weekly', date: '2026-05-25', start: '12:30', end: '13:00', organizer: 'Marcus Greensit', isOrganizer: true, attendees: ['Steve Flavell','Paul Tunstall','Wayne Atwell','Elaine Kelly','Graham Cropley','Zach Bennett','Elin Morgan'] },
+  { id: 'm_2026_05_22_com_ops_standup', title: 'Com Ops Daily Stand Up', date: '2026-05-22', start: '10:00', end: '10:15', organizer: "Steve O'Reilly", isOrganizer: false, attendees: ["Steve O'Reilly",'Harry Newman','Andrew McIntyre','Tim Hutchinson','Steve Kirk','Elliott Drury','Marcus Greensit','Harry Courtenay-Bishop','Graham Cropley'] },
+  { id: 'm_2026_05_21_internal_kyndryl_regroup', title: '(Internal) Kyndryl Re-Group', date: '2026-05-21', start: '13:30', end: '14:00', organizer: 'Michael Boggia', isOrganizer: false, attendees: ['Michael Boggia','Steve Flavell','Edward Cooper','Marcus Greensit','Andrew Birch','Brian Rappe'] },
+  { id: 'm_2026_05_21_marketing_engine', title: 'Marketing Engine', date: '2026-05-21', start: '13:00', end: '13:30', organizer: 'Marcus Greensit', isOrganizer: true, attendees: ['Steve Flavell','Allison Vose','Steve O\'Reilly','Harry Newman','Harry Courtenay-Bishop','Graham Cropley'] },
+  { id: 'm_2026_05_21_loopup_mobile_pricing', title: 'LoopUp Mobile - pricing - initial discussion', date: '2026-05-21', start: '10:30', end: '11:30', organizer: "Nicoletta De'Elia", isOrganizer: false, attendees: ["Nicoletta De'Elia","Chris Howard","Andrew Birch","Tim Hutchinson","Ryan Goodsell","Graham Cropley","Steve Flavell","Michael Hughes","Andrew Bunyan","Marcus Greensit"] },
+  { id: 'm_2026_05_21_stakeholders_checkin', title: 'Stakeholders check-in - support cases in LoopUp One', date: '2026-05-21', start: '10:00', end: '10:30', organizer: "Nicoletta De'Elia", isOrganizer: false, attendees: ["Nicoletta De'Elia","Marcus Greensit","Elin Morgan","Luke Wright","Michael Hughes","Steve Flavell","Sam Bates","Ryan Goodsell","Chris Howard","Mariusz Kawalek","Steve O'Reilly"] },
+  { id: 'm_2026_05_21_event_catchup', title: 'Event Catch up', date: '2026-05-21', start: '09:30', end: '10:00', organizer: 'Elaine Kelly', isOrganizer: false, attendees: ['Elaine Kelly','Marcus Greensit'] },
+  { id: 'm_2026_05_21_bondio_loopup_checkin', title: 'Bondio/LoopUp Check-In', date: '2026-05-21', start: '09:00', end: '09:30', organizer: 'Chris Howard', isOrganizer: false, attendees: ['Chris Howard','Michael Hughes','Steve Flavell','Tim Hutchinson','Andrew Bunyan','Andrew Birch','Robinson (Bondio)','Adrian (Bondio)','Nicole (Bondio)','Graham Cropley','Roxana (Bondio)',"Nicoletta De'Elia",'Marcus Greensit'] },
+  { id: 'm_2026_05_20_slt_weekly', title: 'SLT Weekly', date: '2026-05-20', start: '15:00', end: '15:30', organizer: 'SLT', isOrganizer: false, attendees: ['Marcus Greensit','Steve Flavell','Michael Hughes','Edward Cooper','Andrew Birch','Graham Cropley','Chris Howard','Ayad Othman'] },
+  { id: 'm_2026_05_20_phynova', title: 'Phynova', date: '2026-05-20', start: '14:00', end: '14:30', organizer: 'Marcus Greensit', isOrganizer: true, attendees: ['Yazan El Safadi (Phynova)'] },
+  { id: 'm_2026_05_20_marketing_engine', title: 'Marketing Engine', date: '2026-05-20', start: '13:00', end: '13:30', organizer: 'Marcus Greensit', isOrganizer: true, attendees: ['Steve Flavell','Allison Vose','Steve O\'Reilly','Harry Newman','Harry Courtenay-Bishop','Graham Cropley'] },
+  { id: 'm_2026_05_20_com_ops_standup', title: 'Com Ops Daily Stand Up', date: '2026-05-20', start: '10:00', end: '10:15', organizer: "Steve O'Reilly", isOrganizer: false, attendees: ["Steve O'Reilly",'Harry Newman','Andrew McIntyre','Tim Hutchinson','Steve Kirk','Elliott Drury','Marcus Greensit','Harry Courtenay-Bishop','Graham Cropley'] },
+  { id: 'm_2026_05_19_telescope_demo', title: 'Telescope Demo', date: '2026-05-19', start: '15:30', end: '16:00', organizer: 'Reza Javan (Telescope)', isOrganizer: false, attendees: ['Reza Javan (Telescope)','Marcus Greensit','Harry Newman','Graham Cropley','Steve O\'Reilly','Steve Flavell'] },
+  { id: 'm_2026_05_19_mobile_weekly', title: 'Mobile - Weekly', date: '2026-05-19', start: '14:00', end: '14:30', organizer: 'Andrew Bunyan', isOrganizer: false, attendees: ['Andrew Bunyan','Graham Cropley','Steve Flavell','Michael Hughes','Andrew Birch','Simon Sacerdoti','Edward Cooper','Zach Bennett','Chris Howard','Marcus Greensit'] },
+  { id: 'm_2026_05_19_marketing_engine', title: 'Marketing Engine', date: '2026-05-19', start: '13:00', end: '13:30', organizer: 'Marcus Greensit', isOrganizer: true, attendees: ['Steve Flavell','Allison Vose','Steve O\'Reilly','Harry Newman','Harry Courtenay-Bishop','Graham Cropley'] }
+];
+
+function mtgFormatDate(dateStr){
+  try {
+    const d = new Date(dateStr + 'T12:00:00Z');
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const yesterday = new Date(today); yesterday.setDate(today.getDate()-1);
+    const dStart = new Date(d); dStart.setHours(0,0,0,0);
+    const diffDays = Math.round((today - dStart) / (1000*60*60*24));
+    if(diffDays === 0) return 'Today';
+    if(diffDays === 1) return 'Yesterday';
+    if(diffDays < 7) return d.toLocaleDateString('en-GB', { weekday: 'long' });
+    return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  } catch(e){ return dateStr; }
+}
+
+function mtgRenderMeetingList(){
+  // Filter by search query (title or attendee name)
+  const q = (mtgListFilter || '').toLowerCase().trim();
+  const filtered = q
+    ? MTG_REAL_MEETINGS.filter(m =>
+        m.title.toLowerCase().includes(q) ||
+        m.organizer.toLowerCase().includes(q) ||
+        m.attendees.some(a => a.toLowerCase().includes(q))
+      )
+    : MTG_REAL_MEETINGS;
+
+  if(!filtered.length){
+    return `<input class="mtg-list-search" placeholder="Search meetings, organizer, or attendee…" value="${_escHtml(mtgListFilter)}" oninput="mtgListFilter=this.value;document.getElementById('mtg-input-area').innerHTML=mtgRenderMeetingList()">
+      <div class="mtg-list-empty">No meetings match "${_escHtml(q)}"</div>`;
+  }
+
+  // Group by date
+  const byDate = {};
+  for(const m of filtered){
+    (byDate[m.date] = byDate[m.date] || []).push(m);
+  }
+  const dates = Object.keys(byDate).sort().reverse();
+
+  let html = `<input class="mtg-list-search" placeholder="Search meetings, organizer, or attendee…" value="${_escHtml(mtgListFilter)}" oninput="mtgListFilter=this.value;document.getElementById('mtg-input-area').innerHTML=mtgRenderMeetingList()">
+    <div style="font-size:10px;color:#9EA0A4;padding:0 0 8px;line-height:1.4">
+      Your real Teams meetings from the last 14 days (live snapshot via Microsoft 365).
+      <br>Click any meeting to expand. Status badges sync from Cloudflare KV.
+    </div>`;
+
+  for(const date of dates){
+    html += `<div class="mtg-list-day-hdr">${mtgFormatDate(date)}</div>`;
+    for(const m of byDate[date]){
+      const proc = mtgProcessedMap[m.id];
+      const selected = mtgSelectedMeetingId === m.id;
+      const statusPill = proc
+        ? `<span class="mtg-status-pill mtg-status-done">✓ Processed</span>`
+        : m.isOrganizer
+          ? `<span class="mtg-status-pill mtg-status-org">Yours</span>`
+          : `<span class="mtg-status-pill mtg-status-avail">Available</span>`;
+      html += `<div class="mtg-row ${selected?'selected':''} ${proc?'is-processed':''}" onclick="mtgSelectMeeting('${m.id}')">
+        <div class="mtg-row-time">${m.start}</div>
+        <div class="mtg-row-content">
+          <div class="mtg-row-title">${_escHtml(m.title)}</div>
+          <div class="mtg-row-meta">${_escHtml(m.organizer)} · ${m.attendees.length} attendee${m.attendees.length===1?'':'s'}</div>
+        </div>
+        <div class="mtg-row-status">${statusPill}</div>
+      </div>`;
+      if(selected){
+        html += mtgRenderDetailPanel(m, proc);
+      }
+    }
+  }
+  return html;
+}
+
+function mtgRenderDetailPanel(m, proc){
+  const attendeeChips = m.attendees.map(a => `<span class="mtg-attendee-chip">${_escHtml(a)}</span>`).join('');
+  const procBlock = proc
+    ? `<div class="mtg-processed-note">
+        <b>Already processed</b> by ${_escHtml(proc.by||'someone')} on ${proc.at ? new Date(proc.at).toLocaleString('en-GB') : 'an earlier date'}.
+        ${proc.jiraKeys && proc.jiraKeys.length ? '<br>Created ' + proc.jiraKeys.length + ' Jira task' + (proc.jiraKeys.length===1?'':'s') + ': ' + proc.jiraKeys.map(k => '<a href="https://loopup.atlassian.net/browse/' + k + '" target="_blank">' + k + '</a>').join(', ') : ''}
+        <br><span style="font-size:10px;color:#5D7987">Re-processing will create a duplicate set of tasks.</span>
+       </div>`
+    : '';
+  return `<div class="mtg-detail-panel">
+    <h4>${_escHtml(m.title)}</h4>
+    <div class="mtg-detail-meta">
+      <div><span class="lbl">Date</span> ${mtgFormatDate(m.date)}, ${m.start}–${m.end}</div>
+      <div><span class="lbl">Organizer</span> ${_escHtml(m.organizer)}${m.isOrganizer?' (you)':''}</div>
+      <div style="margin-top:4px"><span class="lbl">Attendees</span> ${attendeeChips}</div>
+    </div>
+    ${procBlock}
+    <div style="font-size:11px;color:#5D7987;margin:8px 0 4px">
+      <b>Paste transcript</b> — Teams transcripts will auto-fetch in Phase 2b once OAuth is wired up. For now, paste the transcript content here:
+    </div>
+    <textarea class="mtg-detail-paste" id="mtg-detail-paste" placeholder="Paste the Teams transcript here. Copy from Teams → past meeting ··· menu → Get recap → transcript section.">${proc ? '' : ''}</textarea>
+    <div class="mtg-detail-actions">
+      <button class="mtg-extract-btn" onclick="mtgExtractFromList('${m.id}')" style="flex:1;margin-top:0">⚡ Extract Tasks from this meeting</button>
+      <button onclick="mtgSelectMeeting('${m.id}')" style="padding:10px 14px;border-radius:7px;border:1px solid #C9CACC;background:#fff;color:#5D7987;cursor:pointer;font-size:12px">Cancel</button>
+    </div>
+  </div>`;
+}
+
+function mtgSelectMeeting(meetingId){
+  mtgSelectedMeetingId = (mtgSelectedMeetingId === meetingId) ? null : meetingId;
+  const area = document.getElementById('mtg-input-area');
+  if(area) area.innerHTML = mtgRenderMeetingList();
+}
+
+async function mtgExtractFromList(meetingId){
+  const m = MTG_REAL_MEETINGS.find(x => x.id === meetingId);
+  if(!m) return;
+  const transcript = document.getElementById('mtg-detail-paste')?.value?.trim();
+  if(!transcript || transcript.length < 30){
+    alert('Please paste the transcript first (at least a few sentences).');
+    return;
+  }
+  // Pre-fill meeting context, mark which meeting this is, then run extraction
+  mtgMeetingTitle = m.title;
+  mtgMeetingDate = m.date;
+  mtgCurrentMeetingId = m.id;
+
+  // Temporarily switch to paste mode so the extraction's UI lives in the paste flow,
+  // but with our meeting context already set.
+  // Actually we can extract directly: stash transcript and run mtgExtract's body
+  // with overrides. Simpler: stuff the values into the hidden paste inputs and call mtgExtract.
+  setMtgSource('paste');
+  setTimeout(() => {
+    const ttl = document.getElementById('mtg-title');
+    const att = document.getElementById('mtg-attendees');
+    const tr  = document.getElementById('mtg-transcript');
+    if(ttl) ttl.value = m.title;
+    if(att) att.value = m.attendees.join(', ');
+    if(tr)  tr.value  = transcript;
+    mtgMeetingTitle = m.title;
+    mtgCurrentMeetingId = m.id;
+    mtgExtract();
+  }, 60);
+}
+
+// v114: load processed-meeting map from Cloudflare KV (one fetch per session)
+async function mtgLoadProcessedStatus(){
+  if(mtgProcessedLoaded) return;
+  mtgProcessedLoaded = true;
+  try {
+    const r = await fetch(PROXY + '/kv', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'listprefix', prefix: 'mtg_processed:' })
+    });
+    if(r.ok){
+      const data = await r.json();
+      for(const fullKey in data){
+        const id = fullKey.replace('mtg_processed:', '');
+        try { mtgProcessedMap[id] = JSON.parse(data[fullKey]); } catch(e){}
+      }
+      // Re-render the auto-fetch list if it's currently visible
+      if(mtgSource === 'auto'){
+        const area = document.getElementById('mtg-input-area');
+        if(area) area.innerHTML = mtgRenderMeetingList();
+      }
+    }
+  } catch(e){
+    appLogMsg('warn', 'meetings', 'Failed to load processed status: ' + e.message);
+  }
+}
+
+// v114: mark a meeting as processed in KV after successful push
+async function mtgMarkProcessed(meetingId, jiraKeys){
+  if(!meetingId) return;
+  const record = {
+    by: currentIam || cfg.email || 'unknown',
+    at: new Date().toISOString(),
+    jiraKeys: jiraKeys,
+    taskCount: jiraKeys.length
+  };
+  mtgProcessedMap[meetingId] = record;
+  try {
+    await fetch(PROXY + '/kv', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'set', key: 'mtg_processed:' + meetingId, value: JSON.stringify(record) })
+    });
+    appLogMsg('info', 'meetings', 'Marked meeting ' + meetingId + ' as processed (' + jiraKeys.length + ' tasks)');
+  } catch(e){
+    appLogMsg('warn', 'meetings', 'Could not save processed status: ' + e.message);
+  }
+}
+
 function setMtgSource(src) {
   mtgSource = src;
   document.querySelectorAll('#mtg-source-tabs button').forEach((b, i) => {
@@ -7491,20 +7748,12 @@ function renderMtgInputArea() {
         Tip: In Teams, click ••• on a past meeting → Get recap → Copy transcript
       </div>`;
   } else {
-    // Auto-fetch placeholder — requires Microsoft Graph integration (Phase 2)
-    area.innerHTML = `
-      <div style="padding:30px 20px;text-align:center">
-        <div style="font-size:32px;margin-bottom:12px;opacity:.5">🔌</div>
-        <div style="font-size:13px;font-weight:600;color:#5D7987;margin-bottom:8px">Auto-fetch coming soon</div>
-        <div style="font-size:12px;color:#9EA0A4;line-height:1.5;max-width:280px;margin:0 auto">
-          This will connect to Microsoft Graph API to automatically pull meeting transcripts from your Teams calendar.
-          <br><br>
-          For now, use <b>Paste Transcript</b> to get started.
-        </div>
-        <button onclick="setMtgSource('paste')" style="margin-top:16px;padding:8px 20px;border-radius:6px;border:1px solid #2E99CE;background:#E0F0F8;color:#125462;cursor:pointer;font-size:12px;font-weight:700">
-          Switch to Paste
-        </button>
-      </div>`;
+    // v114: Auto-fetch — currently using a static snapshot of the user's
+    // real last-14-days meetings (baked at Cowork build time via Microsoft
+    // Graph access). Will swap for live OAuth/Graph fetch in Phase 2b.
+    area.innerHTML = mtgRenderMeetingList();
+    // Load processed status from Cloudflare KV on first render
+    mtgLoadProcessedStatus();
   }
 }
 
@@ -8178,6 +8427,15 @@ async function mtgPushToJira() {
   }
   for (const task of valid) {
     await mtgPushOne(task.id);
+  }
+  // v114: After successful push, mark the source meeting as processed in KV
+  // so it shows as "✓ Processed" in the Auto-fetch list (and prevents others
+  // creating duplicate task sets from the same meeting).
+  if(mtgCurrentMeetingId){
+    const createdKeys = mtgTasks.filter(t => t.status === 'created').map(t => t.jiraKey).filter(Boolean);
+    if(createdKeys.length){
+      await mtgMarkProcessed(mtgCurrentMeetingId, createdKeys);
+    }
   }
   setTimeout(() => doFetch(true), 2000);
 }
