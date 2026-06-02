@@ -391,6 +391,17 @@ button,select,textarea,input{font-family:inherit}
 .mtg-view-existing:hover{background:#F7F8F9;color:#125462}
 .mtg-status-chip{display:inline-block;font-size:9px;font-weight:700;padding:2px 7px;border-radius:8px;text-transform:uppercase;letter-spacing:.04em;margin-left:6px}
 .mtg-card2.is-linked{border-left:3px solid #2E99CE;background:#FAFCFE}
+/* v119: ignored task — compact, dimmed, strikethrough; pills/detail hidden */
+.mtg-card2.is-ignored{border-left:3px solid #C9CACC;background:#FAFAFB;opacity:.65}
+.mtg-card2.is-ignored .mtg-card2-summary{text-decoration:line-through;color:#9EA0A4}
+.mtg-card2.is-ignored .mtg-fields,
+.mtg-card2.is-ignored .mtg-validate-bar,
+.mtg-card2.is-ignored .mtg-detail2,
+.mtg-card2.is-ignored .mtg-dup-banner{display:none}
+.mtg-ignore-btn{padding:5px 8px;border-radius:6px;border:1px solid transparent;background:transparent;color:#9EA0A4;cursor:pointer;font-size:14px;line-height:1}
+.mtg-ignore-btn:hover{background:#FCEBEB;color:#D6202B;border-color:#E89696}
+.mtg-restore-btn{padding:4px 10px;border-radius:6px;border:1px solid #C9CACC;background:#fff;color:#5D7987;font-size:11px;font-weight:700;cursor:pointer}
+.mtg-restore-btn:hover{background:#F7F8F9;color:#125462;border-color:#125462}
 
 /* ══ MEETING INTAKE v114 — Auto-fetch meeting list ══ */
 .mtg-list-search{width:100%;padding:8px 12px;border:1px solid #C9CACC;border-radius:7px;font-size:12px;color:#292E37;font-family:inherit;box-sizing:border-box;margin-bottom:10px}
@@ -602,7 +613,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v118</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v119</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -8511,11 +8522,13 @@ function renderMtgStaging(state, errorMsg) {
   }
   const createdCount = mtgTasks.filter(t => t.status === 'created').length;
   const linkedCount = mtgTasks.filter(t => t.status === 'linked').length;
+  const ignoredCount = mtgTasks.filter(t => t.status === 'ignored').length;
 
   if (titleEl) titleEl.textContent = mtgMeetingTitle || 'Staging Area';
   if (countEl) {
     const parts = [`${mtgTasks.length} tasks`, `${createdCount} created`];
     if (linkedCount) parts.push(`${linkedCount} linked`);
+    if (ignoredCount) parts.push(`${ignoredCount} ignored`);
     parts.push(`${validCount} ready`);
     countEl.textContent = parts.join(' · ');
   }
@@ -8648,6 +8661,7 @@ function renderMtgStaging(state, errorMsg) {
     let klass = 'mtg-card2';
     if (task.status === 'created') klass += ' is-created';
     else if (task.status === 'linked') klass += ' is-linked';
+    else if (task.status === 'ignored') klass += ' is-ignored';
     else if (task.status === 'creating') klass += ' is-creating';
     else if (task.status === 'error') klass += ' is-error';
     else if (task.duplicate && !task.duplicate.isClosed) klass += ' is-dupe';
@@ -8685,10 +8699,12 @@ function renderMtgStaging(state, errorMsg) {
         <div class="mtg-card2-actions">
           ${task.status === 'created' ? `<span style="font-size:11px;font-weight:700;color:#2D7A2D">✓ ${task.jiraKey || 'Created'}</span>` : ''}
           ${task.status === 'linked' ? `<span style="font-size:11px;font-weight:700;color:#125462">↳ Linked to ${task.linkedTo}</span>` : ''}
+          ${task.status === 'ignored' ? `<span style="font-size:11px;font-weight:700;color:#9EA0A4">✕ Ignored</span><button class="mtg-restore-btn" onclick="event.stopPropagation();mtgRestoreTask('${task.id}')" title="Restore this task to pending">Restore</button>` : ''}
           ${task.status === 'creating' ? `<span style="font-size:11px;color:#2E99CE;display:flex;align-items:center;gap:4px">${spinHtml(12, '#2E99CE')} Working…</span>` : ''}
           ${task.status === 'error' ? `<span style="font-size:11px;font-weight:700;color:#D6202B">✗ Failed</span>` : ''}
           ${task.status === 'pending' ? `<button class="mtg-push-one" onclick="event.stopPropagation();mtgPushOne('${task.id}')" ${canPush ? '' : 'disabled'} title="${canPush ? 'Push this task to Jira' : 'Missing required: ' + missing.join(', ')}">⊕ Push</button>` : ''}
-          <button class="mtg-exp-btn ${task.expanded ? 'open' : ''}" onclick="event.stopPropagation();mtgToggleExpandCard('${task.id}')" title="${task.expanded ? 'Collapse' : 'Expand details'}">▾</button>
+          ${task.status === 'pending' ? `<button class="mtg-ignore-btn" onclick="event.stopPropagation();mtgIgnoreTask('${task.id}')" title="Ignore this task — don't create in Jira">✕</button>` : ''}
+          ${task.status !== 'ignored' ? `<button class="mtg-exp-btn ${task.expanded ? 'open' : ''}" onclick="event.stopPropagation();mtgToggleExpandCard('${task.id}')" title="${task.expanded ? 'Collapse' : 'Expand details'}">▾</button>` : ''}
         </div>
       </div>
       ${dupBanner}
@@ -8740,6 +8756,31 @@ function renderMtgStaging(state, errorMsg) {
 function mtgToggleInclude(id) {
   const t = mtgTasks.find(t => t.id === id);
   if (t) { t.included = !t.included; renderMtgStaging('ready'); }
+}
+
+// v119: explicit "ignore this task" — different from unchecking. Sets a
+// distinct status so the card renders compact + greyed + struck through.
+// Skipped by all push flows and excluded from validation counts.
+function mtgIgnoreTask(id) {
+  const t = mtgTasks.find(t => t.id === id);
+  if (!t) return;
+  // Remember previous state so Restore can put it back
+  t._preIgnoreStatus = t.status;
+  t._preIgnoreIncluded = t.included;
+  t.status = 'ignored';
+  t.included = false;
+  t.expanded = false;
+  renderMtgStaging('ready');
+}
+
+function mtgRestoreTask(id) {
+  const t = mtgTasks.find(t => t.id === id);
+  if (!t) return;
+  t.status = t._preIgnoreStatus || 'pending';
+  t.included = (t._preIgnoreIncluded !== undefined) ? t._preIgnoreIncluded : true;
+  delete t._preIgnoreStatus;
+  delete t._preIgnoreIncluded;
+  renderMtgStaging('ready');
 }
 
 // Legacy alias — older code may still call mtgUpdateTask
