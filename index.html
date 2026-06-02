@@ -587,7 +587,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v114</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v115</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -8071,6 +8071,72 @@ function mtgPickEpic(taskId, epicKey, epicSummary){
   renderMtgStaging('ready');
 }
 
+// v115: Pick a Legend. Cascades downward: clears Initiative + Epic if they
+// don't belong under this new Legend.
+function mtgPickLegend(taskId, legKey, legSummary){
+  const t = mtgTasks.find(x => x.id === taskId); if(!t) return;
+  t.legendKey = legKey;
+  t.legendSummary = legSummary;
+  // If we have an Initiative whose parent is no longer this Legend, clear it
+  if(t.initiativeKey){
+    const init = allIssues.find(i => i.key === t.initiativeKey);
+    if(!init || (legKey && init.parent_key !== legKey)){
+      t.initiativeKey = ''; t.initiativeSummary = '';
+      // Cascading clear: also clear Epic since Initiative is gone
+      t.epicKey = ''; t.epicSummary = '';
+    }
+  }
+  mtgOpenPicker = null;
+  renderMtgStaging('ready');
+}
+
+// v115: Pick an Initiative. Auto-fills Legend (parent). Clears Epic if it's
+// no longer under this Initiative.
+function mtgPickInitiative(taskId, initKey, initSummary){
+  const t = mtgTasks.find(x => x.id === taskId); if(!t) return;
+  t.initiativeKey = initKey;
+  t.initiativeSummary = initSummary;
+  // Auto-fill Legend from parent
+  if(initKey){
+    const init = allIssues.find(i => i.key === initKey);
+    if(init && init.parent_key){
+      const leg = allIssues.find(i => i.key === init.parent_key);
+      if(leg && leg.type === 'Legend'){
+        t.legendKey = leg.key;
+        t.legendSummary = leg.summary;
+      }
+    }
+  }
+  // Clear Epic if it doesn't belong to this Initiative
+  if(t.epicKey){
+    const ep = allIssues.find(i => i.key === t.epicKey);
+    if(!ep || (initKey && ep.parent_key !== initKey)){
+      t.epicKey = ''; t.epicSummary = '';
+    }
+  }
+  mtgOpenPicker = null;
+  renderMtgStaging('ready');
+}
+
+// v115: Open the existing Create modal to add a new Legend / Initiative /
+// Epic / Milestone. Pre-fills the issue type and project where possible.
+function mtgOpenCreateAtLevel(taskId, level){
+  const t = mtgTasks.find(x => x.id === taskId);
+  if(typeof openCreate === 'function'){
+    openCreate(currentIam || '');
+    // After openCreate sets up createState, override the type/project
+    setTimeout(() => {
+      if(typeof createState !== 'undefined' && createState){
+        createState.issueType = level;
+        if(t && t.project) createState.projectKey = t.project;
+        if(typeof renderCreateModal === 'function') renderCreateModal();
+      }
+    }, 30);
+  } else {
+    alert('Use the + Create button at the top right to add a new ' + level + '.');
+  }
+}
+
 function mtgPickAssignee(taskId, accountId, displayName){
   const t = mtgTasks.find(x => x.id === taskId); if(!t) return;
   t.assignee = displayName;
@@ -8264,6 +8330,44 @@ function renderMtgStaging(state, errorMsg) {
         ${(!mtgPickerQuery && seeded.length) ? `<div style="font-size:10px;color:#9EA0A4;padding:6px 10px 2px;text-transform:uppercase;letter-spacing:.04em;font-weight:700">Team</div>` + seeded.map(m => `<div class="mtg-pop-row" onclick="mtgPickAssignee('${task.id}','','${m.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><span class="s">${_escHtml(m)}</span></div>`).join('') : ''}
       </div>`;
     }
+    if (kind === 'legend') {
+      // Show all Legends, optionally filtered by query
+      const q = (mtgPickerQuery || '').toLowerCase();
+      const matches = allIssues
+        .filter(i => i.type === 'Legend')
+        .filter(i => !q || (i.summary||'').toLowerCase().includes(q) || (i.key||'').toLowerCase().includes(q))
+        .slice(0, 30);
+      return `<div class="mtg-pill-pop" onclick="event.stopPropagation()">
+        <input class="mtg-pop-input" placeholder="Search Legends…" value="${_escHtml(mtgPickerQuery)}" oninput="mtgPickerQuery=this.value;renderMtgStaging('ready')">
+        ${matches.length ? matches.map(e => `<div class="mtg-pop-row ${e.key === task.legendKey ? 'selected' : ''}" onclick="mtgPickLegend('${task.id}','${e.key}','${(e.summary||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')">
+          <span class="t" style="background:#FFF0E6;color:#9A4500">Legend</span>
+          <span class="k">${e.key}</span><span class="s">${_escHtml(e.summary||'')}</span>
+        </div>`).join('') : `<div class="mtg-pop-hint">No Legends${q ? ' matching "' + _escHtml(q) + '"' : ' found in your data'}.</div>`}
+        ${task.legendKey ? `<div class="mtg-pop-row" style="color:#D6202B;border-top:1px solid #EEF1F3;margin-top:4px" onclick="mtgPickLegend('${task.id}','','')"><span class="s">— Clear Legend —</span></div>` : ''}
+        <div class="mtg-pop-create" onclick="mtgOpenCreateAtLevel('${task.id}','Legend')">＋ Create new Legend…</div>
+      </div>`;
+    }
+    if (kind === 'initiative') {
+      // Show Initiatives, optionally filtered by current Legend
+      const q = (mtgPickerQuery || '').toLowerCase();
+      const candidates = allIssues.filter(i => i.type === 'Initiative');
+      const underLegend = task.legendKey
+        ? candidates.filter(i => i.parent_key === task.legendKey)
+        : candidates;
+      const matches = underLegend
+        .filter(i => !q || (i.summary||'').toLowerCase().includes(q) || (i.key||'').toLowerCase().includes(q))
+        .slice(0, 30);
+      const scopeHint = task.legendKey ? `under ${task.legendKey}` : 'all Legends';
+      return `<div class="mtg-pill-pop" onclick="event.stopPropagation()">
+        <input class="mtg-pop-input" placeholder="Search Initiatives (${scopeHint})…" value="${_escHtml(mtgPickerQuery)}" oninput="mtgPickerQuery=this.value;renderMtgStaging('ready')">
+        ${matches.length ? matches.map(e => `<div class="mtg-pop-row ${e.key === task.initiativeKey ? 'selected' : ''}" onclick="mtgPickInitiative('${task.id}','${e.key}','${(e.summary||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')">
+          <span class="t" style="background:#FFF8E0;color:#B07A00">Init.</span>
+          <span class="k">${e.key}</span><span class="s">${_escHtml(e.summary||'')}</span>
+        </div>`).join('') : `<div class="mtg-pop-hint">No Initiatives ${scopeHint}${q ? ' matching "' + _escHtml(q) + '"' : ''}.</div>`}
+        ${task.initiativeKey ? `<div class="mtg-pop-row" style="color:#D6202B;border-top:1px solid #EEF1F3;margin-top:4px" onclick="mtgPickInitiative('${task.id}','','')"><span class="s">— Clear Initiative —</span></div>` : ''}
+        <div class="mtg-pop-create" onclick="mtgOpenCreateAtLevel('${task.id}','Initiative')">＋ Create new Initiative…</div>
+      </div>`;
+    }
     return '';
   };
 
@@ -8310,10 +8414,10 @@ function renderMtgStaging(state, errorMsg) {
         </div>
       </div>
       <div class="mtg-fields">
-        ${pill(task, 'status', 'Status', task.status_target || 'Backlog', {extraClass: 'status-' + statusKey, missing: missing.includes('Status')})}
         ${pill(task, 'project', 'Project', task.project, {placeholder: 'pick project', missing: missing.includes('Project')})}
         ${pill(task, 'epic', 'Epic', task.epicKey ? task.epicKey + ' — ' + task.epicSummary : '', {placeholder: 'search epic…', missing: missing.includes('Epic')})}
         ${pill(task, 'assignee', 'Assignee', task.assignee || '', {placeholder: 'pick assignee', missing: missing.includes('Assignee')})}
+        ${pill(task, 'status', 'Status', task.status_target || 'Backlog', {extraClass: 'status-' + statusKey, missing: missing.includes('Status')})}
         ${pill(task, 'priority', 'Priority', task.priority || 'Medium', {extraClass: priClass})}
       </div>
       ${missing.length && task.included && task.status === 'pending' ? `<div class="mtg-validate-bar"><span class="warn-icon">⚠</span><span>Missing: <b>${missing.join(', ')}</b> — required by your push settings</span></div>` : ''}
@@ -8325,9 +8429,18 @@ function renderMtgStaging(state, errorMsg) {
           </div>
           <div>
             <div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Hierarchy</div>
-            <div class="mtg-hier-row"><span class="lbl">Legend</span><span class="val ${task.legendKey ? '' : 'muted'}">${task.legendKey ? task.legendKey + ' — ' + _escHtml(task.legendSummary) : '(auto-filled when Epic is set)'}</span></div>
-            <div class="mtg-hier-row"><span class="lbl">Initiative</span><span class="val ${task.initiativeKey ? '' : 'muted'}">${task.initiativeKey ? task.initiativeKey + ' — ' + _escHtml(task.initiativeSummary) : '(auto-filled when Epic is set)'}</span></div>
-            <div class="mtg-hier-row"><span class="lbl">Epic / MS</span><span class="val ${task.epicKey ? '' : 'muted'}">${task.epicKey ? task.epicKey + ' — ' + _escHtml(task.epicSummary) : '(none — click the Epic pill above)'}</span></div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+              <span style="font-size:9px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;width:60px;flex-shrink:0">Legend</span>
+              ${pill(task, 'legend', 'edit', task.legendKey ? task.legendKey + ' — ' + task.legendSummary : '', {placeholder: 'search Legend…'})}
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+              <span style="font-size:9px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;width:60px;flex-shrink:0">Initiative</span>
+              ${pill(task, 'initiative', 'edit', task.initiativeKey ? task.initiativeKey + ' — ' + task.initiativeSummary : '', {placeholder: 'search Initiative…'})}
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <span style="font-size:9px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;width:60px;flex-shrink:0">Epic / MS</span>
+              ${pill(task, 'epic', 'edit', task.epicKey ? task.epicKey + ' — ' + task.epicSummary : '', {placeholder: 'search Epic…'})}
+            </div>
             ${task.sourceQuote ? `<div style="margin-top:10px;font-size:11px;font-style:italic;color:#5D7987;padding:8px 10px;background:#fff;border-left:3px solid #2E99CE;border-radius:0 6px 6px 0;line-height:1.4">"${_escHtml(task.sourceQuote)}"</div>` : ''}
           </div>
         </div>
