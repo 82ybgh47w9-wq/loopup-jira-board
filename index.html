@@ -704,7 +704,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v135</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v136</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -8666,12 +8666,18 @@ function mtgRenderMeetingList(){
       } else if (m.transcriptStatus === 'error'){
         trIcon = `<span class="mtg-row-tr-icon" style="color:#D6202B" title="Scan failed for this meeting">✗</span>`;
       }
-      // v132: source badge — calendar / organised ad-hoc / chat-discovered
-      let sourcePill = '';
+      // v136: source icon — always shown, distinguishes scheduled vs ad-hoc
+      //   🗓️ Scheduled (from your calendar) — the default
+      //   💬 Ad-hoc, discovered via chat thread
+      //   🎙️ Ad-hoc you organised (no calendar entry — currently unused)
+      let sourceIcon = '🗓️';
+      let sourceTooltip = 'Scheduled meeting (from your calendar)';
       if (m._source === 'chat'){
-        sourcePill = `<span class="mtg-status-pill" style="background:#F3EEFF;color:#6B3FA0" title="Discovered via chat thread (you weren't the organiser)">💬 Chat</span>`;
+        sourceIcon = '💬';
+        sourceTooltip = "Ad-hoc call discovered via chat thread";
       } else if (m._source === 'onlineMeeting'){
-        sourcePill = `<span class="mtg-status-pill" style="background:#FFF8E0;color:#854F0B" title="Ad-hoc call you organised (no calendar entry)">🎙️ Ad-hoc</span>`;
+        sourceIcon = '🎙️';
+        sourceTooltip = 'Ad-hoc call you organised (no calendar entry)';
       }
       // v133: avatar for organiser. Special ring when you organised it.
       const isMine = !!m.isOrganizer;
@@ -8682,13 +8688,13 @@ function mtgRenderMeetingList(){
       const procBadge = proc ? `<span class="mtg-status-pill mtg-status-done" title="Already processed by ${_escHtml(proc.by||'someone')}">✓</span>` : '';
 
       html += `<div class="mtg-row ${selected?'selected':''} ${proc?'is-processed':''}" onclick="mtgSelectMeeting('${m.id}')">
+        <span class="mtg-row-source-icon" title="${sourceTooltip}" style="font-size:14px;line-height:1;flex-shrink:0;width:18px;text-align:center">${sourceIcon}</span>
         <div class="mtg-row-time">${m.start}</div>
         <div class="mtg-row-content">
           <div class="mtg-row-title" title="${_escHtml(m.title)}">${_escHtml(m.title)}</div>
           <div class="mtg-row-meta">${m.attendees.length} attendee${m.attendees.length===1?'':'s'}</div>
         </div>
         <div class="mtg-row-status">
-          ${sourcePill}
           ${trIcon}
           ${procBadge}
           <span class="mtg-row-organiser ${isMine?'is-mine':''}" title="Organiser: ${_escHtml(m.organizer || 'Unknown')}${isMine?' (you)':''}">
