@@ -474,7 +474,15 @@ button,select,textarea,input{font-family:inherit}
 .mtg-row-content{flex:1;min-width:0}
 .mtg-row-title{font-size:12px;font-weight:600;color:#292E37;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.3}
 .mtg-row-meta{font-size:10px;color:#9EA0A4;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.mtg-row-status{flex-shrink:0;display:flex;align-items:center;gap:4px}
+.mtg-row-status{flex-shrink:0;display:flex;align-items:center;gap:6px}
+/* v133: icon-only transcript pill — just the 📄 indicator, no text */
+.mtg-row-tr-icon{font-size:14px;line-height:1;color:#2E99CE}
+.mtg-row-tr-icon.is-none{color:#C9CACC}
+.mtg-row-tr-icon.is-checking{color:#9EA0A4;animation:spin 1.2s linear infinite}
+/* Organiser avatar — re-uses .ava styling. Highlighted ring for "yours" */
+.mtg-row-organiser{flex-shrink:0;display:flex;align-items:center;gap:6px}
+.mtg-row-organiser.is-mine .mtg-row-org-avatar{box-shadow:0 0 0 2px #2E99CE}
+.mtg-row-organiser .ava{cursor:default}
 .mtg-status-pill{font-size:9px;font-weight:700;padding:2px 7px;border-radius:8px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
 .mtg-status-avail{background:#E0F0F8;color:#125462}
 .mtg-status-done{background:#E8F5E0;color:#2D7A2D}
@@ -696,7 +704,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v132</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v133</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -8172,10 +8180,15 @@ async function msFetchAdhocFromChats(existingByJoinUrl, sinceIso){
     const data = await msGraphFetch('/me/chats?$top=50&$filter=' + encodeURIComponent(filter) + '&$orderby=lastUpdatedDateTime desc');
     chats = data.value || [];
   } catch(e){
-    appLogMsg('warn', 'graph', 'List chats failed: ' + (e.message || e));
+    // v133: if this fails with 403 it usually means Chat.Read isn't in the token —
+    // user signed in before the scope was added. Suggest re-sign-in.
+    appLogMsg('warn', 'graph', 'List chats failed (Chat.Read missing? Try signing out & in.): ' + (e.message || e));
     return found;
   }
+  appLogMsg('info', 'graph', 'Chat scan: found ' + chats.length + ' chats updated in window');
   if (!chats.length) return found;
+  let recordingEventsSeen = 0;
+  let chatsWithEvents = 0;
 
   // Step 2: scan each chat for recording event messages. Concurrency-limited
   // so we don't trip Graph throttling.
@@ -8194,6 +8207,8 @@ async function msFetchAdhocFromChats(existingByJoinUrl, sinceIso){
           const msgFilter = "createdDateTime ge " + sinceIso;
           const msgData = await msGraphFetch('/me/chats/' + chat.id + '/messages?$top=30&$filter=' + encodeURIComponent(msgFilter));
           const messages = msgData.value || [];
+          // v133: track chats that had at least one call event for diagnostic
+          let chatHadEvent = false;
 
           // Look for system event messages that announce a recording
           for (const msg of messages){
@@ -8204,6 +8219,8 @@ async function msFetchAdhocFromChats(existingByJoinUrl, sinceIso){
             // transcript may exist). Could also catch callTranscript events.
             if (!/callRecording/i.test(type)) continue;
 
+            recordingEventsSeen++;
+            if (!chatHadEvent){ chatHadEvent = true; chatsWithEvents++; }
             const callId = event.callId;
             if (!callId || seenCallIds.has(callId)) continue;
             seenCallIds.add(callId);
@@ -8265,6 +8282,7 @@ async function msFetchAdhocFromChats(existingByJoinUrl, sinceIso){
     })());
   }
   await Promise.all(workers);
+  appLogMsg('info', 'graph', 'Chat scan complete: ' + chatsWithEvents + ' chats had call events, ' + recordingEventsSeen + ' recording events seen, ' + found.length + ' meetings discovered');
   return found;
 }
 
@@ -8287,7 +8305,14 @@ let msScanInProgress = false;
 async function msScanTranscripts(){
   if (msScanInProgress) return;
   msScanInProgress = true;
-  const todo = msMeetings.filter(m => m._joinUrl && m.transcriptStatus === 'unknown');
+  // v133: skip synthetic chatcall:// URLs — they can't be looked up via
+  // the joinWebUrl filter. Chat-discovered meetings have transcriptStatus
+  // already set during discovery, so they don't need scanning here.
+  const todo = msMeetings.filter(m =>
+    m._joinUrl &&
+    !m._joinUrl.startsWith('chatcall://') &&
+    m.transcriptStatus === 'unknown'
+  );
   for (const m of todo) m.transcriptStatus = 'checking';
   // Re-render so badges show "checking..."
   if (mtgSource === 'auto') renderMtgInputArea();
@@ -8623,32 +8648,47 @@ function mtgRenderMeetingList(){
         : m.isOrganizer
           ? `<span class="mtg-status-pill mtg-status-org">Yours</span>`
           : `<span class="mtg-status-pill mtg-status-avail">Available</span>`;
-      // Transcript status pill (only when relevant and from live data)
-      let transcriptPill = '';
+      // v133: icon-only transcript indicator (text was redundant since the
+      // filter shows only transcribed meetings)
+      let trIcon = '';
       if (m.transcriptStatus === 'checking' || m.transcriptStatus === 'unknown'){
-        transcriptPill = `<span class="mtg-status-pill" style="background:#F7F8F9;color:#9EA0A4">…scan</span>`;
+        trIcon = `<span class="mtg-row-tr-icon is-checking" title="Scanning for transcript…">${spinHtml(12, '#9EA0A4')}</span>`;
       } else if (m.transcriptStatus === 'has'){
-        transcriptPill = `<span class="mtg-status-pill" style="background:#E0F0F8;color:#125462">📄 Transcript</span>`;
+        trIcon = `<span class="mtg-row-tr-icon" title="Transcript available">📄</span>`;
       } else if (m.transcriptStatus === 'none'){
-        transcriptPill = `<span class="mtg-status-pill" style="background:#EEF1F3;color:#73777C">No transcript</span>`;
+        trIcon = `<span class="mtg-row-tr-icon is-none" title="No transcript available">○</span>`;
       } else if (m.transcriptStatus === 'error'){
-        transcriptPill = `<span class="mtg-status-pill" style="background:#FCEBEB;color:#A11820" title="Scan failed for this meeting">scan ✗</span>`;
+        trIcon = `<span class="mtg-row-tr-icon" style="color:#D6202B" title="Scan failed for this meeting">✗</span>`;
       }
       // v132: source badge — calendar / organised ad-hoc / chat-discovered
       let sourcePill = '';
       if (m._source === 'chat'){
-        sourcePill = `<span class="mtg-status-pill" style="background:#F3EEFF;color:#6B3FA0" title="Discovered via chat thread (you weren't the organiser)">💬 From chat</span>`;
+        sourcePill = `<span class="mtg-status-pill" style="background:#F3EEFF;color:#6B3FA0" title="Discovered via chat thread (you weren't the organiser)">💬 Chat</span>`;
       } else if (m._source === 'onlineMeeting'){
         sourcePill = `<span class="mtg-status-pill" style="background:#FFF8E0;color:#854F0B" title="Ad-hoc call you organised (no calendar entry)">🎙️ Ad-hoc</span>`;
       }
-      // (calendar source needs no badge — it's the default expected source)
+      // v133: avatar for organiser. Special ring when you organised it.
+      const isMine = !!m.isOrganizer;
+      const orgAvatar = (typeof ava === 'function')
+        ? ava(m.organizer || 'Unknown', 24)
+        : `<div style="width:24px;height:24px;border-radius:50%;background:#125462;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700">${_escHtml((m.organizer||'?').slice(0,1))}</div>`;
+      // v133: processed badge stays compact
+      const procBadge = proc ? `<span class="mtg-status-pill mtg-status-done" title="Already processed by ${_escHtml(proc.by||'someone')}">✓</span>` : '';
+
       html += `<div class="mtg-row ${selected?'selected':''} ${proc?'is-processed':''}" onclick="mtgSelectMeeting('${m.id}')">
         <div class="mtg-row-time">${m.start}</div>
         <div class="mtg-row-content">
-          <div class="mtg-row-title">${_escHtml(m.title)}</div>
-          <div class="mtg-row-meta">${_escHtml(m.organizer)} · ${m.attendees.length} attendee${m.attendees.length===1?'':'s'}</div>
+          <div class="mtg-row-title" title="${_escHtml(m.title)}">${_escHtml(m.title)}</div>
+          <div class="mtg-row-meta">${m.attendees.length} attendee${m.attendees.length===1?'':'s'}</div>
         </div>
-        <div class="mtg-row-status">${sourcePill}${transcriptPill}${primaryPill}</div>
+        <div class="mtg-row-status">
+          ${sourcePill}
+          ${trIcon}
+          ${procBadge}
+          <span class="mtg-row-organiser ${isMine?'is-mine':''}" title="Organiser: ${_escHtml(m.organizer || 'Unknown')}${isMine?' (you)':''}">
+            <span class="mtg-row-org-avatar" style="display:inline-block;border-radius:50%;line-height:0">${orgAvatar}</span>
+          </span>
+        </div>
       </div>`;
       if(selected){
         html += mtgRenderDetailPanel(m, proc);
