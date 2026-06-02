@@ -696,7 +696,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v128</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v129</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -8321,8 +8321,9 @@ function msFormatChatMessages(messages){
   return out.length > 1 ? out.join('\n') : null;
 }
 
-// v128: single-click flow — fetch transcript (+chat) AND extract tasks
-// in one button press. Replaces the previous two-button flow.
+// v129: true single-click flow — fetch transcript (+chat) AND extract tasks
+// in one button press, WITHOUT switching tabs. The staging area on the right
+// updates with extracted tasks; the user stays in Auto-fetch view.
 async function msFetchAndExtract(meetingId){
   const m = msMeetings.find(x => x.id === meetingId);
   if (!m) return;
@@ -8337,33 +8338,46 @@ async function msFetchAndExtract(meetingId){
     const chatLog = await msFetchMeetingChat(m);
     combined = chatLog ? (text + '\n\n' + chatLog) : text;
     if (ta) { ta.value = combined; ta.disabled = false; }
-    if (btn) {
-      btn.innerHTML = (chatLog ? '✓ Transcript + chat loaded' : '✓ Transcript loaded')
-        + spinHtml(12, '#125462') + ' Extracting tasks…';
-    }
-    // Pre-fill meeting context for the AI extraction
-    mtgMeetingTitle = m.title || 'Untitled meeting';
-    mtgMeetingDate = m.date || '';
+    if (btn) btn.innerHTML = (chatLog ? '✓ Transcript + chat loaded' : '✓ Transcript loaded') + ' · ' + spinHtml(12, '#125462') + ' Extracting tasks…';
+    // Stamp the meeting context so the processed-tracker records correctly
     mtgCurrentMeetingId = m.id;
-    setMtgSource('paste');
-    // Hand the transcript over to the existing extraction flow
-    setTimeout(() => {
-      const ttl = document.getElementById('mtg-title');
-      const att = document.getElementById('mtg-attendees');
-      const tr  = document.getElementById('mtg-transcript');
-      if (ttl) ttl.value = m.title;
-      if (att) att.value = (m.attendees || []).join(', ');
-      if (tr)  tr.value  = combined;
-      mtgExtract();
-    }, 60);
+    mtgMeetingDate = m.date || '';
+    // v129: pass opts directly — no tab switch, no DOM read
+    await mtgExtract({
+      transcript: combined,
+      title: m.title || 'Untitled meeting',
+      attendees: (m.attendees || []).join(', ')
+    });
+    if (btn) btn.innerHTML = '✓ Extracted — see staging area on the right (re-run if you edit the transcript below)';
   } catch(e){
     if (ta) { ta.disabled = false; ta.placeholder = 'Paste the meeting transcript here…'; }
     if (btn) { btn.disabled = false; btn.innerHTML = '↻ Try again'; }
-    alert('Could not fetch transcript:\n\n' + (e.message || e) + '\n\nYou can still paste the transcript manually.');
+    alert('Could not fetch transcript:\n\n' + (e.message || e) + '\n\nYou can still paste the transcript manually below and click Re-extract.');
   }
 }
 
-// Keep the old function as an alias for any deep links / older buttons
+// v129: re-run extraction from the (possibly edited) textarea in the detail
+// panel. Useful when the user fetched a transcript, edited it, and wants
+// to re-run the AI.
+async function mtgReExtractFromDetail(meetingId){
+  const m = msMeetings.find(x => x.id === meetingId);
+  if (!m) return;
+  const ta = document.getElementById('mtg-detail-paste');
+  const text = (ta && ta.value || '').trim();
+  if (!text || text.length < 30) {
+    alert('Please paste a transcript first (at least a few sentences).');
+    return;
+  }
+  mtgCurrentMeetingId = m.id;
+  mtgMeetingDate = m.date || '';
+  await mtgExtract({
+    transcript: text,
+    title: m.title || 'Untitled meeting',
+    attendees: (m.attendees || []).join(', ')
+  });
+}
+
+// Backward-compat alias
 async function msFetchTranscriptIntoPaste(meetingId){ return msFetchAndExtract(meetingId); }
 
 function mtgRenderMeetingList(){
@@ -8489,9 +8503,11 @@ function mtgRenderDetailPanel(m, proc){
         <b>Paste transcript</b> below${msSignedIn ? ' (this meeting has no Teams join URL — auto-fetch unavailable)' : ' — or sign in with Microsoft to auto-fetch'}:
       </div>
     `}
-    <textarea class="mtg-detail-paste" id="mtg-detail-paste" placeholder="Paste the Teams transcript here. Copy from Teams → past meeting ··· menu → Get recap → transcript section." style="margin-top:8px"></textarea>
+    <textarea class="mtg-detail-paste" id="mtg-detail-paste" placeholder="Paste the Teams transcript here, or click 'Fetch transcript + extract tasks' above. Copy from Teams → past meeting ··· menu → Get recap → transcript section." style="margin-top:8px"></textarea>
     <div class="mtg-detail-actions">
-      <button class="mtg-extract-btn" onclick="mtgExtractFromList('${m.id}')" style="flex:1;margin-top:0">⚡ Extract Tasks from this meeting</button>
+      ${(msSignedIn && m._joinUrl)
+        ? `<button onclick="mtgReExtractFromDetail('${m.id}')" style="flex:1;padding:9px;border-radius:7px;border:1px solid #C9CACC;background:#fff;color:#5D7987;cursor:pointer;font-size:12px;font-weight:600" title="Re-run AI extraction using the text currently in the box above (use if you've edited it)">↻ Re-extract from edited transcript</button>`
+        : `<button class="mtg-extract-btn" onclick="mtgExtractFromList('${m.id}')" style="flex:1;margin-top:0">⚡ Extract Tasks from this meeting</button>`}
       <button onclick="mtgSelectMeeting('${m.id}')" style="padding:10px 14px;border-radius:7px;border:1px solid #C9CACC;background:#fff;color:#5D7987;cursor:pointer;font-size:12px">Cancel</button>
     </div>
   </div>`;
@@ -8661,10 +8677,14 @@ function renderMtgInputArea() {
   }
 }
 
-async function mtgExtract() {
-  const transcript = document.getElementById('mtg-transcript')?.value?.trim();
-  const attendees = document.getElementById('mtg-attendees')?.value?.trim();
-  mtgMeetingTitle = document.getElementById('mtg-title')?.value?.trim() || 'Untitled meeting';
+// v129: mtgExtract now accepts an optional opts argument so callers can
+// supply transcript / title / attendees directly without needing to set
+// DOM inputs or switch tabs. Backward-compatible — falls back to reading
+// DOM inputs when called without opts (the paste-tab flow still works).
+async function mtgExtract(opts) {
+  const transcript = (opts && opts.transcript) || document.getElementById('mtg-transcript')?.value?.trim();
+  const attendees  = (opts && opts.attendees)  || document.getElementById('mtg-attendees')?.value?.trim();
+  mtgMeetingTitle  = (opts && opts.title)      || document.getElementById('mtg-title')?.value?.trim() || 'Untitled meeting';
 
   if (!transcript || transcript.length < 30) {
     alert('Please paste a meeting transcript (at least a few sentences).');
