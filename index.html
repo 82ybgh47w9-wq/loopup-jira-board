@@ -696,7 +696,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v125</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v126</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -7907,24 +7907,46 @@ function msInit(){
   return msalReady;
 }
 
-async function msSignIn(){
+// v126: signing-in state so the UI can show a "Signing in…" indicator
+let msSigningIn = false;
+
+async function msSignIn(force){
   await msInit();
   msAuthError = null;
+  msSigningIn = true;
+  renderMtgInputArea();
+  // 'force' = true uses prompt:'login' which forces credential re-entry
+  // (ignores existing Microsoft session). Default uses 'select_account'
+  // which shows the account picker but lets you reuse an existing session.
+  const promptValue = force ? 'login' : 'select_account';
   try {
     const result = await msalInstance.loginPopup({
       scopes: MS_SCOPES,
-      prompt: 'select_account'
+      prompt: promptValue
     });
     msAccount = result.account;
     msalInstance.setActiveAccount(result.account);
     msSignedIn = true;
+    msSigningIn = false;
     appLogMsg('info', 'graph', 'Signed in as ' + (result.account?.username || 'unknown'));
     renderMtgInputArea();
-    // Auto-load meetings once signed in
     msLoadMeetings();
   } catch(e){
-    msAuthError = e.message || String(e);
-    appLogMsg('warn', 'graph', 'Sign-in failed: ' + msAuthError);
+    msSigningIn = false;
+    // Friendlier messages for the common error cases
+    const raw = e.message || String(e);
+    if (/popup_window_error|popup_window_unavailable/i.test(raw)){
+      msAuthError = 'Popup was blocked by your browser. Please allow popups for this site, then click Sign in again.';
+    } else if (/user_cancelled|user cancelled/i.test(raw)){
+      msAuthError = 'Sign-in cancelled. Click Sign in to try again.';
+    } else if (/interaction_in_progress/i.test(raw)){
+      // Stale state — clear it and retry once
+      try { sessionStorage.clear(); } catch{}
+      msAuthError = 'A previous sign-in was still in progress (now cleared). Please click Sign in again.';
+    } else {
+      msAuthError = raw;
+    }
+    appLogMsg('warn', 'graph', 'Sign-in failed: ' + raw);
     renderMtgInputArea();
   }
 }
@@ -7980,13 +8002,17 @@ async function msLoadMeetings(force){
     since.setDate(since.getDate() - 14);
     const startStr = since.toISOString();
     const endStr = new Date().toISOString();
-    // Use $filter for date range + online-meeting flag
-    const filter = "start/dateTime ge '" + startStr + "' and start/dateTime le '" + endStr + "' and isOnlineMeeting eq true";
-    const select = 'id,subject,start,end,organizer,attendees,onlineMeeting,webLink,isOrganizer,isCancelled';
+    // v126: Microsoft Graph does NOT support $filter on isOnlineMeeting
+    // (returns ErrorInvalidProperty). Filter only by date server-side; do
+    // the online-meeting and cancelled filtering client-side.
+    const filter = "start/dateTime ge '" + startStr + "' and start/dateTime le '" + endStr + "'";
+    const select = 'id,subject,start,end,organizer,attendees,onlineMeeting,webLink,isOrganizer,isCancelled,isOnlineMeeting';
     const path = '/me/events?$filter=' + encodeURIComponent(filter) +
-                 '&$top=100&$orderby=start/dateTime desc&$select=' + encodeURIComponent(select);
+                 '&$top=200&$orderby=start/dateTime desc&$select=' + encodeURIComponent(select);
     const data = await msGraphFetch(path);
-    const events = (data.value || []).filter(e => !e.isCancelled);
+    const events = (data.value || []).filter(e =>
+      !e.isCancelled && (e.isOnlineMeeting === true || !!e.onlineMeeting)
+    );
     msMeetings = events.map(e => ({
       id: 'm_' + e.id,
       _msEventId: e.id,
@@ -8379,18 +8405,28 @@ function renderMtgInputArea() {
         Tip: In Teams, click ••• on a past meeting → Get recap → Copy transcript
       </div>`;
   } else {
-    // v124: Auto-fetch — live Microsoft Graph integration.
-    // - Not signed in: show "Sign in with Microsoft" button
-    // - Signed in: show account bar, fetch meetings from Graph, render list
+    // v126: Auto-fetch — live Microsoft Graph integration.
+    // - Signing in: show spinner state
+    // - Not signed in: Sign in button + (after a previous failure) Force-relogin link
+    // - Signed in: account bar + meeting list
     msInit().then(() => {
-      if (!msSignedIn) {
+      if (msSigningIn) {
+        area.innerHTML = `<div class="ms-signin-panel">
+          <h4>Signing in…</h4>
+          <p>A Microsoft sign-in popup should have opened. If you don't see it, check your browser for a popup blocker.</p>
+          <div style="display:flex;align-items:center;justify-content:center;gap:10px;color:#5D7987;font-size:12px">
+            ${spinHtml(18, '#2E99CE')} Waiting for Microsoft…
+          </div>
+        </div>`;
+      } else if (!msSignedIn) {
         area.innerHTML = `<div class="ms-signin-panel">
           <h4>Connect Microsoft 365</h4>
           <p>Sign in with your LoopUp account to load your last 14 days of Teams meetings. Transcripts and chat are fetched on-demand when you pick a meeting.</p>
-          <button class="ms-signin-btn" onclick="msSignIn()">
+          <button class="ms-signin-btn" onclick="msSignIn(false)">
             <svg viewBox="0 0 23 23" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="10" height="10" fill="#F25022"/><rect x="12" y="1" width="10" height="10" fill="#7FBA00"/><rect x="1" y="12" width="10" height="10" fill="#00A4EF"/><rect x="12" y="12" width="10" height="10" fill="#FFB900"/></svg>
             Sign in with Microsoft
           </button>
+          <div style="margin-top:14px"><a onclick="msSignIn(true)" style="font-size:11px;color:#5D7987;text-decoration:underline;cursor:pointer">Force re-enter credentials</a></div>
           ${msAuthError ? `<div class="ms-error" style="margin-top:14px">${_escHtml(msAuthError)}</div>` : ''}
         </div>`;
       } else {
