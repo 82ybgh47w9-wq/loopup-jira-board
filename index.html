@@ -696,7 +696,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v130</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v131</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -7982,12 +7982,60 @@ async function msAcquireToken(){
   }
 }
 
+// v131: detect the browser's IANA timezone (e.g. 'Europe/London') so Graph
+// can return event times pre-converted via the Prefer header. Falls back
+// to 'UTC' for browsers that don't expose Intl.
+function msLocalTimeZone(){
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; }
+  catch(e){ return 'UTC'; }
+}
+
+// v131: format a Graph datetime string in the user's local timezone.
+//  - Outlook endpoints with Prefer header return timezone-naive strings
+//    already-in-local-time → slice directly.
+//  - Other endpoints (e.g. /me/onlineMeetings) return UTC with 'Z' suffix
+//    → parse as Date and format using browser's locale.
+function msTimeLocal(isoString){
+  if (!isoString) return '';
+  const s = String(isoString).trim();
+  if (!/[Zz]|[+-]\d{2}:?\d{2}$/.test(s)){
+    return s.slice(11, 16); // already local from Prefer header
+  }
+  try {
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return s.slice(11, 16);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  } catch(e){ return s.slice(11, 16); }
+}
+
+function msDateLocal(isoString){
+  if (!isoString) return '';
+  const s = String(isoString).trim();
+  if (!/[Zz]|[+-]\d{2}:?\d{2}$/.test(s)){
+    return s.slice(0, 10); // already local
+  }
+  try {
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return s.slice(0, 10);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + day;
+  } catch(e){ return s.slice(0, 10); }
+}
+
 async function msGraphFetch(path, opts){
   const token = await msAcquireToken();
   const url = path.startsWith('http') ? path : ('https://graph.microsoft.com/v1.0' + path);
   const r = await fetch(url, {
     method: (opts && opts.method) || 'GET',
-    headers: Object.assign({ 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' }, (opts && opts.headers) || {}),
+    headers: Object.assign({
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/json',
+      // v131: Outlook endpoints honour this and return event times in the
+      // user's local timezone. Non-Outlook endpoints ignore it harmlessly.
+      'Prefer': 'outlook.timezone="' + msLocalTimeZone() + '"'
+    }, (opts && opts.headers) || {}),
     body: (opts && opts.body) || undefined
   });
   if (!r.ok){
@@ -8046,9 +8094,9 @@ async function msLoadMeetings(force){
         _joinUrl: join,
         _webLink: e.webLink || '',
         title: e.subject || '(no subject)',
-        date: (e.start?.dateTime || '').slice(0, 10),
-        start: (e.start?.dateTime || '').slice(11, 16),
-        end: (e.end?.dateTime || '').slice(11, 16),
+        date: msDateLocal(e.start?.dateTime),
+        start: msTimeLocal(e.start?.dateTime),
+        end: msTimeLocal(e.end?.dateTime),
         _startMs: new Date(e.start?.dateTime || 0).getTime(),
         _endMs: new Date(e.end?.dateTime || e.start?.dateTime || 0).getTime(),
         organizer: e.organizer?.emailAddress?.name || e.organizer?.emailAddress?.address || 'Unknown',
@@ -8071,9 +8119,9 @@ async function msLoadMeetings(force){
         _joinUrl: join,
         _webLink: om.joinWebUrl || '',
         title: om.subject || '(Ad-hoc call)',
-        date: startIso.slice(0, 10),
-        start: startIso.slice(11, 16),
-        end: endIso.slice(11, 16),
+        date: msDateLocal(startIso),
+        start: msTimeLocal(startIso),
+        end: msTimeLocal(endIso),
         _startMs: new Date(startIso || 0).getTime(),
         _endMs: new Date(endIso || startIso || 0).getTime(),
         organizer: om.participants?.organizer?.identity?.user?.displayName || 'You',
@@ -8312,7 +8360,7 @@ function msFormatChatMessages(messages){
   const out = ['--- Meeting chat (messages within ±1hr of the meeting) ---'];
   for (const m of messages){
     if (m.messageType && m.messageType !== 'message') continue; // skip system messages
-    const ts = m.createdDateTime ? m.createdDateTime.slice(11, 16) : '';
+    const ts = m.createdDateTime ? msTimeLocal(m.createdDateTime) : '';
     const from = m.from?.user?.displayName ||
                  m.from?.application?.displayName ||
                  'Unknown';
