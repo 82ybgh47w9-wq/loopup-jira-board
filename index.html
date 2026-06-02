@@ -509,10 +509,13 @@ button,select,textarea,input{font-family:inherit}
 .ms-fetch-transcript:disabled{opacity:.5;cursor:default}
 .ms-transcript-info{font-size:11px;color:#5D7987;margin:6px 0;font-style:italic}
 </style>
-<!-- v124: Microsoft Authentication Library (MSAL.js) for browser SPAs.
-     Used for OAuth2 + PKCE sign-in to Microsoft Graph. Required scopes
-     are granted via the LoopUp Meeting Task Extractor app registration. -->
-<script src="https://alcdn.msauth.net/browser/3.27.0/js/msal-browser.min.js"></script>
+<!-- v125: Microsoft Authentication Library (MSAL.js) for browser SPAs.
+     OAuth2 + PKCE sign-in to Microsoft Graph. We load from jsdelivr (npm)
+     because the Microsoft CDN (alcdn.msauth.net) doesn't host every version.
+     Pinned to v3.10.0 which includes the required initialize() method.
+     If jsdelivr fails, fallback to unpkg. -->
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.10.0/lib/msal-browser.min.js"
+        onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/@azure/msal-browser@3.10.0/lib/msal-browser.min.js';document.head.appendChild(s);"></script>
 </head>
 <body>
 
@@ -693,7 +696,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v124</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v125</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -7870,8 +7873,14 @@ let msAuthError = null;      // last auth/graph error message
 function msInit(){
   if (msalReady) return msalReady;
   msalReady = (async () => {
+    // v125: wait up to 5s for the MSAL global to appear — the fallback CDN
+    // loader (in the <head>) may still be fetching when sign-in is clicked.
+    for (let i = 0; i < 50; i++){
+      if (typeof msal !== 'undefined' && msal.PublicClientApplication) break;
+      await new Promise(r => setTimeout(r, 100));
+    }
     if (typeof msal === 'undefined' || !msal.PublicClientApplication){
-      throw new Error('MSAL library not loaded');
+      throw new Error('MSAL library could not be loaded from any CDN. Check your network connection or browser console for blocked-resource errors.');
     }
     msalInstance = new msal.PublicClientApplication({
       auth: {
