@@ -349,7 +349,7 @@ button,select,textarea,input{font-family:inherit}
 .mtg-priority-High{background:#FAEEDA;border-color:#D4B07A;color:#945200}
 .mtg-priority-Medium{background:#E0F0F8;border-color:#7CB7DA;color:#125462}
 .mtg-priority-Low{background:#EAF3DE;border-color:#A9C98E;color:#3D6B1E}
-.mtg-pill-pop{position:absolute;top:calc(100% + 4px);left:0;z-index:200;background:#fff;border:1px solid #C9CACC;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);min-width:280px;max-width:380px;max-height:340px;overflow-y:auto;padding:6px}
+.mtg-pill-pop{position:fixed;z-index:300;background:#fff;border:1px solid #C9CACC;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.18);min-width:320px;max-width:480px;max-height:340px;overflow-y:auto;padding:6px}
 .mtg-pop-input{width:100%;padding:7px 10px;border:1px solid #C9CACC;border-radius:6px;font-size:12px;font-family:inherit;margin-bottom:6px;box-sizing:border-box}
 .mtg-pop-input:focus{border-color:#2E99CE;outline:none}
 .mtg-pop-row{display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:12px;color:#292E37}
@@ -587,7 +587,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v115</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v116</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -8012,8 +8012,66 @@ function mtgOpenPickerFor(taskId, kind, event){
     if(t) t.expanded = true;
   }
   renderMtgStaging('ready');
-  setTimeout(() => { const inp = document.querySelector('.mtg-pill-pop .mtg-pop-input'); if(inp) inp.focus(); }, 0);
+  // v116: position the popup (fixed) at the pill's screen coordinates so it
+  // escapes the card's overflow:hidden and the staging container's overflow:auto.
+  setTimeout(() => {
+    mtgPositionOpenPicker();
+    const inp = document.querySelector('.mtg-pill-pop .mtg-pop-input');
+    if(inp) inp.focus();
+  }, 0);
 }
+
+// v116: place the open picker popup just under the pill it belongs to,
+// using viewport coordinates so it doesn't get clipped by any ancestor.
+function mtgPositionOpenPicker(){
+  if(!mtgOpenPicker) return;
+  const card = document.getElementById('mtg-card-' + mtgOpenPicker.taskId);
+  if(!card) return;
+  const pop = card.querySelector('.mtg-pill-pop');
+  if(!pop) return;
+  const pill = pop.parentElement;
+  if(!pill) return;
+  const rect = pill.getBoundingClientRect();
+  const vw = window.innerWidth, vh = window.innerHeight;
+  // Default: directly below the pill, left-aligned
+  let top = rect.bottom + 4;
+  let left = rect.left;
+  // If too close to right edge, right-align to viewport
+  const popWidth = Math.max(pop.offsetWidth, 320);
+  if(left + popWidth > vw - 16) left = Math.max(16, vw - popWidth - 16);
+  // If the pop would overflow the bottom, flip above the pill
+  const popHeight = Math.min(pop.offsetHeight || 340, 340);
+  if(top + popHeight > vh - 16){
+    const flippedTop = rect.top - popHeight - 4;
+    top = flippedTop > 16 ? flippedTop : Math.max(16, vh - popHeight - 16);
+  }
+  pop.style.top = top + 'px';
+  pop.style.left = left + 'px';
+  // Constrain height to remaining viewport space (so internal scroll bar appears)
+  const availH = Math.max(160, vh - top - 16);
+  pop.style.maxHeight = Math.min(340, availH) + 'px';
+}
+
+// v116: scrolling the staging area would leave the popup pinned to the
+// wrong place. Close it instead — feels less disorienting than reflowing.
+(function setupMtgScrollClose(){
+  let installed = false;
+  const tryInstall = () => {
+    const st = document.getElementById('mtg-staging');
+    if(!st || installed) return;
+    installed = true;
+    st.addEventListener('scroll', () => {
+      if(mtgOpenPicker) mtgClosePicker();
+    });
+  };
+  // Try right away and on DOMContentLoaded
+  tryInstall();
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', tryInstall);
+  }
+  // Retry whenever a Meetings render might have created the element
+  setInterval(tryInstall, 1000);
+})();
 
 function mtgClosePicker(){ mtgOpenPicker = null; renderMtgStaging('ready'); }
 
@@ -8450,6 +8508,12 @@ function renderMtgStaging(state, errorMsg) {
   }
 
   staging.innerHTML = html;
+  // v116: if a picker is open, re-position it on every render (typing in
+  // the search input re-renders, which would otherwise leave the new
+  // popup pinned at top:0;left:0 since it's position:fixed).
+  if(mtgOpenPicker){
+    requestAnimationFrame(mtgPositionOpenPicker);
+  }
 }
 
 function mtgToggleInclude(id) {
