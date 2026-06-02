@@ -377,6 +377,21 @@ button,select,textarea,input{font-family:inherit}
 .mtg-bulk-bar .stat{color:#5D7987}
 .mtg-bulk-bar .stat strong{color:#292E37}
 
+/* ══ MEETING INTAKE v117 — duplicate banner ══ */
+.mtg-dup-banner{display:flex;align-items:center;gap:10px;padding:8px 12px 8px 42px;background:#FFF8E0;border-bottom:1px solid #F0DC9A;font-size:12px;color:#854F0B}
+.mtg-dup-banner.is-closed{background:#EEF1F3;color:#5D7987;border-bottom-color:#D8DADE}
+.mtg-dup-banner-icon{font-size:16px;flex-shrink:0}
+.mtg-dup-banner-content{flex:1;min-width:0}
+.mtg-dup-banner-content strong{color:#854F0B}
+.mtg-dup-banner.is-closed .mtg-dup-banner-content strong{color:#5D7987}
+.mtg-dup-banner-actions{display:flex;gap:6px;flex-shrink:0}
+.mtg-link-btn{padding:5px 10px;border-radius:6px;border:1px solid #2E99CE;background:#E0F0F8;color:#125462;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap}
+.mtg-link-btn:hover{background:#CFE5F1}
+.mtg-view-existing{padding:5px 10px;border-radius:6px;border:1px solid #C9CACC;background:#fff;color:#5D7987;font-size:11px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:4px}
+.mtg-view-existing:hover{background:#F7F8F9;color:#125462}
+.mtg-status-chip{display:inline-block;font-size:9px;font-weight:700;padding:2px 7px;border-radius:8px;text-transform:uppercase;letter-spacing:.04em;margin-left:6px}
+.mtg-card2.is-linked{border-left:3px solid #2E99CE;background:#FAFCFE}
+
 /* ══ MEETING INTAKE v114 — Auto-fetch meeting list ══ */
 .mtg-list-search{width:100%;padding:8px 12px;border:1px solid #C9CACC;border-radius:7px;font-size:12px;color:#292E37;font-family:inherit;box-sizing:border-box;margin-bottom:10px}
 .mtg-list-search:focus{border-color:#2E99CE;outline:none}
@@ -587,7 +602,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v116</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v117</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -7954,40 +7969,194 @@ Return ONLY the JSON array.`
   return [];
 }
 
+// v117: Comprehensive duplicate detection.
+//  1) Batched JQL across ALL extracted tasks (not just first 5)
+//  2) Fetches status so we know if the match is Done/Closed (low-risk dup)
+//  3) Local fuzzy match (word overlap) for fast wins
+//  4) AI semantic pass for borderline / no-match cases (catches paraphrases)
+//  5) Auto-uncheck only when match is HIGH and existing is NOT closed
 async function mtgCheckDuplicates() {
   if (!mtgTasks.length) return;
   try {
-    // Search for similar existing issues (first 5 tasks' keywords)
-    const searchTerms = mtgTasks.slice(0, 5).map(t =>
-      t.summary.split(/\s+/).slice(0, 4).join(' ')
-    );
-    const jql = searchTerms.map(s => 'summary ~ "' + s.replace(/"/g, '') + '"').join(' OR ');
-    const d = await jiraGet('/rest/api/3/search/jql?jql=' + encodeURIComponent(jql + ' ORDER BY updated DESC') + '&fields=summary,status,project&maxResults=30');
-    const existing = (d.issues || []).map(i => ({
-      key: i.key,
-      summary: i.fields.summary,
-      project: i.fields.project?.key
-    }));
+    // Step 1: Batched JQL across ALL tasks
+    const allCandidates = [];
+    const seenKeys = new Set();
+    const batchSize = 6; // 6 OR clauses per query keeps URL short
+    for (let i = 0; i < mtgTasks.length; i += batchSize) {
+      const batch = mtgTasks.slice(i, i + batchSize);
+      const searchTerms = batch
+        .map(t => t.summary.split(/\s+/).filter(w => w.length > 3).slice(0, 5).join(' '))
+        .filter(s => s);
+      if (!searchTerms.length) continue;
+      const jql = searchTerms.map(s => 'summary ~ "' + s.replace(/"/g, '') + '"').join(' OR ');
+      try {
+        const d = await jiraGet('/rest/api/3/search/jql?jql=' + encodeURIComponent(jql + ' ORDER BY updated DESC') + '&fields=summary,status,project,issuetype,assignee&maxResults=30');
+        for (const issue of (d.issues || [])) {
+          if (seenKeys.has(issue.key)) continue;
+          seenKeys.add(issue.key);
+          const statusName = issue.fields.status?.name || '';
+          allCandidates.push({
+            key: issue.key,
+            summary: issue.fields.summary,
+            project: issue.fields.project?.key,
+            status: statusName,
+            type: issue.fields.issuetype?.name,
+            assignee: issue.fields.assignee?.displayName || '',
+            isClosed: /done|closed|resolved|cancelled|won't.?do/i.test(statusName)
+          });
+        }
+      } catch (e) { /* keep going across batches */ }
+    }
+    if (!allCandidates.length) return;
 
-    if (!existing.length) return;
-
-    // Simple fuzzy match: compare word overlap
+    // Step 2: Local fuzzy match (word overlap) per task — pick best match
     for (const task of mtgTasks) {
       const tWords = new Set(task.summary.toLowerCase().split(/\s+/).filter(w => w.length > 3));
-      for (const ex of existing) {
-        const eWords = new Set(ex.summary.toLowerCase().split(/\s+/).filter(w => w.length > 3));
+      if (!tWords.size) continue;
+      let best = null, bestScore = 0;
+      for (const ex of allCandidates) {
+        const eWords = new Set((ex.summary || '').toLowerCase().split(/\s+/).filter(w => w.length > 3));
+        if (!eWords.size) continue;
         const overlap = [...tWords].filter(w => eWords.has(w)).length;
-        const similarity = tWords.size > 0 ? overlap / tWords.size : 0;
-        if (similarity >= 0.5) {
-          task.duplicate = { key: ex.key, summary: ex.summary, similarity: similarity >= 0.75 ? 'high' : 'medium' };
-          if (similarity >= 0.75) task.included = false;
-          break;
-        }
+        // Jaccard-style on smaller set so short titles can still match
+        const similarity = overlap / Math.min(tWords.size, eWords.size);
+        if (similarity > bestScore) { bestScore = similarity; best = ex; }
+      }
+      if (best && bestScore >= 0.5) {
+        task.duplicate = {
+          key: best.key,
+          summary: best.summary,
+          status: best.status,
+          assignee: best.assignee,
+          isClosed: best.isClosed,
+          similarity: bestScore >= 0.75 ? 'high' : 'medium',
+          reason: 'word-overlap',
+          score: Math.round(bestScore * 100)
+        };
+        // v117: auto-uncheck only if match is HIGH and existing is NOT closed
+        if (bestScore >= 0.75 && !best.isClosed) task.included = false;
       }
     }
+
+    // Step 3: AI semantic pass — catches paraphrases ("Update billing portal"
+    // vs "Refresh invoicing UI") that word-overlap misses. Single batched call.
+    await mtgAiSemanticDedup(allCandidates);
+
   } catch (e) {
     appLogMsg('warn', 'meetings', 'Dupe check failed: ' + e.message);
   }
+}
+
+// v117: AI semantic duplicate detection — one batched call across all tasks.
+async function mtgAiSemanticDedup(allCandidates) {
+  // Only check tasks that don't already have a high-confidence local match
+  const tasksToCheck = mtgTasks
+    .map((t, i) => ({ t, i }))
+    .filter(({ t }) => !t.duplicate || t.duplicate.similarity !== 'high');
+  if (!tasksToCheck.length || !allCandidates.length) return;
+
+  // Trim candidate list to keep prompt size manageable
+  const cands = allCandidates.slice(0, 40);
+
+  const prompt =
+    `For each NEW TASK below, determine if it is a duplicate (same work item, even if worded differently) of any EXISTING task.\n\n` +
+    `NEW TASKS:\n` +
+    tasksToCheck.map(({ t, i }) =>
+      `[${i}] "${t.summary}"` + (t.description ? ` — ${t.description.substring(0, 120)}` : '')
+    ).join('\n') +
+    `\n\nEXISTING JIRA TASKS:\n` +
+    cands.map(c => `${c.key} [${c.status}]: "${c.summary}"`).join('\n') +
+    `\n\nReturn ONLY a JSON array (no markdown, no commentary). For each new task that has a likely match, output one row:\n` +
+    `[{"i": <new task index>, "key": "<existing Jira key>", "confidence": "high"|"medium"|"low", "reason": "<short>"}, ...]\n` +
+    `Only include matches that are clearly the same work. Different topic = no match. If unsure, use "medium" or "low". Omit a task entirely if no match.`;
+
+  try {
+    const r = await fetch(PROXY + '/ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemPrompt: 'You compare proposed new tasks against existing Jira issues to find semantic duplicates. Be conservative: only flag clear matches. Return ONLY the raw JSON array.',
+        prompt: prompt
+      })
+    });
+    if (!r.ok) return;
+    const d = await r.json();
+    const text = d.text || '';
+    const match = text.match(/\[[\s\S]*\]/);
+    if (!match) return;
+    let dupes;
+    try { dupes = JSON.parse(match[0]); } catch (e) { return; }
+    if (!Array.isArray(dupes)) return;
+
+    for (const dup of dupes) {
+      if (typeof dup.i !== 'number') continue;
+      const task = mtgTasks[dup.i];
+      if (!task) continue;
+      const existing = cands.find(c => c.key === dup.key);
+      if (!existing) continue;
+      // If AI found a stronger / new match, record it
+      const aiConf = (dup.confidence || 'medium').toLowerCase();
+      const aiBeatsLocal = !task.duplicate ||
+        (aiConf === 'high' && task.duplicate.similarity !== 'high');
+      if (aiBeatsLocal) {
+        task.duplicate = {
+          key: existing.key,
+          summary: existing.summary,
+          status: existing.status,
+          assignee: existing.assignee,
+          isClosed: existing.isClosed,
+          similarity: aiConf,
+          reason: 'AI: ' + (dup.reason || 'semantic match'),
+          score: null
+        };
+        if (aiConf === 'high' && !existing.isClosed) task.included = false;
+      }
+    }
+  } catch (e) {
+    appLogMsg('warn', 'meetings', 'AI dedup failed: ' + e.message);
+  }
+}
+
+// v117: Link this extracted task as a COMMENT on the existing Jira issue
+// instead of creating a new one. Marks task as 'linked' so it's excluded
+// from Push to Jira but still visible in the staging area.
+async function mtgLinkToExisting(taskId) {
+  const task = mtgTasks.find(t => t.id === taskId);
+  if (!task || !task.duplicate) return;
+  if (!confirm('Add this task as a comment on ' + task.duplicate.key + ' instead of creating a new Jira issue?')) return;
+
+  task.status = 'creating';
+  renderMtgStaging('ready');
+
+  try {
+    const sourceLine = 'From meeting "' + mtgMeetingTitle + '" (linked via Meeting Task Extractor):';
+    const lines = [task.summary];
+    if (task.description) lines.push(task.description);
+    if (task.sourceQuote) lines.push('Source quote: "' + task.sourceQuote + '"');
+
+    const body = {
+      type: 'doc', version: 1,
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: sourceLine, marks: [{ type: 'strong' }] }] },
+        ...lines.map(line => ({ type: 'paragraph', content: [{ type: 'text', text: line }] }))
+      ]
+    };
+
+    const r = await jiraPost('/rest/api/3/issue/' + task.duplicate.key + '/comment', { body });
+    if (r.ok) {
+      task.status = 'linked';
+      task.linkedTo = task.duplicate.key;
+      task.jiraKey = task.duplicate.key; // for the processed-meeting record
+      appLogMsg('info', 'meetings', 'Linked ' + task.summary + ' to ' + task.duplicate.key);
+    } else {
+      task.status = 'error';
+      appLogMsg('error', 'meetings', 'Link to existing failed for ' + task.duplicate.key);
+    }
+  } catch (e) {
+    task.status = 'error';
+    appLogMsg('error', 'meetings', 'Link error: ' + e.message);
+  }
+  renderMtgStaging('ready');
 }
 
 // v111: Global state for inline picker pop-ups (only one open at a time).
@@ -8320,9 +8489,15 @@ function renderMtgStaging(state, errorMsg) {
     if (mtgValidateTask(t).length === 0) validCount++;
   }
   const createdCount = mtgTasks.filter(t => t.status === 'created').length;
+  const linkedCount = mtgTasks.filter(t => t.status === 'linked').length;
 
   if (titleEl) titleEl.textContent = mtgMeetingTitle || 'Staging Area';
-  if (countEl) countEl.textContent = `${mtgTasks.length} tasks · ${createdCount} created · ${validCount} ready`;
+  if (countEl) {
+    const parts = [`${mtgTasks.length} tasks`, `${createdCount} created`];
+    if (linkedCount) parts.push(`${linkedCount} linked`);
+    parts.push(`${validCount} ready`);
+    countEl.textContent = parts.join(' · ');
+  }
   if (pushBtn) {
     pushBtn.disabled = validCount === 0;
     pushBtn.innerHTML = mtgTasks.some(t => t.status === 'creating')
@@ -8451,13 +8626,36 @@ function renderMtgStaging(state, errorMsg) {
     const canPush = missing.length === 0 && task.status === 'pending' && task.included;
     let klass = 'mtg-card2';
     if (task.status === 'created') klass += ' is-created';
+    else if (task.status === 'linked') klass += ' is-linked';
     else if (task.status === 'creating') klass += ' is-creating';
     else if (task.status === 'error') klass += ' is-error';
-    else if (task.duplicate?.similarity === 'high') klass += ' is-dupe';
+    else if (task.duplicate && !task.duplicate.isClosed) klass += ' is-dupe';
     else if (missing.length > 0 && task.included) klass += ' is-invalid';
 
     const statusKey = (task.status_target || 'Backlog').replace(/ /g, '-');
     const priClass = 'mtg-priority-' + (task.priority || 'Medium');
+
+    // v117: prominent duplicate banner at the top of the card
+    const dup = task.duplicate;
+    const dupBanner = (dup && task.status === 'pending') ? (() => {
+      const isClosed = dup.isClosed;
+      const closedClass = isClosed ? ' is-closed' : '';
+      const statusChip = `<span class="mtg-status-chip" style="background:${isClosed ? '#E8F5E0' : '#FFF8E0'};color:${isClosed ? '#2D7A2D' : '#854F0B'}">${_escHtml(dup.status || '—')}</span>`;
+      const confLabel = dup.similarity === 'high' ? 'High similarity' : (dup.similarity === 'medium' ? 'Possible match' : 'Maybe related');
+      const reasonText = dup.reason ? ' · ' + dup.reason : '';
+      const assigneeText = dup.assignee ? ' · assigned to ' + dup.assignee : '';
+      return `<div class="mtg-dup-banner${closedClass}">
+        <span class="mtg-dup-banner-icon">${isClosed ? '◎' : '⚠'}</span>
+        <div class="mtg-dup-banner-content">
+          <div><strong>${confLabel}:</strong> ${_escHtml(dup.key)} — "${_escHtml(dup.summary)}"${statusChip}</div>
+          <div style="font-size:10px;opacity:.8;margin-top:2px">${isClosed ? 'Existing task is closed/done — safe to create new if needed' : 'Likely a duplicate'}${assigneeText}${reasonText}</div>
+        </div>
+        <div class="mtg-dup-banner-actions">
+          <a class="mtg-view-existing" href="https://loopup.atlassian.net/browse/${dup.key}" target="_blank" onclick="event.stopPropagation()">View ↗</a>
+          ${!isClosed ? `<button class="mtg-link-btn" onclick="event.stopPropagation();mtgLinkToExisting('${task.id}')" title="Add this as a comment on ${dup.key} instead of creating new">↳ Link to ${dup.key}</button>` : ''}
+        </div>
+      </div>`;
+    })() : '';
 
     html += `<div class="${klass}" id="mtg-card-${task.id}">
       <div class="mtg-card2-top">
@@ -8465,12 +8663,14 @@ function renderMtgStaging(state, errorMsg) {
         <div class="mtg-card2-summary" contenteditable="true" spellcheck="true" onblur="mtgUpdateField('${task.id}','summary',this.textContent.trim())">${_escHtml(task.summary)}</div>
         <div class="mtg-card2-actions">
           ${task.status === 'created' ? `<span style="font-size:11px;font-weight:700;color:#2D7A2D">✓ ${task.jiraKey || 'Created'}</span>` : ''}
-          ${task.status === 'creating' ? `<span style="font-size:11px;color:#2E99CE;display:flex;align-items:center;gap:4px">${spinHtml(12, '#2E99CE')} Creating…</span>` : ''}
+          ${task.status === 'linked' ? `<span style="font-size:11px;font-weight:700;color:#125462">↳ Linked to ${task.linkedTo}</span>` : ''}
+          ${task.status === 'creating' ? `<span style="font-size:11px;color:#2E99CE;display:flex;align-items:center;gap:4px">${spinHtml(12, '#2E99CE')} Working…</span>` : ''}
           ${task.status === 'error' ? `<span style="font-size:11px;font-weight:700;color:#D6202B">✗ Failed</span>` : ''}
           ${task.status === 'pending' ? `<button class="mtg-push-one" onclick="event.stopPropagation();mtgPushOne('${task.id}')" ${canPush ? '' : 'disabled'} title="${canPush ? 'Push this task to Jira' : 'Missing required: ' + missing.join(', ')}">⊕ Push</button>` : ''}
           <button class="mtg-exp-btn ${task.expanded ? 'open' : ''}" onclick="event.stopPropagation();mtgToggleExpandCard('${task.id}')" title="${task.expanded ? 'Collapse' : 'Expand details'}">▾</button>
         </div>
       </div>
+      ${dupBanner}
       <div class="mtg-fields">
         ${pill(task, 'project', 'Project', task.project, {placeholder: 'pick project', missing: missing.includes('Project')})}
         ${pill(task, 'epic', 'Epic', task.epicKey ? task.epicKey + ' — ' + task.epicSummary : '', {placeholder: 'search epic…', missing: missing.includes('Epic')})}
@@ -8502,7 +8702,7 @@ function renderMtgStaging(state, errorMsg) {
             ${task.sourceQuote ? `<div style="margin-top:10px;font-size:11px;font-style:italic;color:#5D7987;padding:8px 10px;background:#fff;border-left:3px solid #2E99CE;border-radius:0 6px 6px 0;line-height:1.4">"${_escHtml(task.sourceQuote)}"</div>` : ''}
           </div>
         </div>
-        ${task.duplicate ? `<div style="margin-top:10px;font-size:11px;color:#854F0B;padding:6px 10px;background:#FFF8E0;border-radius:6px;display:flex;align-items:center;gap:6px">⚠ Possible duplicate of <b>${task.duplicate.key}</b>: "${_escHtml(task.duplicate.summary)}" <span style="color:#9EA0A4">(${task.duplicate.similarity})</span></div>` : ''}
+        ${/* v117: in-detail strip removed — duplicate is now shown as a prominent banner at the top of the card */ ''}
       </div>
     </div>`;
   }
@@ -8609,9 +8809,14 @@ async function mtgPushToJira() {
   // so it shows as "✓ Processed" in the Auto-fetch list (and prevents others
   // creating duplicate task sets from the same meeting).
   if(mtgCurrentMeetingId){
-    const createdKeys = mtgTasks.filter(t => t.status === 'created').map(t => t.jiraKey).filter(Boolean);
-    if(createdKeys.length){
-      await mtgMarkProcessed(mtgCurrentMeetingId, createdKeys);
+    // v117: include both newly-created tasks and linked-to-existing tasks in the
+    // processed record, so the Auto-fetch list shows all related Jira keys.
+    const resultKeys = mtgTasks
+      .filter(t => t.status === 'created' || t.status === 'linked')
+      .map(t => t.jiraKey)
+      .filter(Boolean);
+    if(resultKeys.length){
+      await mtgMarkProcessed(mtgCurrentMeetingId, resultKeys);
     }
   }
   setTimeout(() => doFetch(true), 2000);
