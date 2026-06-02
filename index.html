@@ -696,7 +696,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v129</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v130</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -7860,7 +7860,10 @@ function mtgFormatDate(dateStr){
 const MS_CLIENT_ID = '422e01ef-e107-49a7-8c7b-4e04ce772bad';
 const MS_TENANT_ID = '2e905e36-dc9a-4abd-b156-82dffe6b3944';
 const MS_REDIRECT_URI = window.location.origin + window.location.pathname;
-const MS_SCOPES = ['User.Read', 'Calendars.Read', 'OnlineMeetings.Read', 'OnlineMeetingTranscript.Read.All'];
+// v130: Chat.Read added now that it's admin-consented on the app registration.
+// Primary sign-in requests it; fallback msTryAcquireChatToken still exists
+// for sessions signed in before the scope was added (caches don't carry over).
+const MS_SCOPES = ['User.Read', 'Calendars.Read', 'OnlineMeetings.Read', 'OnlineMeetingTranscript.Read.All', 'Chat.Read'];
 
 let msalInstance = null;
 let msalReady = null;        // a Promise that resolves once init + redirect-handling is done
