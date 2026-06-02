@@ -654,7 +654,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v120</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v121</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -9145,14 +9145,16 @@ function lblOnDrop(e, targetKey){
   lblRenderBoard();
 }
 
-// Try to open the issue detail pane (existing app function)
+// Open the existing issue detail pane. openPane(key) — note: takes the key
+// string, not the issue object. It already handles issues outside allIssues
+// by fetching them from Jira. v120's previous wrapper passed the object,
+// which made the inner code try /rest/api/3/issue/[object Object] → 404.
 function openIssueKey(key){
-  if (typeof openPane === 'function'){
-    const issue = (allIssues || []).find(i => i.key === key);
-    if (issue) { openPane(issue); return; }
+  if (typeof openPane === 'function') {
+    openPane(key);
+  } else {
+    window.open('https://loopup.atlassian.net/browse/' + key, '_blank');
   }
-  // Fallback: open in Jira
-  window.open('https://loopup.atlassian.net/browse/' + key, '_blank');
 }
 
 async function renderLabels(){
