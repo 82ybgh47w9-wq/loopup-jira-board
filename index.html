@@ -672,7 +672,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v122</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v123</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -1597,7 +1597,10 @@ async function fetchAllTeamIssues(){
   // v79: team list is auto-discovered from results — no more `assignee in (team)` pre-filter.
   // The project-group scope already narrows the data appropriately, and discovering team
   // members from real assignees means every user gets a fresh, accurate list with zero setup.
-  const fields="summary,status,assignee,priority,issuetype,updated,parent,description,project,subtasks,customfield_10014,comment";
+  // v123: include 'labels' so issues in the local cache (allIssues) have their
+  // labels populated. Without this, the detail pane shows 'No labels yet' for
+  // any issue that's already in the cache, even when Jira has labels on it.
+  const fields="summary,status,assignee,priority,issuetype,updated,parent,description,project,subtasks,customfield_10014,comment,labels";
   const projScope = getActiveProjectsJQL();
   let jql='statusCategory != Done ORDER BY updated DESC';
   if(currentProjFilter) jql='project='+currentProjFilter+' AND '+jql;
@@ -3057,7 +3060,7 @@ async function fetchDescendants(rootKey, levelsToTraverse){
       ? 'parent = '+currentParents[0]
       : 'parent in ('+currentParents.join(',')+')';
     const jql = parentClause + ' AND ' + typeFilter + ' ORDER BY rank ASC';
-    const url = '/rest/api/3/search/jql?jql='+encodeURIComponent(jql)+'&fields=summary,status,assignee,priority,issuetype,updated,parent&maxResults=200';
+    const url = '/rest/api/3/search/jql?jql='+encodeURIComponent(jql)+'&fields=summary,status,assignee,priority,issuetype,updated,parent,labels&maxResults=200';
     const d = await jiraGet(url);
     const issues = (d.issues||[]).map(parseIssue);
     if(i === levelsToTraverse.length - 1){
@@ -6471,7 +6474,7 @@ async function renderMyEpics() {
       const myEpicsShowDone = getShowDone('myepics');
       const doneClause = myEpicsShowDone ? '' : ' AND statusCategory != Done';
       const jql = 'issueType in (Task,"Sub-task",Story,Bug) AND parent in ('+epicKeys.join(',')+')' + doneClause + ' ORDER BY rank ASC';
-      const td = await jiraGet('/rest/api/3/search/jql?jql='+encodeURIComponent(jql)+'&fields=summary,status,assignee,priority,issuetype,updated,parent&maxResults=200');
+      const td = await jiraGet('/rest/api/3/search/jql?jql='+encodeURIComponent(jql)+'&fields=summary,status,assignee,priority,issuetype,updated,parent,labels&maxResults=200');
       myEpicsTasks = (td.issues||[]).map(parseIssue);
       // Also pick up tasks already in allIssues whose parent is one of our epics
       const extraTasks = allIssues.filter(i=>{
@@ -6501,7 +6504,7 @@ async function renderMyEpics() {
     if(parentKeys.size > 0) {
       try {
         const hierJql = 'key in ('+[...parentKeys].join(',')+')';
-        const hd = await jiraGet('/rest/api/3/search/jql?jql='+encodeURIComponent(hierJql)+'&fields=summary,status,assignee,priority,issuetype,updated,parent&maxResults=100');
+        const hd = await jiraGet('/rest/api/3/search/jql?jql='+encodeURIComponent(hierJql)+'&fields=summary,status,assignee,priority,issuetype,updated,parent,labels&maxResults=100');
         const hierIssues = (hd.issues||[]).map(parseIssue);
         // Add to allIssues for hierarchy lookups (avoid duplicates)
         hierIssues.forEach(hi => { if(!allIssues.find(x=>x.key===hi.key)) allIssues.push(hi); });
@@ -6509,7 +6512,7 @@ async function renderMyEpics() {
         const gp = new Set();
         hierIssues.forEach(hi => { if(hi.parent_key && !allIssues.find(x=>x.key===hi.parent_key)) gp.add(hi.parent_key); });
         if(gp.size > 0) {
-          const gpd = await jiraGet('/rest/api/3/search/jql?jql='+encodeURIComponent('key in ('+[...gp].join(',')+')')+'&fields=summary,status,assignee,priority,issuetype,updated,parent&maxResults=50');
+          const gpd = await jiraGet('/rest/api/3/search/jql?jql='+encodeURIComponent('key in ('+[...gp].join(',')+')')+'&fields=summary,status,assignee,priority,issuetype,updated,parent,labels&maxResults=50');
           (gpd.issues||[]).map(parseIssue).forEach(i => { if(!allIssues.find(x=>x.key===i.key)) allIssues.push(i); });
         }
       } catch {}
@@ -7445,7 +7448,7 @@ async function loadActivity() {
       // Fetch each in parallel — only their comments
       const supplementalFetches = myAssignedKeys.map(async k => {
         try {
-          const d = await jiraGet('/rest/api/3/issue/'+k+'?fields=summary,status,assignee,priority,issuetype,updated,parent,project,comment');
+          const d = await jiraGet('/rest/api/3/issue/'+k+'?fields=summary,status,assignee,priority,issuetype,updated,parent,project,comment,labels');
           return d;
         } catch { return null; }
       });
