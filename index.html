@@ -696,7 +696,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v127</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v128</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -7998,46 +7998,93 @@ async function msGraphFetch(path, opts){
 
 async function msLoadMeetings(force){
   if (!msSignedIn) return;
-  // Cache for 60s unless force-refreshed
   if (!force && msMeetings.length && (Date.now() - msMeetingsFetchedAt) < 60_000) return;
   try {
     const since = new Date();
     since.setDate(since.getDate() - 14);
     const startStr = since.toISOString();
     const endStr = new Date().toISOString();
-    // v126: Microsoft Graph does NOT support $filter on isOnlineMeeting
-    // (returns ErrorInvalidProperty). Filter only by date server-side; do
-    // the online-meeting and cancelled filtering client-side.
-    const filter = "start/dateTime ge '" + startStr + "' and start/dateTime le '" + endStr + "'";
-    const select = 'id,subject,start,end,organizer,attendees,onlineMeeting,webLink,isOrganizer,isCancelled,isOnlineMeeting';
-    const path = '/me/events?$filter=' + encodeURIComponent(filter) +
-                 '&$top=200&$orderby=start/dateTime desc&$select=' + encodeURIComponent(select);
-    const data = await msGraphFetch(path);
-    const events = (data.value || []).filter(e =>
+
+    // ── Source A: calendar events (scheduled meetings) ──
+    const evFilter = "start/dateTime ge '" + startStr + "' and start/dateTime le '" + endStr + "'";
+    const evSelect = 'id,subject,start,end,organizer,attendees,onlineMeeting,webLink,isOrganizer,isCancelled,isOnlineMeeting';
+    const evPath = '/me/events?$filter=' + encodeURIComponent(evFilter) +
+                   '&$top=200&$orderby=start/dateTime desc&$select=' + encodeURIComponent(evSelect);
+    const evData = await msGraphFetch(evPath);
+    const events = (evData.value || []).filter(e =>
       !e.isCancelled && (e.isOnlineMeeting === true || !!e.onlineMeeting)
     );
-    msMeetings = events.map(e => ({
-      // v127: id is now derived from joinWebUrl (stable across users) so
-      // the processed-status badge syncs when different team members view
-      // the same meeting. Falls back to event.id if no joinUrl.
-      id: msMeetingFingerprint(e.onlineMeeting?.joinUrl) || ('m_evt_' + e.id),
-      _msEventId: e.id,
-      _joinUrl: e.onlineMeeting?.joinUrl || '',
-      _webLink: e.webLink || '',
-      title: e.subject || '(no subject)',
-      date: (e.start?.dateTime || '').slice(0, 10),
-      start: (e.start?.dateTime || '').slice(11, 16),
-      end: (e.end?.dateTime || '').slice(11, 16),
-      organizer: e.organizer?.emailAddress?.name || e.organizer?.emailAddress?.address || 'Unknown',
-      isOrganizer: !!e.isOrganizer,
-      attendees: (e.attendees || []).map(a => a.emailAddress?.name || a.emailAddress?.address).filter(Boolean),
-      transcriptStatus: 'unknown',  // 'unknown' | 'checking' | 'has' | 'none' | 'error'
-      _omId: null                    // cached online-meeting id once discovered
-    }));
+
+    // ── Source B (v128): onlineMeetings the user organized, including
+    //     ad-hoc calls started from a chat that have no calendar entry. ──
+    // Filter by creationDateTime so we only get meetings from the same
+    // 14-day window — avoids years-old chat thread meetings.
+    let organized = [];
+    try {
+      const omFilter = "creationDateTime ge " + startStr + " and creationDateTime le " + endStr;
+      const omPath = '/me/onlineMeetings?$filter=' + encodeURIComponent(omFilter);
+      const omData = await msGraphFetch(omPath);
+      organized = (omData.value || []);
+    } catch(e){
+      // Some tenants restrict /me/onlineMeetings — keep going with calendar only
+      appLogMsg('warn', 'graph', 'onlineMeetings fetch failed (continuing with calendar): ' + (e.message || e));
+    }
+
+    // ── Merge + dedupe by joinWebUrl ──
+    const byJoinUrl = new Map();
+    // Calendar events first (they have more metadata — attendees, organizer name)
+    for (const e of events){
+      const join = e.onlineMeeting?.joinUrl;
+      if (!join) continue;
+      byJoinUrl.set(join, {
+        id: msMeetingFingerprint(join) || ('m_evt_' + e.id),
+        _source: 'calendar',
+        _msEventId: e.id,
+        _joinUrl: join,
+        _webLink: e.webLink || '',
+        title: e.subject || '(no subject)',
+        date: (e.start?.dateTime || '').slice(0, 10),
+        start: (e.start?.dateTime || '').slice(11, 16),
+        end: (e.end?.dateTime || '').slice(11, 16),
+        _startMs: new Date(e.start?.dateTime || 0).getTime(),
+        _endMs: new Date(e.end?.dateTime || e.start?.dateTime || 0).getTime(),
+        organizer: e.organizer?.emailAddress?.name || e.organizer?.emailAddress?.address || 'Unknown',
+        isOrganizer: !!e.isOrganizer,
+        attendees: (e.attendees || []).map(a => a.emailAddress?.name || a.emailAddress?.address).filter(Boolean),
+        transcriptStatus: 'unknown',
+        _omId: null
+      });
+    }
+    // Then ad-hoc onlineMeetings — only add if not already present from calendar
+    for (const om of organized){
+      const join = om.joinWebUrl;
+      if (!join || byJoinUrl.has(join)) continue;
+      const startIso = om.startDateTime || om.creationDateTime || '';
+      const endIso = om.endDateTime || startIso;
+      byJoinUrl.set(join, {
+        id: msMeetingFingerprint(join),
+        _source: 'onlineMeeting',
+        _msEventId: null,
+        _joinUrl: join,
+        _webLink: om.joinWebUrl || '',
+        title: om.subject || '(Ad-hoc call)',
+        date: startIso.slice(0, 10),
+        start: startIso.slice(11, 16),
+        end: endIso.slice(11, 16),
+        _startMs: new Date(startIso || 0).getTime(),
+        _endMs: new Date(endIso || startIso || 0).getTime(),
+        organizer: om.participants?.organizer?.identity?.user?.displayName || 'You',
+        isOrganizer: true,
+        attendees: (om.participants?.attendees || []).map(a => a.identity?.user?.displayName).filter(Boolean),
+        transcriptStatus: 'unknown',
+        _omId: om.id  // already known for ad-hoc — skip lookup later
+      });
+    }
+
+    msMeetings = [...byJoinUrl.values()].sort((a, b) => (b._startMs || 0) - (a._startMs || 0));
     msMeetingsFetchedAt = Date.now();
-    appLogMsg('info', 'graph', 'Loaded ' + msMeetings.length + ' meetings from Graph');
+    appLogMsg('info', 'graph', 'Loaded ' + msMeetings.length + ' meetings (calendar: ' + events.length + ', ad-hoc organized: ' + organized.length + ')');
     msAuthError = null;
-    // Kick off background transcript scan — don't await, list renders immediately
     msScanTranscripts();
     renderMtgInputArea();
   } catch(e){
@@ -8199,76 +8246,125 @@ async function msFetchMeetingChat(meetingObj){
   const chatToken = await msTryAcquireChatToken();
   if (!chatToken) return null;
   try {
-    // 1) Find the online meeting to get the chatInfo.threadId
-    const filterEncoded = encodeURIComponent("joinWebUrl eq '" + meetingObj._joinUrl + "'");
-    const lookup = await msGraphFetch('/me/onlineMeetings?$filter=' + filterEncoded);
-    const onlineMeeting = (lookup.value || [])[0];
-    const threadId = onlineMeeting?.chatInfo?.threadId;
+    // 1) Find the online meeting to get the chatInfo.threadId (skip if cached)
+    let threadId = null;
+    if (meetingObj._omId){
+      // We already have the OM id; fetch just the chatInfo
+      const detail = await msGraphFetch('/me/onlineMeetings/' + meetingObj._omId + '?$select=chatInfo');
+      threadId = detail.chatInfo?.threadId;
+    } else {
+      const filterEncoded = encodeURIComponent("joinWebUrl eq '" + meetingObj._joinUrl + "'");
+      const lookup = await msGraphFetch('/me/onlineMeetings?$filter=' + filterEncoded);
+      const om = (lookup.value || [])[0];
+      threadId = om?.chatInfo?.threadId;
+      if (om) meetingObj._omId = om.id;
+    }
     if (!threadId) return null;
-    // 2) Fetch messages from that chat (use the chat-scoped token)
+
+    // 2) v128: Time-window the chat fetch to ±1 hour around the meeting.
+    //    Critical for ad-hoc calls in long-running chat threads where the
+    //    chat history could span years. We only want messages contextually
+    //    related to this specific recording.
+    const WINDOW_MS = 60 * 60 * 1000; // 1 hour
+    const startMs = meetingObj._startMs || Date.now();
+    const endMs = meetingObj._endMs || startMs;
+    const winStart = new Date(startMs - WINDOW_MS).toISOString();
+    const winEnd = new Date(endMs + WINDOW_MS).toISOString();
+    // Note: chat-messages $filter on createdDateTime is supported via ge/le
+    const msgFilter = "createdDateTime ge " + winStart + " and createdDateTime le " + winEnd;
     const r = await fetch('https://graph.microsoft.com/v1.0/me/chats/' + encodeURIComponent(threadId) +
-                          '/messages?$top=100&$orderby=createdDateTime asc', {
+                          '/messages?$top=200&$orderby=createdDateTime asc&$filter=' + encodeURIComponent(msgFilter), {
       headers: { 'Authorization': 'Bearer ' + chatToken, 'Accept': 'application/json' }
     });
-    if (!r.ok) return null;
+    if (!r.ok) {
+      // If filter is rejected by the tenant, fall back to top-100 with no filter
+      // (cap is still bounded by $top to avoid pulling years of history)
+      const r2 = await fetch('https://graph.microsoft.com/v1.0/me/chats/' + encodeURIComponent(threadId) +
+                             '/messages?$top=100&$orderby=createdDateTime desc', {
+        headers: { 'Authorization': 'Bearer ' + chatToken, 'Accept': 'application/json' }
+      });
+      if (!r2.ok) return null;
+      const d2 = await r2.json();
+      // Filter client-side to the time window
+      const messages = (d2.value || []).filter(m => {
+        const t = new Date(m.createdDateTime || 0).getTime();
+        return t >= (startMs - WINDOW_MS) && t <= (endMs + WINDOW_MS);
+      });
+      return msFormatChatMessages(messages);
+    }
     const data = await r.json();
     const messages = data.value || [];
     if (!messages.length) return null;
-    // 3) Format as a readable log
-    const out = ['--- Meeting chat ---'];
-    for (const m of messages){
-      if (m.messageType && m.messageType !== 'message') continue; // skip system messages
-      const ts = m.createdDateTime ? m.createdDateTime.slice(11, 16) : '';
-      const from = m.from?.user?.displayName ||
-                   m.from?.application?.displayName ||
-                   'Unknown';
-      const raw = m.body?.content || '';
-      const text = raw.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
-      if (!text) continue;
-      out.push((ts ? '['+ts+'] ' : '') + from + ': ' + text);
-    }
-    return out.length > 1 ? out.join('\n') : null;
+    return msFormatChatMessages(messages);
   } catch(e){
     appLogMsg('warn', 'graph', 'Chat fetch failed: ' + (e.message || e));
     return null;
   }
 }
 
-async function msFetchTranscriptIntoPaste(meetingId){
+// v128: extracted into its own helper so the time-window filter fallback
+// can reuse the same formatting.
+function msFormatChatMessages(messages){
+  if (!messages || !messages.length) return null;
+  const out = ['--- Meeting chat (messages within ±1hr of the meeting) ---'];
+  for (const m of messages){
+    if (m.messageType && m.messageType !== 'message') continue; // skip system messages
+    const ts = m.createdDateTime ? m.createdDateTime.slice(11, 16) : '';
+    const from = m.from?.user?.displayName ||
+                 m.from?.application?.displayName ||
+                 'Unknown';
+    const raw = m.body?.content || '';
+    const text = raw.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!text) continue;
+    out.push((ts ? '['+ts+'] ' : '') + from + ': ' + text);
+  }
+  return out.length > 1 ? out.join('\n') : null;
+}
+
+// v128: single-click flow — fetch transcript (+chat) AND extract tasks
+// in one button press. Replaces the previous two-button flow.
+async function msFetchAndExtract(meetingId){
   const m = msMeetings.find(x => x.id === meetingId);
   if (!m) return;
   const ta = document.getElementById('mtg-detail-paste');
-  if (ta) {
-    ta.value = '';
-    ta.placeholder = 'Fetching transcript via Microsoft Graph…';
-    ta.disabled = true;
-  }
   const btn = document.getElementById('ms-fetch-transcript-btn');
+  if (ta) { ta.value = ''; ta.placeholder = 'Fetching transcript via Microsoft Graph…'; ta.disabled = true; }
   if (btn) { btn.disabled = true; btn.innerHTML = spinHtml(12, '#125462') + ' Fetching transcript…'; }
+  let combined = '';
   try {
     const text = await msFetchTranscript(m);
-    // Try to enrich with chat — graceful no-op if Chat.Read not granted
-    if (btn) btn.innerHTML = spinHtml(12, '#125462') + ' Fetching chat messages…';
+    if (btn) btn.innerHTML = spinHtml(12, '#125462') + ' Fetching chat (within ±1hr)…';
     const chatLog = await msFetchMeetingChat(m);
-    const combined = chatLog ? (text + '\n\n' + chatLog) : text;
-    if (ta) {
-      ta.value = combined;
-      ta.disabled = false;
-    }
+    combined = chatLog ? (text + '\n\n' + chatLog) : text;
+    if (ta) { ta.value = combined; ta.disabled = false; }
     if (btn) {
-      btn.innerHTML = chatLog
-        ? '✓ Transcript + chat loaded — review and click Extract Tasks'
-        : '✓ Transcript loaded — review and click Extract Tasks';
+      btn.innerHTML = (chatLog ? '✓ Transcript + chat loaded' : '✓ Transcript loaded')
+        + spinHtml(12, '#125462') + ' Extracting tasks…';
     }
+    // Pre-fill meeting context for the AI extraction
+    mtgMeetingTitle = m.title || 'Untitled meeting';
+    mtgMeetingDate = m.date || '';
+    mtgCurrentMeetingId = m.id;
+    setMtgSource('paste');
+    // Hand the transcript over to the existing extraction flow
+    setTimeout(() => {
+      const ttl = document.getElementById('mtg-title');
+      const att = document.getElementById('mtg-attendees');
+      const tr  = document.getElementById('mtg-transcript');
+      if (ttl) ttl.value = m.title;
+      if (att) att.value = (m.attendees || []).join(', ');
+      if (tr)  tr.value  = combined;
+      mtgExtract();
+    }, 60);
   } catch(e){
-    if (ta) {
-      ta.disabled = false;
-      ta.placeholder = 'Paste the meeting transcript here…';
-    }
+    if (ta) { ta.disabled = false; ta.placeholder = 'Paste the meeting transcript here…'; }
     if (btn) { btn.disabled = false; btn.innerHTML = '↻ Try again'; }
     alert('Could not fetch transcript:\n\n' + (e.message || e) + '\n\nYou can still paste the transcript manually.');
   }
 }
+
+// Keep the old function as an alias for any deep links / older buttons
+async function msFetchTranscriptIntoPaste(meetingId){ return msFetchAndExtract(meetingId); }
 
 function mtgRenderMeetingList(){
   // v124: data source is now live msMeetings (from Microsoft Graph).
@@ -8384,13 +8480,10 @@ function mtgRenderDetailPanel(m, proc){
     </div>
     ${procBlock}
     ${(msSignedIn && m._joinUrl) ? `
-      <div style="font-size:11px;color:#5D7987;margin:8px 0 6px">
-        <b>Transcript</b> — fetch via Microsoft Graph, or paste manually below:
-      </div>
-      <button class="ms-fetch-transcript" id="ms-fetch-transcript-btn" onclick="msFetchTranscriptIntoPaste('${m.id}')">
-        ⚡ Fetch transcript from Teams
+      <button class="ms-fetch-transcript" id="ms-fetch-transcript-btn" onclick="msFetchAndExtract('${m.id}')" style="width:100%;justify-content:center;padding:12px;font-size:13px">
+        ⚡ Fetch transcript + extract tasks
       </button>
-      <div class="ms-transcript-info">Pulls the meeting transcript (and chat messages if available). May fail if the meeting wasn't recorded with transcription enabled.</div>
+      <div class="ms-transcript-info">Pulls the Teams transcript (and chat messages within ±1hr of the meeting if Chat.Read is granted), then runs AI extraction in one step. Or paste manually below.</div>
     ` : `
       <div style="font-size:11px;color:#5D7987;margin:8px 0 4px">
         <b>Paste transcript</b> below${msSignedIn ? ' (this meeting has no Teams join URL — auto-fetch unavailable)' : ' — or sign in with Microsoft to auto-fetch'}:
