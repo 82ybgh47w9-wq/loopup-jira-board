@@ -602,7 +602,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v117</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v118</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -7978,10 +7978,25 @@ Return ONLY the JSON array.`
 async function mtgCheckDuplicates() {
   if (!mtgTasks.length) return;
   try {
-    // Step 1: Batched JQL across ALL tasks
     const allCandidates = [];
     const seenKeys = new Set();
-    const batchSize = 6; // 6 OR clauses per query keeps URL short
+    const pushCandidate = (issue) => {
+      if (seenKeys.has(issue.key)) return;
+      seenKeys.add(issue.key);
+      const statusName = issue.fields.status?.name || '';
+      allCandidates.push({
+        key: issue.key,
+        summary: issue.fields.summary,
+        project: issue.fields.project?.key,
+        status: statusName,
+        type: issue.fields.issuetype?.name,
+        assignee: issue.fields.assignee?.displayName || '',
+        isClosed: /done|closed|resolved|cancelled|won't.?do/i.test(statusName)
+      });
+    };
+
+    // Step 1a: Batched JQL keyword search across ALL extracted tasks
+    const batchSize = 6;
     for (let i = 0; i < mtgTasks.length; i += batchSize) {
       const batch = mtgTasks.slice(i, i + batchSize);
       const searchTerms = batch
@@ -7991,22 +8006,27 @@ async function mtgCheckDuplicates() {
       const jql = searchTerms.map(s => 'summary ~ "' + s.replace(/"/g, '') + '"').join(' OR ');
       try {
         const d = await jiraGet('/rest/api/3/search/jql?jql=' + encodeURIComponent(jql + ' ORDER BY updated DESC') + '&fields=summary,status,project,issuetype,assignee&maxResults=30');
-        for (const issue of (d.issues || [])) {
-          if (seenKeys.has(issue.key)) continue;
-          seenKeys.add(issue.key);
-          const statusName = issue.fields.status?.name || '';
-          allCandidates.push({
-            key: issue.key,
-            summary: issue.fields.summary,
-            project: issue.fields.project?.key,
-            status: statusName,
-            type: issue.fields.issuetype?.name,
-            assignee: issue.fields.assignee?.displayName || '',
-            isClosed: /done|closed|resolved|cancelled|won't.?do/i.test(statusName)
-          });
-        }
-      } catch (e) { /* keep going across batches */ }
+        (d.issues || []).forEach(pushCandidate);
+      } catch (e) { /* keep going */ }
     }
+    const keywordCount = allCandidates.length;
+
+    // Step 1b (v118): Recent-issues sweep per relevant project.
+    // Keyword search alone misses tasks whose titles share few literal words
+    // with the new task — e.g. "Send eSIM to Marcus for Turkey test" vs
+    // existing "Testing - provide eSIM for Testing in Turkey". This sweep
+    // pulls the 80 most recently updated tasks in every relevant project,
+    // so newly created or recently touched issues always land in the pool.
+    const relevantProjects = [...new Set(mtgTasks.map(t => t.project).filter(Boolean))];
+    for (const proj of relevantProjects) {
+      try {
+        const jql = `project = "${proj}" ORDER BY updated DESC`;
+        const d = await jiraGet('/rest/api/3/search/jql?jql=' + encodeURIComponent(jql) + '&fields=summary,status,project,issuetype,assignee&maxResults=80');
+        (d.issues || []).forEach(pushCandidate);
+      } catch (e) { /* keep going */ }
+    }
+
+    appLogMsg('info', 'meetings', 'Dedup pool: ' + keywordCount + ' from keyword search + ' + (allCandidates.length - keywordCount) + ' from recent-issues sweep across ' + relevantProjects.length + ' project(s) = ' + allCandidates.length + ' total candidates');
     if (!allCandidates.length) return;
 
     // Step 2: Local fuzzy match (word overlap) per task — pick best match
@@ -8056,7 +8076,8 @@ async function mtgAiSemanticDedup(allCandidates) {
   if (!tasksToCheck.length || !allCandidates.length) return;
 
   // Trim candidate list to keep prompt size manageable
-  const cands = allCandidates.slice(0, 40);
+  // v118: increased from 40 to 80 to match the broader recent-issues sweep
+  const cands = allCandidates.slice(0, 80);
 
   const prompt =
     `For each NEW TASK below, determine if it is a duplicate (same work item, even if worded differently) of any EXISTING task.\n\n` +
