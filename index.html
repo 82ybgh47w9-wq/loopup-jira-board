@@ -696,7 +696,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v126</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v127</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -7869,6 +7869,9 @@ let msSignedIn = false;
 let msMeetings = [];         // live meetings cache
 let msMeetingsFetchedAt = 0;
 let msAuthError = null;      // last auth/graph error message
+// v127: when true, the meeting list hides meetings whose scan determined
+// they have no transcript. Persisted in localStorage.
+let msOnlyProcessable = (localStorage.getItem('ms_only_processable') !== '0');
 
 function msInit(){
   if (msalReady) return msalReady;
@@ -8014,7 +8017,10 @@ async function msLoadMeetings(force){
       !e.isCancelled && (e.isOnlineMeeting === true || !!e.onlineMeeting)
     );
     msMeetings = events.map(e => ({
-      id: 'm_' + e.id,
+      // v127: id is now derived from joinWebUrl (stable across users) so
+      // the processed-status badge syncs when different team members view
+      // the same meeting. Falls back to event.id if no joinUrl.
+      id: msMeetingFingerprint(e.onlineMeeting?.joinUrl) || ('m_evt_' + e.id),
       _msEventId: e.id,
       _joinUrl: e.onlineMeeting?.joinUrl || '',
       _webLink: e.webLink || '',
@@ -8024,11 +8030,15 @@ async function msLoadMeetings(force){
       end: (e.end?.dateTime || '').slice(11, 16),
       organizer: e.organizer?.emailAddress?.name || e.organizer?.emailAddress?.address || 'Unknown',
       isOrganizer: !!e.isOrganizer,
-      attendees: (e.attendees || []).map(a => a.emailAddress?.name || a.emailAddress?.address).filter(Boolean)
+      attendees: (e.attendees || []).map(a => a.emailAddress?.name || a.emailAddress?.address).filter(Boolean),
+      transcriptStatus: 'unknown',  // 'unknown' | 'checking' | 'has' | 'none' | 'error'
+      _omId: null                    // cached online-meeting id once discovered
     }));
     msMeetingsFetchedAt = Date.now();
     appLogMsg('info', 'graph', 'Loaded ' + msMeetings.length + ' meetings from Graph');
     msAuthError = null;
+    // Kick off background transcript scan — don't await, list renders immediately
+    msScanTranscripts();
     renderMtgInputArea();
   } catch(e){
     msAuthError = 'Failed to load meetings: ' + (e.message || e);
@@ -8038,14 +8048,84 @@ async function msLoadMeetings(force){
 }
 
 // Fetch the transcript for a meeting. Two-step: find onlineMeeting by joinUrl,
+// v127: stable cross-user fingerprint derived from joinWebUrl. All users
+// see the same id for the same meeting → processed badge syncs across team.
+function msMeetingFingerprint(joinUrl){
+  if (!joinUrl) return null;
+  let h = 0;
+  for (let i = 0; i < joinUrl.length; i++){
+    h = ((h << 5) - h + joinUrl.charCodeAt(i)) | 0;
+  }
+  return 'm_url_' + Math.abs(h).toString(36);
+}
+
+// v127: Background scan — for each meeting with a joinUrl, check whether
+// a transcript exists. Sets meeting.transcriptStatus. Concurrency-limited
+// so we don't hammer Graph. Triggers a re-render after each batch.
+let msScanInProgress = false;
+async function msScanTranscripts(){
+  if (msScanInProgress) return;
+  msScanInProgress = true;
+  const todo = msMeetings.filter(m => m._joinUrl && m.transcriptStatus === 'unknown');
+  for (const m of todo) m.transcriptStatus = 'checking';
+  // Re-render so badges show "checking..."
+  if (mtgSource === 'auto') renderMtgInputArea();
+
+  const CONCURRENCY = 4;
+  let cursor = 0;
+  const workers = [];
+  for (let w = 0; w < CONCURRENCY; w++){
+    workers.push((async () => {
+      while (cursor < todo.length){
+        const m = todo[cursor++];
+        if (!m) break;
+        try {
+          const lookup = await msGraphFetch('/me/onlineMeetings?$filter=' +
+            encodeURIComponent("joinWebUrl eq '" + m._joinUrl + "'"));
+          const om = (lookup.value || [])[0];
+          if (!om) { m.transcriptStatus = 'none'; continue; }
+          m._omId = om.id;
+          const tr = await msGraphFetch('/me/onlineMeetings/' + om.id + '/transcripts');
+          m.transcriptStatus = (tr.value || []).length ? 'has' : 'none';
+        } catch(e){
+          m.transcriptStatus = 'error';
+        }
+      }
+    })());
+  }
+  // Periodically re-render while scanning so badges update progressively
+  const renderInterval = setInterval(() => {
+    if (mtgSource === 'auto') renderMtgInputArea();
+  }, 800);
+  try {
+    await Promise.all(workers);
+  } finally {
+    clearInterval(renderInterval);
+    msScanInProgress = false;
+    if (mtgSource === 'auto') renderMtgInputArea();
+    const counts = msMeetings.reduce((acc, m) => {
+      acc[m.transcriptStatus] = (acc[m.transcriptStatus] || 0) + 1;
+      return acc;
+    }, {});
+    appLogMsg('info', 'graph', 'Transcript scan complete: ' + JSON.stringify(counts));
+  }
+}
+
 // then list transcripts, then download the VTT content.
 async function msFetchTranscript(meetingObj){
   if (!meetingObj || !meetingObj._joinUrl) throw new Error('This meeting has no Teams join URL — transcript unavailable.');
-  // Step 1: find the online meeting
-  const filterEncoded = encodeURIComponent("joinWebUrl eq '" + meetingObj._joinUrl + "'");
-  const lookup = await msGraphFetch('/me/onlineMeetings?$filter=' + filterEncoded);
-  const onlineMeeting = (lookup.value || [])[0];
-  if (!onlineMeeting) throw new Error('No online meeting record found in Graph. The meeting may not have been recorded.');
+  // v127: reuse the cached online-meeting id from the background scan when
+  // available, falling back to a fresh joinWebUrl lookup if not yet cached.
+  let onlineMeeting;
+  if (meetingObj._omId){
+    onlineMeeting = { id: meetingObj._omId };
+  } else {
+    const filterEncoded = encodeURIComponent("joinWebUrl eq '" + meetingObj._joinUrl + "'");
+    const lookup = await msGraphFetch('/me/onlineMeetings?$filter=' + filterEncoded);
+    onlineMeeting = (lookup.value || [])[0];
+    if (!onlineMeeting) throw new Error('No online meeting record found in Graph. The meeting may not have been recorded.');
+    meetingObj._omId = onlineMeeting.id;
+  }
   // Step 2: list transcripts
   const list = await msGraphFetch('/me/onlineMeetings/' + onlineMeeting.id + '/transcripts');
   const transcripts = list.value || [];
@@ -8196,17 +8276,47 @@ function mtgRenderMeetingList(){
   const source = (msMeetings && msMeetings.length) ? msMeetings : MTG_REAL_MEETINGS;
   // Filter by search query (title or attendee name)
   const q = (mtgListFilter || '').toLowerCase().trim();
-  const filtered = q
+  let filtered = q
     ? source.filter(m =>
         m.title.toLowerCase().includes(q) ||
         m.organizer.toLowerCase().includes(q) ||
         m.attendees.some(a => a.toLowerCase().includes(q))
       )
-    : source;
+    : source.slice();
+
+  // v127: "Only processable" — hide meetings the scan determined have no
+  // transcript. Keep 'unknown' and 'checking' visible (don't hide what we
+  // don't yet know). Always keep 'has', 'error', and meetings that are
+  // currently processed (they may have had their transcript at the time).
+  if (msOnlyProcessable && msSignedIn && msMeetings.length){
+    filtered = filtered.filter(m => {
+      const proc = mtgProcessedMap[m.id];
+      if (proc) return true; // never hide a processed meeting
+      const st = m.transcriptStatus;
+      return st !== 'none'; // hide only confirmed-none
+    });
+  }
+
+  const scanRemaining = msMeetings.filter(m => m._joinUrl && (m.transcriptStatus === 'unknown' || m.transcriptStatus === 'checking')).length;
+  const scanComplete = msMeetings.length > 0 && scanRemaining === 0;
+  const hiddenCount = (msSignedIn && msOnlyProcessable && msMeetings.length)
+    ? msMeetings.filter(m => m.transcriptStatus === 'none' && !mtgProcessedMap[m.id]).length
+    : 0;
+
+  // Header: search input + filter toggle + scan progress
+  const header = `<input class="mtg-list-search" placeholder="Search meetings, organizer, or attendee…" value="${_escHtml(mtgListFilter)}" oninput="mtgListFilter=this.value;document.getElementById('mtg-input-area').innerHTML=mtgRenderMeetingList()">
+    <div style="display:flex;align-items:center;gap:10px;padding:0 0 8px;font-size:11px;color:#9EA0A4;flex-wrap:wrap">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#292E37">
+        <input type="checkbox" ${msOnlyProcessable?'checked':''} onchange="msOnlyProcessable=this.checked;localStorage.setItem('ms_only_processable',this.checked?'1':'0');document.getElementById('mtg-input-area').innerHTML=mtgRenderMeetingList()">
+        <span>Only show meetings with a transcript</span>
+      </label>
+      ${msSignedIn && msMeetings.length ? (scanComplete
+        ? `<span>Scan complete · ${hiddenCount} hidden</span>`
+        : `<span style="display:flex;align-items:center;gap:6px">${spinHtml(11,'#9EA0A4')} Scanning ${scanRemaining} meeting${scanRemaining===1?'':'s'}…</span>`) : ''}
+    </div>`;
 
   if(!filtered.length){
-    return `<input class="mtg-list-search" placeholder="Search meetings, organizer, or attendee…" value="${_escHtml(mtgListFilter)}" oninput="mtgListFilter=this.value;document.getElementById('mtg-input-area').innerHTML=mtgRenderMeetingList()">
-      <div class="mtg-list-empty">${msSignedIn && msMeetings.length === 0 ? `${spinHtml(14)} Loading meetings from Microsoft 365…` : `No meetings match "${_escHtml(q)}"`}</div>`;
+    return header + `<div class="mtg-list-empty">${msSignedIn && msMeetings.length === 0 ? `${spinHtml(14)} Loading meetings from Microsoft 365…` : (q ? `No meetings match "${_escHtml(q)}"` : (hiddenCount ? `All ${hiddenCount} meetings hidden — uncheck "Only show meetings with a transcript" to see them all.` : 'No meetings.'))}</div>`;
   }
 
   // Group by date
@@ -8216,29 +8326,37 @@ function mtgRenderMeetingList(){
   }
   const dates = Object.keys(byDate).sort().reverse();
 
-  let html = `<input class="mtg-list-search" placeholder="Search meetings, organizer, or attendee…" value="${_escHtml(mtgListFilter)}" oninput="mtgListFilter=this.value;document.getElementById('mtg-input-area').innerHTML=mtgRenderMeetingList()">
-    <div style="font-size:10px;color:#9EA0A4;padding:0 0 8px;line-height:1.4">
-      Your real Teams meetings from the last 14 days (live snapshot via Microsoft 365).
-      <br>Click any meeting to expand. Status badges sync from Cloudflare KV.
-    </div>`;
+  let html = header;
 
   for(const date of dates){
     html += `<div class="mtg-list-day-hdr">${mtgFormatDate(date)}</div>`;
     for(const m of byDate[date]){
       const proc = mtgProcessedMap[m.id];
       const selected = mtgSelectedMeetingId === m.id;
-      const statusPill = proc
+      // Primary status pill
+      const primaryPill = proc
         ? `<span class="mtg-status-pill mtg-status-done">✓ Processed</span>`
         : m.isOrganizer
           ? `<span class="mtg-status-pill mtg-status-org">Yours</span>`
           : `<span class="mtg-status-pill mtg-status-avail">Available</span>`;
+      // Transcript status pill (only when relevant and from live data)
+      let transcriptPill = '';
+      if (m.transcriptStatus === 'checking' || m.transcriptStatus === 'unknown'){
+        transcriptPill = `<span class="mtg-status-pill" style="background:#F7F8F9;color:#9EA0A4">…scan</span>`;
+      } else if (m.transcriptStatus === 'has'){
+        transcriptPill = `<span class="mtg-status-pill" style="background:#E0F0F8;color:#125462">📄 Transcript</span>`;
+      } else if (m.transcriptStatus === 'none'){
+        transcriptPill = `<span class="mtg-status-pill" style="background:#EEF1F3;color:#73777C">No transcript</span>`;
+      } else if (m.transcriptStatus === 'error'){
+        transcriptPill = `<span class="mtg-status-pill" style="background:#FCEBEB;color:#A11820" title="Scan failed for this meeting">scan ✗</span>`;
+      }
       html += `<div class="mtg-row ${selected?'selected':''} ${proc?'is-processed':''}" onclick="mtgSelectMeeting('${m.id}')">
         <div class="mtg-row-time">${m.start}</div>
         <div class="mtg-row-content">
           <div class="mtg-row-title">${_escHtml(m.title)}</div>
           <div class="mtg-row-meta">${_escHtml(m.organizer)} · ${m.attendees.length} attendee${m.attendees.length===1?'':'s'}</div>
         </div>
-        <div class="mtg-row-status">${statusPill}</div>
+        <div class="mtg-row-status">${transcriptPill}${primaryPill}</div>
       </div>`;
       if(selected){
         html += mtgRenderDetailPanel(m, proc);
