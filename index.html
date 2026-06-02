@@ -704,7 +704,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v133</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v134</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -8074,20 +8074,11 @@ async function msLoadMeetings(force){
       !e.isCancelled && (e.isOnlineMeeting === true || !!e.onlineMeeting)
     );
 
-    // ── Source B (v128): onlineMeetings the user organized, including
-    //     ad-hoc calls started from a chat that have no calendar entry. ──
-    // Filter by creationDateTime so we only get meetings from the same
-    // 14-day window — avoids years-old chat thread meetings.
-    let organized = [];
-    try {
-      const omFilter = "creationDateTime ge " + startStr + " and creationDateTime le " + endStr;
-      const omPath = '/me/onlineMeetings?$filter=' + encodeURIComponent(omFilter);
-      const omData = await msGraphFetch(omPath);
-      organized = (omData.value || []);
-    } catch(e){
-      // Some tenants restrict /me/onlineMeetings — keep going with calendar only
-      appLogMsg('warn', 'graph', 'onlineMeetings fetch failed (continuing with calendar): ' + (e.message || e));
-    }
+    // ── Source B (v134): DISABLED ── /me/onlineMeetings doesn't support
+    //  $filter on creationDateTime (only videoTeleconferenceId / joinWebUrl
+    //  are filterable). Chat scanning (Source C) covers organized ad-hoc
+    //  calls anyway — they appear in the user's own chat history.
+    const organized = [];
 
     // ── Merge + dedupe by joinWebUrl ──
     const byJoinUrl = new Map();
@@ -8172,20 +8163,27 @@ async function msLoadMeetings(force){
 async function msFetchAdhocFromChats(existingByJoinUrl, sinceIso){
   const found = [];
 
-  // Step 1: list recently-active chats. lastUpdatedDateTime filter avoids
-  // pulling years of stale chats.
+  // Step 1: list recent chats. v134 NOTE: /me/chats does NOT support
+  // $filter on lastUpdatedDateTime (Graph only allows $filter on chatType
+  // here). So we fetch top 50 and filter/sort client-side.
   let chats = [];
   try {
-    const filter = "lastUpdatedDateTime ge " + sinceIso;
-    const data = await msGraphFetch('/me/chats?$top=50&$filter=' + encodeURIComponent(filter) + '&$orderby=lastUpdatedDateTime desc');
+    const data = await msGraphFetch('/me/chats?$top=50');
     chats = data.value || [];
   } catch(e){
-    // v133: if this fails with 403 it usually means Chat.Read isn't in the token —
-    // user signed in before the scope was added. Suggest re-sign-in.
+    // 403 here usually means Chat.Read isn't in the token — user signed
+    // in before the scope was added. Suggest re-sign-in.
     appLogMsg('warn', 'graph', 'List chats failed (Chat.Read missing? Try signing out & in.): ' + (e.message || e));
     return found;
   }
-  appLogMsg('info', 'graph', 'Chat scan: found ' + chats.length + ' chats updated in window');
+  // Client-side: sort by lastUpdatedDateTime desc, then keep only those
+  // updated within the time window.
+  const sinceMs = new Date(sinceIso).getTime();
+  chats = chats
+    .map(c => ({ ...c, _updMs: new Date(c.lastUpdatedDateTime || 0).getTime() }))
+    .filter(c => c._updMs >= sinceMs)
+    .sort((a, b) => b._updMs - a._updMs);
+  appLogMsg('info', 'graph', 'Chat scan: ' + chats.length + ' chats updated in window (of 50 fetched)');
   if (!chats.length) return found;
   let recordingEventsSeen = 0;
   let chatsWithEvents = 0;
