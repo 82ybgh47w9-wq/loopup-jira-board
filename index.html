@@ -704,7 +704,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v136</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v137</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -8168,7 +8168,9 @@ async function msFetchAdhocFromChats(existingByJoinUrl, sinceIso){
   // here). So we fetch top 50 and filter/sort client-side.
   let chats = [];
   try {
-    const data = await msGraphFetch('/me/chats?$top=50');
+    // v137: $expand=members so chat-discovered meetings get participant names
+    // (the onlineMeeting object often isn't accessible for non-organisers).
+    const data = await msGraphFetch('/me/chats?$top=50&$expand=members');
     chats = data.value || [];
   } catch(e){
     // 403 here usually means Chat.Read isn't in the token — user signed
@@ -8255,6 +8257,20 @@ async function msFetchAdhocFromChats(existingByJoinUrl, sinceIso){
               endMs += (hrs*3600 + mins*60 + secs) * 1000;
             }
 
+            // v137: derive attendees from chat members (works for ad-hoc calls
+            // where the onlineMeeting object isn't accessible).
+            const chatMembers = (chat.members || [])
+              .map(mb => mb.displayName)
+              .filter(Boolean);
+            const attendeeNames = om
+              ? (om.participants?.attendees || []).map(a => a.identity?.user?.displayName).filter(Boolean)
+              : chatMembers;
+            // Better title: use chat topic if available, otherwise the recording display name
+            const chatTopic = chat.topic && chat.topic.trim();
+            const finalTitle = om?.subject ||
+                               chatTopic ||
+                               event.callRecordingDisplayName ||
+                               'Ad-hoc call';
             found.push({
               id: msMeetingFingerprint(joinUrl),
               _source: 'chat',
@@ -8262,7 +8278,8 @@ async function msFetchAdhocFromChats(existingByJoinUrl, sinceIso){
               _joinUrl: joinUrl,
               _webLink: '',
               _chatThreadId: chat.id,
-              title: om?.subject || event.callRecordingDisplayName || ('Call in ' + (chat.topic || 'chat')),
+              _chatType: chat.chatType || 'group',
+              title: finalTitle,
               date: msDateLocal(startIso),
               start: msTimeLocal(startIso),
               end: msTimeLocal(new Date(endMs).toISOString()),
@@ -8270,10 +8287,8 @@ async function msFetchAdhocFromChats(existingByJoinUrl, sinceIso){
               _endMs: endMs,
               organizer: initiatorName,
               isOrganizer: false,
-              attendees: om
-                ? (om.participants?.attendees || []).map(a => a.identity?.user?.displayName).filter(Boolean)
-                : [],
-              transcriptStatus: om ? 'unknown' : 'has', // we have a recording event → transcript likely exists
+              attendees: attendeeNames,
+              transcriptStatus: 'has', // we have a recording event → transcript exists
               _omId: om?.id || null
             });
           }
@@ -8361,7 +8376,21 @@ async function msScanTranscripts(){
 
 // then list transcripts, then download the VTT content.
 async function msFetchTranscript(meetingObj){
-  if (!meetingObj || !meetingObj._joinUrl) throw new Error('This meeting has no Teams join URL — transcript unavailable.');
+  if (!meetingObj) throw new Error('Meeting reference missing.');
+
+  // v137: chat-discovered meetings have no accessible spoken transcript
+  // (the call was organised by someone else; Graph doesn't expose the
+  // organiser's transcript via delegated permissions). Fall back to using
+  // the chat thread itself as the source of context for AI extraction.
+  if (meetingObj._source === 'chat' && meetingObj._chatThreadId){
+    const chatLog = await msFetchChatThreadAsTranscript(meetingObj);
+    if (!chatLog || chatLog.trim().length < 30){
+      throw new Error('No chat messages found around the recording. Try widening the time window or paste the transcript manually.');
+    }
+    return '[Source: Teams chat thread, ±1hr around the recording. Spoken transcript not directly accessible because the call was organised by another user.]\n\n' + chatLog;
+  }
+
+  if (!meetingObj._joinUrl) throw new Error('This meeting has no Teams join URL — transcript unavailable.');
   // v127: reuse the cached online-meeting id from the background scan when
   // available, falling back to a fresh joinWebUrl lookup if not yet cached.
   let onlineMeeting;
@@ -8509,6 +8538,33 @@ async function msFetchMeetingChat(meetingObj){
 
 // v128: extracted into its own helper so the time-window filter fallback
 // can reuse the same formatting.
+// v137: fetch messages from a known chat thread directly (no onlineMeeting
+// lookup required). Used when the call was discovered via chat scanning and
+// we already have the threadId. ±1hr window applied client-side.
+async function msFetchChatThreadAsTranscript(meetingObj){
+  const chatToken = await msTryAcquireChatToken();
+  if (!chatToken) throw new Error('Chat.Read permission is required but not granted in your token. Sign out and sign back in.');
+  const threadId = meetingObj._chatThreadId;
+  if (!threadId) return null;
+  const WINDOW_MS = 60 * 60 * 1000;
+  const startMs = meetingObj._startMs || Date.now();
+  const endMs = meetingObj._endMs || startMs;
+  const r = await fetch('https://graph.microsoft.com/v1.0/me/chats/' + encodeURIComponent(threadId) +
+                        '/messages?$top=200', {
+    headers: { 'Authorization': 'Bearer ' + chatToken, 'Accept': 'application/json' }
+  });
+  if (!r.ok) throw new Error('Could not fetch chat messages: Graph ' + r.status);
+  const data = await r.json();
+  const messages = (data.value || [])
+    .filter(m => {
+      const t = new Date(m.createdDateTime || 0).getTime();
+      return t >= (startMs - WINDOW_MS) && t <= (endMs + WINDOW_MS);
+    })
+    .sort((a, b) => new Date(a.createdDateTime || 0) - new Date(b.createdDateTime || 0));
+  if (!messages.length) return null;
+  return msFormatChatMessages(messages);
+}
+
 function msFormatChatMessages(messages){
   if (!messages || !messages.length) return null;
   const out = ['--- Meeting chat (messages within ±1hr of the meeting) ---'];
@@ -8539,11 +8595,19 @@ async function msFetchAndExtract(meetingId){
   let combined = '';
   try {
     const text = await msFetchTranscript(m);
-    if (btn) btn.innerHTML = spinHtml(12, '#125462') + ' Fetching chat (within ±1hr)…';
-    const chatLog = await msFetchMeetingChat(m);
+    // v137: for chat-discovered meetings, msFetchTranscript already returns
+    // the chat as the transcript — skip the extra chat enrichment fetch.
+    let chatLog = null;
+    if (m._source !== 'chat'){
+      if (btn) btn.innerHTML = spinHtml(12, '#125462') + ' Fetching chat (within ±1hr)…';
+      chatLog = await msFetchMeetingChat(m);
+    }
     combined = chatLog ? (text + '\n\n' + chatLog) : text;
     if (ta) { ta.value = combined; ta.disabled = false; }
-    if (btn) btn.innerHTML = (chatLog ? '✓ Transcript + chat loaded' : '✓ Transcript loaded') + ' · ' + spinHtml(12, '#125462') + ' Extracting tasks…';
+    if (btn) {
+      const label = m._source === 'chat' ? '✓ Chat thread loaded' : (chatLog ? '✓ Transcript + chat loaded' : '✓ Transcript loaded');
+      btn.innerHTML = label + ' · ' + spinHtml(12, '#125462') + ' Extracting tasks…';
+    }
     // Stamp the meeting context so the processed-tracker records correctly
     mtgCurrentMeetingId = m.id;
     mtgMeetingDate = m.date || '';
