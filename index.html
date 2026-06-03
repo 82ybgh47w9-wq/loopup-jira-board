@@ -255,6 +255,9 @@ button,select,textarea,input{font-family:inherit}
 .pri-drop-zone{min-height:50px;border-radius:6px;transition:.15s}
 .pri-drop-zone.drag-over{background:#E0F0F8;border:2px dashed #2E99CE}
 .pri-rank-num{font-size:9px;font-weight:700;color:#C9CACC;margin-right:4px;min-width:16px}
+/* v140: visual when dragging an epic over a different priority band */
+.pri-band-droppable.drag-over-band{outline:3px dashed #2E99CE;outline-offset:-3px;background:#E0F0F8}
+.pri-epic-card-h.dragging{opacity:.4}
 
 /* ══ MEETING INTAKE ══ */
 #page-meetings{flex-direction:column;flex:1;min-height:0;overflow:hidden}
@@ -704,7 +707,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v139</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v140</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -6423,6 +6426,9 @@ function priCardHtml(t, rank) {
 }
 
 async function priDrop(e, epicKey) {
+  // v140: epic-drag uses the band-level handler; bail out here so we
+  // don't accidentally treat it as a task drop
+  if (window._priDragEpicKey) return;
   e.preventDefault();
   e.currentTarget.classList.remove('drag-over');
 
@@ -6975,8 +6981,62 @@ function priDragEnd(e) {
 }
 
 function priDragOver(e, epicKey) {
+  // v140: if an epic is being dragged, defer to the band-level drop handler
+  if (window._priDragEpicKey) return;
   e.preventDefault();
   e.currentTarget.classList.add('drag-over');
+}
+
+// v140: epic dragstart/end + band drop handlers (horizontal mode)
+function priEpicDragStart(e, epicKey){
+  window._priDragEpicKey = epicKey;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', 'epic|' + epicKey);
+  setTimeout(() => e.currentTarget.classList.add('dragging'), 0);
+}
+function priEpicDragEnd(e){
+  setTimeout(() => { window._priDragEpicKey = null; }, 100);
+  e.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('.drag-over-band').forEach(el => el.classList.remove('drag-over-band'));
+}
+function priBandDragOver(e, bandName){
+  if (!window._priDragEpicKey) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  // Highlight just this band
+  document.querySelectorAll('.drag-over-band').forEach(el => el.classList.remove('drag-over-band'));
+  e.currentTarget.classList.add('drag-over-band');
+}
+function priBandDragLeave(e){
+  // Only clear if leaving the band entirely (not crossing into a child)
+  if (!e.currentTarget.contains(e.relatedTarget)){
+    e.currentTarget.classList.remove('drag-over-band');
+  }
+}
+async function priBandDrop(e, bandName){
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over-band');
+  const epicKey = window._priDragEpicKey;
+  window._priDragEpicKey = null;
+  if (!epicKey) return;
+  const newPriority = bandName === 'No priority' ? '' : bandName;
+  // Find current priority of this epic
+  const epic = priEpics.find(e => e.key === epicKey);
+  if (!epic) return;
+  if (epic.priority === newPriority) return; // no-op
+  // Optimistic local update
+  locPri[epicKey] = newPriority || 'Medium'; // locPri can't really hold ''
+  if (epic) epic.priority = newPriority || 'Medium';
+  saveAll();
+  renderPriBoardHorizontal();
+  // Push to Jira
+  try {
+    await updatePriority(epicKey, newPriority || 'Medium');
+    appLogMsg('info', 'prioritise', 'Moved ' + epicKey + ' to ' + (newPriority || 'Medium') + ' band');
+  } catch(err){
+    appLogMsg('warn', 'prioritise', 'Failed to update priority for ' + epicKey + ': ' + err.message);
+    alert('Could not update priority on Jira: ' + err.message);
+  }
 }
 
 function priDragLeave(e) {
@@ -7205,7 +7265,12 @@ function renderPriBoardHorizontal() {
 
     // Band wrapper — full width (no min-width:max-content; per-row scroll handles overflow)
     const bandEl = document.createElement('div');
+    bandEl.className = 'pri-band-droppable';
     bandEl.style.cssText = 'width:100%;flex-shrink:0;border-bottom:2px solid '+pc.d+';margin-bottom:4px';
+    // v140: drop zone for epic priority changes
+    bandEl.addEventListener('dragover', (e) => priBandDragOver(e, band));
+    bandEl.addEventListener('dragleave', (e) => priBandDragLeave(e));
+    bandEl.addEventListener('drop', (e) => priBandDrop(e, band));
 
     // Band header (collapsible)
     const totalTasks = bandEpics.reduce((sum,e)=>sum+(byEpic[e.key]||[]).length, 0);
@@ -7248,7 +7313,7 @@ function renderPriBoardHorizontal() {
       // user click any blank part of the card to open the detail panel and
       // edit the hierarchy. Missing Legend/Initiative show "+ Set …" pills.
       const epicCardHtml = `
-        <div onclick="openPane('${epic.key}')" title="Open ${epic.key} to edit hierarchy / parent" style="width:280px;min-width:280px;flex-shrink:0;background:${epicCardBg};border:1px solid #C8E6F7;border-left:3px solid ${epicCardBorder};border-radius:8px;padding:8px 10px;margin-right:10px;display:flex;flex-direction:column;gap:4px;position:sticky;left:0;z-index:2;box-shadow:2px 0 6px -2px rgba(0,0,0,0.12);cursor:pointer${epicOpacity}">
+        <div class="pri-epic-card-h" draggable="true" ondragstart="priEpicDragStart(event,'${epic.key}')" ondragend="priEpicDragEnd(event)" onclick="openPane('${epic.key}')" title="Drag to move to a different priority band, or click to open ${epic.key}" style="width:280px;min-width:280px;flex-shrink:0;background:${epicCardBg};border:1px solid #C8E6F7;border-left:3px solid ${epicCardBorder};border-radius:8px;padding:8px 10px;margin-right:10px;display:flex;flex-direction:column;gap:4px;position:sticky;left:0;z-index:2;box-shadow:2px 0 6px -2px rgba(0,0,0,0.12);cursor:grab${epicOpacity}">
           <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
             ${legend ? `<a href="${BASE()}${legend.key}" target="_blank" onclick="event.stopPropagation()"
               style="font-size:9px;font-weight:700;color:#9A4500;background:#FFF0E6;padding:1px 5px;border-radius:3px;text-decoration:none;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block"
