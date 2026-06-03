@@ -8510,7 +8510,7 @@ async function msFetchMeetingChat(meetingObj){
     const startMs = meetingObj._startMs || Date.now();
     const endMs = meetingObj._endMs || startMs;
     const r = await fetch('https://graph.microsoft.com/v1.0/me/chats/' + encodeURIComponent(threadId) +
-                          '/messages?$top=200', {
+                          '/messages?$top=50', {
       headers: { 'Authorization': 'Bearer ' + chatToken, 'Accept': 'application/json' }
     });
     if (!r.ok) {
@@ -8558,7 +8558,7 @@ async function msFetchChatThreadAsTranscript(meetingObj){
   const startMs = meetingObj._startMs || Date.now();
   const endMs = meetingObj._endMs || startMs;
   const r = await fetch('https://graph.microsoft.com/v1.0/me/chats/' + encodeURIComponent(threadId) +
-                        '/messages?$top=200', {
+                        '/messages?$top=50', {
     headers: { 'Authorization': 'Bearer ' + chatToken, 'Accept': 'application/json' }
   });
   if (!r.ok) throw new Error('Could not fetch chat messages: Graph ' + r.status);
