@@ -707,7 +707,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v140</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v141</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -4395,7 +4395,8 @@ createState = {
   status:'Selected', summary:'', description:'',
   selLegend:'', selInit:'', selEpic:'',
   legends:[], initiatives:[], epics:[],
-  aiSuggestions:[], aiLoading:false
+  aiSuggestions:[], aiLoading:false,
+  labels:[] // v141
 };
 
 function openCreate(defaultAssignee, e) {
@@ -4412,7 +4413,8 @@ function openCreate(defaultAssignee, e) {
     // v86: new fields for the AI-first parent selector
     epicExpanded:false, epicFilter:'',
     // v93: "make active" preset (priority=Highest + status=In Progress + setActive)
-    makeActive:false
+    makeActive:false,
+    labels:[] // v141: labels to apply on creation
   };
   document.getElementById('create-overlay').classList.add('open');
   renderCreateModal();
@@ -4422,6 +4424,98 @@ function closeCreate() {
   document.getElementById('create-overlay').classList.remove('open');
   trackedMentions['cr-desc'] = [];
   trackedMentions['cr-comment'] = [];
+}
+
+// v141: Labels UI for the Create modal. Mirrors the detail-pane label
+// pattern (chip + typeahead) but stores selections in createState.labels
+// instead of mutating an existing Jira issue. The labels are applied
+// on submitCreate() via fields.labels.
+function renderCreateLabels(){
+  const labels = (createState.labels || []);
+  const chips = labels.length
+    ? labels.map(l => `<span class="pane-lbl-chip" data-label="${_escHtml(l)}">${_escHtml(l)}<button class="pane-lbl-x" title="Remove" onclick="event.stopPropagation();crRemoveLabel('${(l||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')">✕</button></span>`).join('')
+    : '<span class="pane-lbl-empty">No labels yet.</span>';
+  return chips + `<span id="cr-lbl-addslot"><button class="pane-lbl-addbtn" onclick="event.stopPropagation();crOpenLabelInput()">＋ Add label</button></span>`;
+}
+
+function _crRerenderLabels(){
+  const wrap = document.getElementById('cr-labels-wrap');
+  if (wrap) wrap.innerHTML = renderCreateLabels();
+}
+
+function crOpenLabelInput(){
+  const slot = document.getElementById('cr-lbl-addslot');
+  if (!slot) return;
+  if (typeof lblFetchAllLabels === 'function') lblFetchAllLabels();
+  slot.innerHTML = `<span class="pane-lbl-input-wrap">
+    <input class="pane-lbl-input" id="cr-lbl-input" placeholder="Type a label…" autocomplete="off"
+      oninput="crLabelInputChanged(this.value)"
+      onkeydown="if(event.key==='Enter'){event.preventDefault();crCommitLabelFromInput(this.value)} else if(event.key==='Escape'){crCancelLabelInput()}"
+      onblur="setTimeout(crCancelLabelInput,200)">
+    <div class="pane-lbl-pop" id="cr-lbl-pop"></div>
+  </span>`;
+  setTimeout(() => { const inp = document.getElementById('cr-lbl-input'); if (inp) inp.focus(); }, 0);
+  crLabelInputChanged('');
+}
+
+function crCancelLabelInput(){ _crRerenderLabels(); }
+
+function crLabelInputChanged(val){
+  const pop = document.getElementById('cr-lbl-pop');
+  if (!pop) return;
+  const q = (val || '').trim();
+  const qLower = q.toLowerCase();
+  const cache = Array.isArray(lblAllLabels) ? lblAllLabels : [];
+  const current = (createState.labels || []).map(l => l.toLowerCase());
+  const matches = (q
+    ? cache.filter(l => l.toLowerCase().includes(qLower))
+    : cache.slice()
+  ).filter(l => !current.includes(l.toLowerCase())).slice(0, 30);
+  const exactExists = q && cache.some(l => l.toLowerCase() === qLower);
+  const alreadyOnTask = q && current.includes(qLower);
+  let html = '';
+  if (alreadyOnTask){
+    html += `<div class="pane-lbl-pop-row" style="color:#9EA0A4;font-style:italic">"${_escHtml(q)}" is already selected</div>`;
+  } else if (q && !exactExists){
+    html += `<div class="pane-lbl-pop-row" onmousedown="crAddLabel('${q.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><span class="pane-lbl-pop-new">＋ Create new label "${_escHtml(q)}"</span></div>`;
+  }
+  if (matches.length){
+    html += matches.map(l => `<div class="pane-lbl-pop-row" onmousedown="crAddLabel('${l.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')">${_escHtml(l)}</div>`).join('');
+  } else if (!q){
+    html += '<div class="pane-lbl-pop-row" style="color:#9EA0A4;font-style:italic">Type to search labels…</div>';
+  }
+  pop.innerHTML = html;
+}
+
+function crCommitLabelFromInput(val){
+  const v = (val || '').trim();
+  if (!v) { crCancelLabelInput(); return; }
+  crAddLabel(v);
+}
+
+function crAddLabel(label){
+  if (!createState) return;
+  const clean = (label || '').trim();
+  if (!clean) return;
+  const safe = clean.replace(/\s+/g, '-'); // Jira labels can't have spaces
+  createState.labels = createState.labels || [];
+  if (createState.labels.some(l => l.toLowerCase() === safe.toLowerCase())) {
+    _crRerenderLabels();
+    return;
+  }
+  createState.labels.push(safe);
+  // Push new label into the cache so it's available elsewhere immediately
+  if (typeof lblAllLabels !== 'undefined' && !lblAllLabels.includes(safe)){
+    lblAllLabels.push(safe);
+    lblAllLabels.sort();
+  }
+  _crRerenderLabels();
+}
+
+function crRemoveLabel(label){
+  if (!createState || !Array.isArray(createState.labels)) return;
+  createState.labels = createState.labels.filter(l => l.toLowerCase() !== (label || '').toLowerCase());
+  _crRerenderLabels();
 }
 
 function renderCreateModal() {
@@ -4568,6 +4662,8 @@ function renderCreateModal() {
         <span style="font-size:13px;font-weight:700;color:${s.makeActive?'#3D6B1E':'#292E37'}">${s.makeActive?'● ':''}Make Active <span style="font-size:11px;font-weight:600;color:${s.makeActive?'#3D6B1E':'#9EA0A4'}">(Priority = Highest + Status = In Progress)</span></span>
       </label>
     </div>
+    <div style="margin-bottom:12px"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Labels</div>
+      <div class="pane-lbl-wrap" id="cr-labels-wrap">${renderCreateLabels()}</div></div>
     <div style="margin-bottom:12px"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Description</div>
       <textarea id="cr-desc" placeholder="Add details…" oninput="createState.description=this.value" style="width:100%;min-height:60px;padding:10px 12px;border:1px solid #E4E6E8;border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box">${s.description}</textarea></div>
     <div style="margin-bottom:4px"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Comment</div>
@@ -5003,6 +5099,10 @@ async function submitCreate(){
         : {type:'doc',version:1,content:[{type:'paragraph',content:[{type:'text',text:s.description}]}]};
     }
     if(s.dueDate) fields.duedate = s.dueDate;
+    // v141: include labels selected in the Create modal
+    if(Array.isArray(s.labels) && s.labels.length){
+      fields.labels = s.labels.slice();
+    }
     if(s.assignee) {
       // Look up accountId from team
       try {
@@ -5164,7 +5264,8 @@ function quickAddTask(epicKey, epicSummary, projectKey) {
     legends: [], initiatives: [], epics: [],
     aiSuggestions: [], aiLoading: false, showHierarchy: false,
     epicExpanded: !!(epicKey), epicFilter: '',
-    makeActive: false
+    makeActive: false,
+    labels: [] // v141
   };
   document.getElementById('create-overlay').classList.add('open');
   renderCreateModal();
