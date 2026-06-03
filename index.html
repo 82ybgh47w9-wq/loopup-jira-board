@@ -6795,6 +6795,12 @@ function renderPriBoard() {
   // Multi-select status filter — apply if any statuses are selected
   if(priStatusFilters && priStatusFilters.size > 0) {
     tasks = tasks.filter(i => priStatusFilters.has(normStatus(i.status)));
+  } else if(!getShowDone('prioritise')) {
+    // v138: Done tasks were leaking through when their parent epic wasn't
+    // Done. Honour the global Show Done toggle for tasks too (not just epics).
+    // Only applies when no explicit status filter is set — otherwise the
+    // user's filter selection takes precedence.
+    tasks = tasks.filter(i => normStatus(i.status) !== 'Done');
   }
   if (unassignedOnly) tasks = tasks.filter(i => i.assignee === 'Unassigned');
 
@@ -7153,10 +7159,12 @@ function renderPriBoardHorizontal() {
 
   const unassignedOnly = document.getElementById('pri-unassigned-only')?.checked || false;
 
-  // Filter tasks (same as vertical)
+  // Filter tasks (same as vertical) — including v138 Show Done filter
   let tasks = [...priIssues];
   if(priStatusFilters && priStatusFilters.size > 0) {
     tasks = tasks.filter(i => priStatusFilters.has(normStatus(i.status)));
+  } else if(!getShowDone('prioritise')) {
+    tasks = tasks.filter(i => normStatus(i.status) !== 'Done');
   }
   if(unassignedOnly) tasks = tasks.filter(i => i.assignee === 'Unassigned');
 
