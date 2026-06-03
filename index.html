@@ -403,6 +403,7 @@ button,select,textarea,input{font-family:inherit}
 .lbl-row:hover{border-color:#C9CACC;box-shadow:0 1px 3px rgba(0,0,0,.06)}
 .lbl-row.dragging{opacity:.4;cursor:grabbing}
 .lbl-row.drag-over{border-top:3px solid #2E99CE;padding-top:6px}
+.lbl-band.drag-over-band{outline:3px dashed #2E99CE;outline-offset:-3px;background:#E0F0F8}
 .lbl-handle{color:#C9CACC;font-size:16px;cursor:grab;flex-shrink:0;user-select:none}
 .lbl-rank{font-size:10px;font-weight:700;color:#9EA0A4;min-width:20px;text-align:right;flex-shrink:0;font-variant-numeric:tabular-nums}
 .lbl-key{font-size:11px;font-weight:700;color:#257AA5;font-family:monospace;flex-shrink:0;min-width:80px}
@@ -707,7 +708,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v141</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v142</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -10376,29 +10377,56 @@ function lblRenderBoard(){
     return;
   }
 
-  const rows = lblIssues.map((iss, idx) => {
-    const statusKey = (iss.status || 'Backlog').replace(/ /g, '-');
-    const priKey = (iss.priority || 'Medium').replace(/ /g, '-');
-    return `<div class="lbl-row" draggable="true"
-      ondragstart="lblOnDragStart(event,'${iss.key}')"
-      ondragend="lblOnDragEnd(event)"
-      ondragover="lblOnDragOver(event,'${iss.key}')"
-      ondragleave="lblOnDragLeave(event)"
-      ondrop="lblOnDrop(event,'${iss.key}')"
-      onclick="openIssueKey('${iss.key}')"
-      data-key="${iss.key}">
-      <span class="lbl-handle" title="Drag to reorder">⋮⋮</span>
-      <span class="lbl-rank">${idx + 1}</span>
-      <span class="lbl-key">${iss.key}</span>
-      <span class="lbl-summary">${_escHtml(iss.summary || '')}</span>
-      <div class="lbl-meta">
-        ${iss.assignee ? `<span class="lbl-assignee">${_escHtml(iss.assignee)}</span>` : '<span class="lbl-assignee" style="color:#9EA0A4;font-style:italic">Unassigned</span>'}
-        <span class="lbl-pill lbl-priority-${priKey}">${iss.priority || 'Medium'}</span>
-        <span class="lbl-pill lbl-status-${statusKey}">${iss.status || 'Backlog'}</span>
+  // v142: group issues by priority into bands (Highest top → Low bottom)
+  const LBL_PRI_BANDS = ['Highest', 'High', 'Medium', 'Low', 'No priority'];
+  const byBand = { Highest:[], High:[], Medium:[], Low:[], 'No priority':[] };
+  for (const iss of lblIssues){
+    const p = iss.priority;
+    if (p && byBand[p]) byBand[p].push(iss);
+    else byBand['No priority'].push(iss);
+  }
+
+  let html = '';
+  let absoluteIdx = 0;
+  for (const band of LBL_PRI_BANDS){
+    const items = byBand[band];
+    if (!items.length) continue;
+    const pc = band === 'No priority' ? { bg:'#F4F4F5', c:'#73777C', d:'#9EA0A4' } : (PC[band] || PC.Medium);
+    html += `<div class="lbl-band" data-band="${band}"
+      ondragover="lblBandDragOver(event,'${band}')"
+      ondragleave="lblBandDragLeave(event)"
+      ondrop="lblBandDrop(event,'${band}')"
+      style="margin-bottom:14px;border:1px solid ${pc.d}40;border-radius:8px;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:${pc.bg};border-bottom:1px solid ${pc.d}40">
+        <span style="font-size:12px;font-weight:700;color:${pc.c};text-transform:uppercase;letter-spacing:.04em">${band}</span>
+        <span class="badge" style="background:${pc.d};color:#fff;font-size:10px">${items.length} issue${items.length === 1 ? '' : 's'}</span>
       </div>
-    </div>`;
-  }).join('');
-  board.innerHTML = rows;
+      <div class="lbl-band-body" style="padding:6px 8px">`;
+    for (const iss of items){
+      absoluteIdx++;
+      const statusKey = (iss.status || 'Backlog').replace(/ /g, '-');
+      const priKey = (iss.priority || 'Medium').replace(/ /g, '-');
+      html += `<div class="lbl-row" draggable="true"
+        ondragstart="lblOnDragStart(event,'${iss.key}')"
+        ondragend="lblOnDragEnd(event)"
+        ondragover="lblOnDragOver(event,'${iss.key}')"
+        ondragleave="lblOnDragLeave(event)"
+        ondrop="lblOnDrop(event,'${iss.key}')"
+        onclick="openIssueKey('${iss.key}')"
+        data-key="${iss.key}">
+        <span class="lbl-handle" title="Drag to reorder, or onto a different band to change priority">⋮⋮</span>
+        <span class="lbl-rank">${absoluteIdx}</span>
+        <span class="lbl-key">${iss.key}</span>
+        <span class="lbl-summary">${_escHtml(iss.summary || '')}</span>
+        <div class="lbl-meta">
+          ${iss.assignee ? `<span class="lbl-assignee">${_escHtml(iss.assignee)}</span>` : '<span class="lbl-assignee" style="color:#9EA0A4;font-style:italic">Unassigned</span>'}
+          <span class="lbl-pill lbl-status-${statusKey}">${iss.status || 'Backlog'}</span>
+        </div>
+      </div>`;
+    }
+    html += `</div></div>`;
+  }
+  board.innerHTML = html;
 }
 
 // Drag-drop handlers (HTML5 native)
@@ -10406,10 +10434,13 @@ function lblOnDragStart(e, key){
   e.dataTransfer.setData('text/plain', key);
   e.dataTransfer.effectAllowed = 'move';
   e.currentTarget.classList.add('dragging');
+  window._lblDragKey = key;
 }
 function lblOnDragEnd(e){
   e.currentTarget.classList.remove('dragging');
   document.querySelectorAll('.lbl-row.drag-over').forEach(el => el.classList.remove('drag-over'));
+  document.querySelectorAll('.lbl-band.drag-over-band').forEach(el => el.classList.remove('drag-over-band'));
+  setTimeout(() => { window._lblDragKey = null; }, 100);
 }
 function lblOnDragOver(e, targetKey){
   e.preventDefault();
@@ -10422,9 +10453,21 @@ function lblOnDragLeave(e){
 }
 function lblOnDrop(e, targetKey){
   e.preventDefault();
+  e.stopPropagation(); // prevent band-level drop from also firing
   e.currentTarget.classList.remove('drag-over');
-  const sourceKey = e.dataTransfer.getData('text/plain');
+  const sourceKey = e.dataTransfer.getData('text/plain') || window._lblDragKey;
   if (!sourceKey || sourceKey === targetKey) return;
+  const sourceIss = lblIssues.find(i => i.key === sourceKey);
+  const targetIss = lblIssues.find(i => i.key === targetKey);
+  if (!sourceIss || !targetIss) return;
+  const sourcePri = sourceIss.priority || 'No priority';
+  const targetPri = targetIss.priority || 'No priority';
+  if (sourcePri !== targetPri){
+    // Cross-band: change priority on the source to match the target's band
+    lblChangePriority(sourceKey, targetPri);
+    return;
+  }
+  // Same-band reorder
   const sourceIdx = lblIssues.findIndex(i => i.key === sourceKey);
   const targetIdx = lblIssues.findIndex(i => i.key === targetKey);
   if (sourceIdx < 0 || targetIdx < 0) return;
@@ -10432,6 +10475,61 @@ function lblOnDrop(e, targetKey){
   lblIssues.splice(targetIdx, 0, moved);
   lblSaveLocalOrder();
   lblRenderBoard();
+}
+
+// v142: Band-level drag handlers — drop onto a band area (not a specific row)
+// to change the source issue's priority to that band's priority.
+function lblBandDragOver(e, bandName){
+  if (!window._lblDragKey) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  document.querySelectorAll('.lbl-band.drag-over-band').forEach(el => el.classList.remove('drag-over-band'));
+  e.currentTarget.classList.add('drag-over-band');
+}
+function lblBandDragLeave(e){
+  // Only clear if leaving the band entirely (not crossing into a child)
+  if (!e.currentTarget.contains(e.relatedTarget)){
+    e.currentTarget.classList.remove('drag-over-band');
+  }
+}
+async function lblBandDrop(e, bandName){
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over-band');
+  const sourceKey = e.dataTransfer.getData('text/plain') || window._lblDragKey;
+  if (!sourceKey) return;
+  const iss = lblIssues.find(i => i.key === sourceKey);
+  if (!iss) return;
+  const currentPri = iss.priority || 'No priority';
+  if (currentPri === bandName) return; // dropped on own band — no-op
+  await lblChangePriority(sourceKey, bandName);
+}
+
+// v142: Update an issue's priority on Jira and locally, with optimistic UI
+// + revert on failure. Dropping into the "No priority" band sets priority to
+// Medium, since Jira requires a priority value (matches v140 epic behavior).
+async function lblChangePriority(key, newBand){
+  const iss = lblIssues.find(i => i.key === key);
+  if (!iss) return;
+  const newPri = newBand === 'No priority' ? 'Medium' : newBand;
+  const oldPri = iss.priority;
+  if (oldPri === newPri) return;
+  // Optimistic local update
+  iss.priority = newPri;
+  const aiss = (typeof allIssues !== 'undefined' && Array.isArray(allIssues))
+    ? allIssues.find(i => i.key === key) : null;
+  if (aiss) aiss.priority = newPri;
+  lblRenderBoard();
+  try {
+    const ok = await updatePriority(key, newPri);
+    if (!ok) throw new Error('Jira returned non-OK');
+    if (typeof appLogMsg === 'function') appLogMsg('info', 'labels', 'Changed ' + key + ' priority to ' + newPri);
+  } catch(err){
+    // Revert
+    iss.priority = oldPri;
+    if (aiss) aiss.priority = oldPri;
+    lblRenderBoard();
+    alert('Could not update priority on Jira: ' + (err && err.message ? err.message : err));
+  }
 }
 
 // Open the existing issue detail pane. openPane(key) — note: takes the key
