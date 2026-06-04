@@ -708,7 +708,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v151</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v152</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -1979,7 +1979,7 @@ function renderPaneStatusButtons(i){
       `<button class="edit-option" style="${i.status===s?`border:2px solid ${c.c};background:${c.bg};color:${c.c}`:""}" onclick="doPaneStatus(${JSON.stringify(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;')})">${s}</button>`
     ).join("");
   }
-  // Deduped list: current status first, then all transition targets.
+  // Build deduped list of all candidate statuses: current + transition targets.
   const names = [];
   if (i.status && !names.includes(i.status)) names.push(i.status);
   for (const t of cached){ if (t.name && !names.includes(t.name)) names.push(t.name); }
@@ -1989,6 +1989,19 @@ function renderPaneStatusButtons(i){
       `<button class="edit-option" style="${i.status===s?`border:2px solid ${c.c};background:${c.bg};color:${c.c}`:""}" onclick="doPaneStatus(${JSON.stringify(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;')})">${s}</button>`
     ).join("");
   }
+  // v152: Stable sort independent of which status is currently selected.
+  // Order by Jira's statusCategory (To Do → In Progress → Done), then by
+  // name. Without this, clicking a status moved it to position 0 and all
+  // the others shuffled — confusing when picking the next step.
+  const CAT_RANK = { 'new': 0, 'indeterminate': 1, 'done': 2 };
+  names.sort((a, b) => {
+    const ta = cached.find(x => x.name === a);
+    const tb = cached.find(x => x.name === b);
+    const ca = ta && CAT_RANK[ta.category] != null ? CAT_RANK[ta.category] : 1;
+    const cb = tb && CAT_RANK[tb.category] != null ? CAT_RANK[tb.category] : 1;
+    if (ca !== cb) return ca - cb;
+    return a.localeCompare(b);
+  });
   return names.map(s => {
     const t = cached.find(x => x.name === s);
     const c = statusColors(s, t ? t.category : '');
@@ -3792,6 +3805,10 @@ async function submitPaneComment(key){
   const msg = document.getElementById("post-msg");
   if(ok) {
     msg.textContent = "Posted ✓"; msg.style.color = "#5E8E38";
+    // v152: re-enable the Post button on success too. Previously this only
+    // happened on failure, so the button stayed in the "Posting…" spinner
+    // state forever after a successful comment.
+    btn.disabled = false; btn.innerHTML = "Post to Jira";
     const postedText = txt;
     const postedAuthor = currentIam || "You";
     ta.value = "";
@@ -8262,8 +8279,16 @@ function renderActivity() {
                 ${isNew?'<span style="font-size:9px;font-weight:700;background:#2E99CE;color:#fff;padding:1px 6px;border-radius:8px">NEW</span>':''}
                 ${item.isMention?'<span style="font-size:9px;font-weight:700;background:#E08000;color:#fff;padding:1px 6px;border-radius:8px">@mentioned you</span>':''}
                 <span style="font-size:10px;color:#9EA0A4">${isComment?'commented on':'updated'}</span>
-                <a href="${BASE()}${item.issue.key}" target="_blank" onclick="event.stopPropagation()" 
-                  style="font-size:10px;font-weight:700;color:#257AA5;font-family:monospace;text-decoration:none">${item.issue.key}</a>
+                <!-- v152: clicking the key opens the in-app pane (matches the row click);
+                     small ↗ icon optionally opens Jira in a new tab. -->
+                <span onclick="event.stopPropagation();openPane('${item.issue.key}')"
+                  style="font-size:10px;font-weight:700;color:#257AA5;font-family:monospace;cursor:pointer"
+                  onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'"
+                  title="Open detail pane">${item.issue.key}</span>
+                <a href="${BASE()}${item.issue.key}" target="_blank" onclick="event.stopPropagation()"
+                  style="font-size:10px;color:#9EA0A4;text-decoration:none;padding:0 2px"
+                  onmouseover="this.style.color='#2E99CE'" onmouseout="this.style.color='#9EA0A4'"
+                  title="Open in Jira">↗</a>
                 <span style="font-size:10px;color:#9EA0A4;margin-left:auto;white-space:nowrap">${timeStr}</span>
               </div>
               <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
