@@ -708,7 +708,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v143</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v144</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -1698,6 +1698,38 @@ async function fetchAllTeamIssues(){
 }
 
 async function fetchProjects(){const d=await jiraGet("/rest/api/3/project/search?maxResults=100&orderBy=name&action=browse");return(d.values||[]).map(p=>({key:p.key,name:p.name}));}
+
+// v144: Self-heal helper for the Settings → Projects tab. If init() failed
+// silently (e.g. transient Jira 401 or proxy hiccup) `allProjects` stays []
+// and the project-group picker renders empty — which is what the user saw
+// in the wild. ensureProjectsLoaded() lazy-fetches when something needs the
+// list and re-renders the settings panel once it arrives. Idempotent and
+// concurrency-guarded.
+let _ensureProjectsInFlight = false;
+async function ensureProjectsLoaded(force){
+  if (_ensureProjectsInFlight) return;
+  if (!force && allProjects.length) return;
+  _ensureProjectsInFlight = true;
+  let err = null;
+  try {
+    const fresh = await fetchProjects();
+    if (Array.isArray(fresh) && fresh.length){
+      allProjects = fresh;
+      try { populateProjFilter && populateProjFilter(); } catch {}
+      try { populateCtrlProjFilter && populateCtrlProjFilter(); } catch {}
+      try { populateProjGroupSelector && populateProjGroupSelector(); } catch {}
+      if (typeof appLogMsg === 'function') appLogMsg('info','settings','Loaded ' + fresh.length + ' Jira projects');
+    }
+  } catch(e){
+    err = e;
+    if (typeof appLogMsg === 'function') appLogMsg('warn','settings','Failed to load Jira projects: ' + (e.message || e));
+  } finally {
+    _ensureProjectsInFlight = false;
+    // Re-render the settings panel if it's still open
+    try { if (document.getElementById('settings-body')) renderSettings(); } catch {}
+  }
+  if (err) throw err;
+}
 async function fetchComments(key){
   const d=await jiraGet("/rest/api/3/issue/"+key+"/comment?maxResults=50&orderBy=-created");
   return(d.comments||[]).map(c=>({
@@ -6098,15 +6130,24 @@ function renderSettings(){
                 <div style="font-size:11px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.05em">
                   <span id="pg-selcount-${activePG.replace(/[^a-z0-9]/gi,'_')}">${(projectGroups[activePG]||[]).length}</span> of ${allProjects.length} projects selected
                 </div>
-                ${canEditGroups ? `<div style="display:flex;gap:6px">
+                <div style="display:flex;gap:6px">
+                  ${canEditGroups ? `
                   <button data-pg="${activePG.replace(/"/g,'&quot;')}" onclick="pgSelectAllProjects(this.getAttribute('data-pg'))"
                     style="font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid #2E99CE;background:#fff;color:#2E99CE;cursor:pointer;font-weight:700">Select all</button>
                   <button data-pg="${activePG.replace(/"/g,'&quot;')}" onclick="pgClearAllProjects(this.getAttribute('data-pg'))"
-                    style="font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid #C9CACC;background:#fff;color:#73777C;cursor:pointer;font-weight:700">Clear all</button>
-                </div>` : ''}
+                    style="font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid #C9CACC;background:#fff;color:#73777C;cursor:pointer;font-weight:700">Clear all</button>` : ''}
+                  <!-- v144: manual reload — useful if Jira was 401 at boot -->
+                  <button onclick="ensureProjectsLoaded(true)" title="Re-fetch the project list from Jira"
+                    style="font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid #C9CACC;background:#fff;color:#73777C;cursor:pointer;font-weight:700">↻ Reload</button>
+                </div>
               </div>
               <div id="pg-proj-list" style="max-height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
-                ${allProjects.map(p=>{
+                ${allProjects.length === 0
+                  ? `<div style="padding:18px;text-align:center;font-size:12px;color:#73777C;background:#F7F8F9;border:1px dashed #E4E6E8;border-radius:6px">
+                       <div style="display:inline-flex;align-items:center;gap:8px">${spinHtml(14)} Loading projects from Jira…</div>
+                       <div style="font-size:11px;color:#9EA0A4;margin-top:6px">If this stays empty, click <b>↻ Reload</b> above or check Credentials.</div>
+                     </div>`
+                  : allProjects.map(p=>{
                   const inGroup=(projectGroups[activePG]||[]).includes(p.key);
                   const rowId='pgrow-'+(activePG.replace(/[^a-z0-9]/gi,'_'))+'-'+p.key.replace(/[^a-z0-9]/gi,'_');
                   const tickId='pgtick-'+(activePG.replace(/[^a-z0-9]/gi,'_'))+'-'+p.key.replace(/[^a-z0-9]/gi,'_');
@@ -6124,6 +6165,12 @@ function renderSettings(){
               </div>
             </div>` : ''}
           </div>`}`;
+    // v144: If the project list is empty, kick off a lazy fetch. This
+    // self-heals when init() failed at boot (e.g. transient Jira 401) so
+    // the user doesn't have to refresh or re-enter credentials.
+    if (allProjects.length === 0){
+      setTimeout(() => { ensureProjectsLoaded().catch(() => {}); }, 0);
+    }
 
   /* ── TEAM (GROUPS) TAB ── */
   }else if(settingsTab==="groups"){
