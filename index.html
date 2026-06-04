@@ -708,7 +708,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v144</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v147</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -1754,6 +1754,68 @@ async function postComment(key, textOrBody) {
   } catch { return false; }
 }
 async function transitionIssue(key,targetStatus){appLogMsg("info","jira","Transitioning "+key+" to "+targetStatus);try{const d=await jiraGet("/rest/api/3/issue/"+key+"/transitions");const t=(d.transitions||[]).find(t=>t.name.toLowerCase()===targetStatus.toLowerCase())||(d.transitions||[]).find(t=>t.to?.name?.toLowerCase()===targetStatus.toLowerCase());if(!t)return false;const r=await jiraPost("/rest/api/3/issue/"+key+"/transitions",{transition:{id:t.id}});return r.ok||r.status===204;}catch{return false;}}
+
+// v145: Dynamic workflow statuses on the detail pane. Cache per-issue so we
+// only hit /transitions once per pane open. Stores {id, name, category}
+// for each available transition target. Category is 'new'|'indeterminate'|'done'.
+const paneTransitionsCache = {};
+async function loadPaneTransitions(key){
+  if (paneTransitionsCache[key]) return paneTransitionsCache[key];
+  try {
+    const d = await jiraGet('/rest/api/3/issue/' + key + '/transitions');
+    const list = (d.transitions || []).map(t => ({
+      id: t.id,
+      // Prefer the target-status name — the transition's own name is often
+      // the same but a workflow can use distinct labels like "Send to QA".
+      name: t.to?.name || t.name,
+      category: t.to?.statusCategory?.key || ''
+    }));
+    paneTransitionsCache[key] = list;
+    return list;
+  } catch(e){
+    paneTransitionsCache[key] = []; // mark attempted so we don't loop
+    return [];
+  }
+}
+// Color hint for statuses not in the static SC map. Uses Jira's status
+// category so unknown statuses still render with a sensible palette.
+function statusColors(name, category){
+  if (SC[name]) return SC[name];
+  if (category === 'done') return { c:'#2D7A2D', bg:'#E8F5E0' };
+  if (category === 'indeterminate') return { c:'#2E99CE', bg:'#E0F0F8' };
+  if (category === 'new') return { c:'#5E8E38', bg:'#F1F7EC' };
+  return { c:'#9EA0A4', bg:'#EEF1F3' };
+}
+// Build the status-button row for the detail pane. If transitions haven't
+// loaded for this key yet, fire the load and render the static SC list as a
+// placeholder; the pane re-renders once transitions arrive.
+function renderPaneStatusButtons(i){
+  const cached = paneTransitionsCache[i.key];
+  if (!cached){
+    setTimeout(() => loadPaneTransitions(i.key).then(() => {
+      try { if (openIssue && openIssue.key === i.key) renderPaneMain(); } catch {}
+    }), 0);
+    return Object.entries(SC).filter(([s])=>!s.includes("Development")||i.status===s).map(([s,c])=>
+      `<button class="edit-option" style="${i.status===s?`border:2px solid ${c.c};background:${c.bg};color:${c.c}`:""}" onclick="doPaneStatus(${JSON.stringify(s)})">${s}</button>`
+    ).join("");
+  }
+  // Deduped list: current status first, then all transition targets.
+  const names = [];
+  if (i.status && !names.includes(i.status)) names.push(i.status);
+  for (const t of cached){ if (t.name && !names.includes(t.name)) names.push(t.name); }
+  // If Jira refused or returned nothing, fall back to the static SC map.
+  if (cached.length === 0){
+    return Object.entries(SC).filter(([s])=>!s.includes("Development")||i.status===s).map(([s,c])=>
+      `<button class="edit-option" style="${i.status===s?`border:2px solid ${c.c};background:${c.bg};color:${c.c}`:""}" onclick="doPaneStatus(${JSON.stringify(s)})">${s}</button>`
+    ).join("");
+  }
+  return names.map(s => {
+    const t = cached.find(x => x.name === s);
+    const c = statusColors(s, t ? t.category : '');
+    return `<button class="edit-option" style="${i.status===s?`border:2px solid ${c.c};background:${c.bg};color:${c.c}`:""}" onclick="doPaneStatus(${JSON.stringify(s)})">${s}</button>`;
+  }).join("");
+}
+
 async function updatePriority(key,priority){try{const r=await jiraPut("/rest/api/3/issue/"+key,{fields:{priority:{name:priority}}});return r.ok||r.status===204;}catch{return false;}}
 
 async function createIssue(payload){
@@ -3353,7 +3415,7 @@ async function renderPaneMain(){
     <div class="pane-section">
       <div class="pane-section-title">Status</div>
       <div style="display:flex;flex-wrap:wrap;gap:4px">
-        ${Object.entries(SC).filter(([s])=>!s.includes("Development")||i.status===s).map(([s,c])=>`<button class="edit-option" style="${i.status===s?`border:2px solid ${c.c};background:${c.bg};color:${c.c}`:""}" onclick="doPaneStatus('${s}')">${s}</button>`).join("")}
+        ${renderPaneStatusButtons(i)}
       </div>
     </div>
     <div class="pane-section">
@@ -5649,6 +5711,27 @@ async function loadTeams() {
         }
       }
       groupProjectAssignment = {...groupProjectAssignment, ...loaded};
+    }
+  } catch {}
+  // v147 HOTFIX: seed teamMembers from loaded groups. Fixes the cold-start
+  // case where a user has shared teams in KV but their localStorage
+  // teamMembers list was empty (cleared cache / incognito / first run on a
+  // new browser). Without this, the I am selector was blank with no recovery
+  // path — the user couldn't pick themselves to trigger the fetch that would
+  // discover team members. Now the selector populates straight from groups.
+  try {
+    const seen = new Set(teamMembers);
+    let added = 0;
+    for (const list of Object.values(groups || {})){
+      if (!Array.isArray(list)) continue;
+      for (const name of list){
+        if (name && !seen.has(name)){ teamMembers.push(name); seen.add(name); added++; }
+      }
+    }
+    if (added){
+      teamMembers.sort();
+      if (typeof appLogMsg === 'function') appLogMsg('info','team','Seeded I am selector with '+added+' members from groups');
+      try { populateIamSelector && populateIamSelector(); } catch {}
     }
   } catch {}
   saveAll();
