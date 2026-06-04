@@ -708,7 +708,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v147</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v148</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -968,8 +968,9 @@ button,select,textarea,input{font-family:inherit}
           <h3>Meeting Task Extractor</h3>
           <p>Extract action items from Teams meetings and stage for Jira</p>
           <div class="mtg-source-tabs" id="mtg-source-tabs">
-            <button class="active" onclick="setMtgSource('paste')">Paste Transcript</button>
-            <button onclick="setMtgSource('auto')">Auto-fetch</button>
+            <!-- v148: Auto-fetch is now the left/default option. -->
+            <button class="active" onclick="setMtgSource('auto')">Auto-fetch</button>
+            <button onclick="setMtgSource('paste')">Paste Transcript</button>
           </div>
         </div>
         <div class="mtg-paste-area" id="mtg-input-area">
@@ -1212,9 +1213,71 @@ function showLogViewer() {
 
 
 const auth=()=>"Basic "+btoa(cfg.email+":"+cfg.token);
-async function jiraGet(path){const t=encodeURIComponent(cfg.url+path);const r=await fetch(PROXY+"?target="+t,{headers:{Authorization:auth(),Accept:"application/json"}});if(!r.ok)throw new Error("Jira "+r.status+": "+r.statusText);return r.json();}
-async function jiraPost(path,body){const t=encodeURIComponent(cfg.url+path);return fetch(PROXY+"?target="+t,{method:"POST",headers:{Authorization:auth(),Accept:"application/json","Content-Type":"application/json"},body:JSON.stringify(body)});}
-async function jiraPut(path,body){const t=encodeURIComponent(cfg.url+path);return fetch(PROXY+"?target="+t,{method:"PUT",headers:{Authorization:auth(),Accept:"application/json","Content-Type":"application/json"},body:JSON.stringify(body)});}
+
+// v148: Detect 401/403 responses and surface a persistent banner so users
+// can spot a bad/expired API token immediately instead of seeing silently
+// empty boards. A 2xx anywhere clears the banner so transient blips don't
+// get stuck on screen.
+function _jiraAuthErrorObserved(status){
+  try { if (status === 401 || status === 403) showJiraAuthBanner(status); } catch(e){}
+}
+function _jiraAuthErrorCleared(){
+  try { hideJiraAuthBanner(); } catch(e){}
+}
+async function jiraGet(path){
+  const t=encodeURIComponent(cfg.url+path);
+  const r=await fetch(PROXY+"?target="+t,{headers:{Authorization:auth(),Accept:"application/json"}});
+  if(!r.ok){ _jiraAuthErrorObserved(r.status); throw new Error("Jira "+r.status+": "+r.statusText); }
+  _jiraAuthErrorCleared();
+  return r.json();
+}
+async function jiraPost(path,body){
+  const t=encodeURIComponent(cfg.url+path);
+  const r = await fetch(PROXY+"?target="+t,{method:"POST",headers:{Authorization:auth(),Accept:"application/json","Content-Type":"application/json"},body:JSON.stringify(body)});
+  if (r.status === 401 || r.status === 403) _jiraAuthErrorObserved(r.status);
+  else if (r.ok) _jiraAuthErrorCleared();
+  return r;
+}
+async function jiraPut(path,body){
+  const t=encodeURIComponent(cfg.url+path);
+  const r = await fetch(PROXY+"?target="+t,{method:"PUT",headers:{Authorization:auth(),Accept:"application/json","Content-Type":"application/json"},body:JSON.stringify(body)});
+  if (r.status === 401 || r.status === 403) _jiraAuthErrorObserved(r.status);
+  else if (r.ok) _jiraAuthErrorCleared();
+  return r;
+}
+
+// v148: Banner UI for bad-credentials state. Inserted lazily, idempotent.
+function showJiraAuthBanner(status){
+  let el = document.getElementById('jira-auth-banner');
+  if (!el){
+    el = document.createElement('div');
+    el.id = 'jira-auth-banner';
+    el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#FCEBEB;border-bottom:2px solid #D6202B;color:#A11820;padding:10px 16px;font-size:13px;font-weight:700;display:flex;align-items:center;gap:12px;box-shadow:0 1px 4px rgba(0,0,0,.08)';
+    el.innerHTML = '<span style="font-size:16px">⚠️</span>'
+      + '<span id="jira-auth-banner-msg" style="flex:1">Your Jira credentials appear to be invalid or expired. The board can\'t load data.</span>'
+      + '<button id="jira-auth-banner-fix" style="background:#D6202B;color:#fff;border:none;border-radius:5px;padding:6px 14px;cursor:pointer;font-weight:700;font-size:12px">Open Credentials settings</button>'
+      + '<button id="jira-auth-banner-x" title="Dismiss" style="background:transparent;color:#A11820;border:none;font-size:20px;cursor:pointer;padding:0 6px;line-height:1">×</button>';
+    document.body.appendChild(el);
+    document.getElementById('jira-auth-banner-fix').onclick = () => {
+      try {
+        if (typeof openSettings === 'function') openSettings();
+        if (typeof setSettingsTab === 'function') setSettingsTab('credentials');
+      } catch(e){}
+    };
+    document.getElementById('jira-auth-banner-x').onclick = hideJiraAuthBanner;
+  }
+  const msg = document.getElementById('jira-auth-banner-msg');
+  if (msg){
+    msg.textContent = (status === 403)
+      ? 'Jira returned 403 (forbidden). Your API token may lack access to one or more projects, or you\'re signed in with the wrong account email.'
+      : 'Your Jira credentials appear to be invalid or expired. The board can\'t load data — update your API token in Settings → Credentials to continue.';
+  }
+  el.style.display = 'flex';
+}
+function hideJiraAuthBanner(){
+  const el = document.getElementById('jira-auth-banner');
+  if (el) el.style.display = 'none';
+}
 
 function extractText(doc){
   if(!doc)return"";
@@ -8158,7 +8221,7 @@ function installAutoRefreshHooks(){
    stages them for review, and creates Jira issues.
    ══════════════════════════════════════════════════════════════════ */
 
-let mtgSource = 'paste';     // 'paste' or 'auto'
+let mtgSource = 'auto';      // v148: default is now 'auto' (was 'paste')
 let mtgTasks = [];           // extracted tasks array
 let mtgExtracting = false;   // loading state
 let mtgExpandedTask = null;  // which task detail is open
@@ -9263,8 +9326,9 @@ async function mtgMarkProcessed(meetingId, jiraKeys){
 
 function setMtgSource(src) {
   mtgSource = src;
+  // v148: button 0 is now Auto-fetch, button 1 is Paste Transcript.
   document.querySelectorAll('#mtg-source-tabs button').forEach((b, i) => {
-    b.classList.toggle('active', (i === 0 && src === 'paste') || (i === 1 && src === 'auto'));
+    b.classList.toggle('active', (i === 0 && src === 'auto') || (i === 1 && src === 'paste'));
   });
   renderMtgInputArea();
 }
