@@ -708,7 +708,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v148</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v150</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -728,9 +728,9 @@ button,select,textarea,input{font-family:inherit}
 <!-- CONTROLS -->
 <!-- FILTERS BAR (row 2) — applies to whichever view is active -->
 <div id="filters-bar" style="display:flex;align-items:flex-end;gap:8px;padding:7px 15px;background:#fff;border-bottom:1px solid #E4E6E8;flex-shrink:0;flex-wrap:wrap">
-  <!-- I am -->
+  <!-- v150: renamed from "I am" to "Viewing user" -->
   <div style="display:flex;flex-direction:column;gap:1px">
-    <span style="font-size:9px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em">I am</span>
+    <span style="font-size:9px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em">Viewing user</span>
     <select class="iam-select" id="iam-sel" onchange="onIamChange()" style="margin:0"><option value="">— select —</option></select>
   </div>
   <!-- Team (group-sel) — only visible in views that filter by team -->
@@ -1214,70 +1214,187 @@ function showLogViewer() {
 
 const auth=()=>"Basic "+btoa(cfg.email+":"+cfg.token);
 
-// v148: Detect 401/403 responses and surface a persistent banner so users
-// can spot a bad/expired API token immediately instead of seeing silently
-// empty boards. A 2xx anywhere clears the banner so transient blips don't
-// get stuck on screen.
-function _jiraAuthErrorObserved(status){
-  try { if (status === 401 || status === 403) showJiraAuthBanner(status); } catch(e){}
+// v150: Comprehensive Jira API error surfacing. Tracks the last failed
+// call so the banner's Retry button can re-fire it. Distinguishes:
+//   - auth errors (401/403) — red banner, fix-credentials CTA
+//   - server errors (5xx)  — amber, retry CTA
+//   - network errors       — amber, "can't reach Jira", retry CTA
+//   - timeout              — amber, retry CTA
+// 30-second timeout via AbortController prevents the "stuck loading"
+// symptom we hit on Edge. A 2xx anywhere clears the banner so transient
+// blips don't get stuck on screen.
+const JIRA_TIMEOUT_MS = 30000;
+let _lastJiraCall = null; // { method, path, body }
+function _recordJiraCall(method, path, body){
+  _lastJiraCall = { method, path, body };
 }
-function _jiraAuthErrorCleared(){
-  try { hideJiraAuthBanner(); } catch(e){}
+function _jiraObservedError(status, kind){
+  try {
+    if (status === 401 || status === 403) showJiraBanner('auth', status);
+    else if (kind === 'network') showJiraBanner('network');
+    else if (kind === 'timeout') showJiraBanner('timeout');
+    else if (status >= 500 && status < 600) showJiraBanner('server', status);
+  } catch(e){}
 }
+function _jiraSuccess(){ try { hideJiraBanner(); } catch(e){} }
+function _withTimeout(ms){
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  return { signal: ctrl.signal, cleanup: () => clearTimeout(timer) };
+}
+
 async function jiraGet(path){
+  _recordJiraCall('GET', path, null);
   const t=encodeURIComponent(cfg.url+path);
-  const r=await fetch(PROXY+"?target="+t,{headers:{Authorization:auth(),Accept:"application/json"}});
-  if(!r.ok){ _jiraAuthErrorObserved(r.status); throw new Error("Jira "+r.status+": "+r.statusText); }
-  _jiraAuthErrorCleared();
+  const to = _withTimeout(JIRA_TIMEOUT_MS);
+  let r;
+  try {
+    r = await fetch(PROXY+"?target="+t, {
+      headers:{Authorization:auth(),Accept:"application/json"},
+      signal: to.signal
+    });
+  } catch(e){
+    to.cleanup();
+    if (e && e.name === 'AbortError') { _jiraObservedError(0, 'timeout'); throw new Error('Jira request timed out after '+(JIRA_TIMEOUT_MS/1000)+'s'); }
+    _jiraObservedError(0, 'network');
+    throw new Error('Network error reaching Jira: ' + (e && e.message || e));
+  }
+  to.cleanup();
+  if(!r.ok){ _jiraObservedError(r.status); throw new Error("Jira "+r.status+": "+r.statusText); }
+  _jiraSuccess();
   return r.json();
 }
 async function jiraPost(path,body){
+  _recordJiraCall('POST', path, body);
   const t=encodeURIComponent(cfg.url+path);
-  const r = await fetch(PROXY+"?target="+t,{method:"POST",headers:{Authorization:auth(),Accept:"application/json","Content-Type":"application/json"},body:JSON.stringify(body)});
-  if (r.status === 401 || r.status === 403) _jiraAuthErrorObserved(r.status);
-  else if (r.ok) _jiraAuthErrorCleared();
+  const to = _withTimeout(JIRA_TIMEOUT_MS);
+  let r;
+  try {
+    r = await fetch(PROXY+"?target="+t, {
+      method:"POST",
+      headers:{Authorization:auth(),Accept:"application/json","Content-Type":"application/json"},
+      body:JSON.stringify(body),
+      signal: to.signal
+    });
+  } catch(e){
+    to.cleanup();
+    if (e && e.name === 'AbortError') { _jiraObservedError(0, 'timeout'); throw new Error('Jira request timed out'); }
+    _jiraObservedError(0, 'network');
+    throw new Error('Network error reaching Jira: ' + (e && e.message || e));
+  }
+  to.cleanup();
+  if (r.ok) _jiraSuccess();
+  else _jiraObservedError(r.status);
   return r;
 }
 async function jiraPut(path,body){
+  _recordJiraCall('PUT', path, body);
   const t=encodeURIComponent(cfg.url+path);
-  const r = await fetch(PROXY+"?target="+t,{method:"PUT",headers:{Authorization:auth(),Accept:"application/json","Content-Type":"application/json"},body:JSON.stringify(body)});
-  if (r.status === 401 || r.status === 403) _jiraAuthErrorObserved(r.status);
-  else if (r.ok) _jiraAuthErrorCleared();
+  const to = _withTimeout(JIRA_TIMEOUT_MS);
+  let r;
+  try {
+    r = await fetch(PROXY+"?target="+t, {
+      method:"PUT",
+      headers:{Authorization:auth(),Accept:"application/json","Content-Type":"application/json"},
+      body:JSON.stringify(body),
+      signal: to.signal
+    });
+  } catch(e){
+    to.cleanup();
+    if (e && e.name === 'AbortError') { _jiraObservedError(0, 'timeout'); throw new Error('Jira request timed out'); }
+    _jiraObservedError(0, 'network');
+    throw new Error('Network error reaching Jira: ' + (e && e.message || e));
+  }
+  to.cleanup();
+  if (r.ok) _jiraSuccess();
+  else _jiraObservedError(r.status);
   return r;
 }
 
-// v148: Banner UI for bad-credentials state. Inserted lazily, idempotent.
-function showJiraAuthBanner(status){
+// v150: Tiered banner for Jira API failures.
+function showJiraBanner(kind, status){
   let el = document.getElementById('jira-auth-banner');
   if (!el){
     el = document.createElement('div');
     el.id = 'jira-auth-banner';
-    el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#FCEBEB;border-bottom:2px solid #D6202B;color:#A11820;padding:10px 16px;font-size:13px;font-weight:700;display:flex;align-items:center;gap:12px;box-shadow:0 1px 4px rgba(0,0,0,.08)';
-    el.innerHTML = '<span style="font-size:16px">⚠️</span>'
-      + '<span id="jira-auth-banner-msg" style="flex:1">Your Jira credentials appear to be invalid or expired. The board can\'t load data.</span>'
-      + '<button id="jira-auth-banner-fix" style="background:#D6202B;color:#fff;border:none;border-radius:5px;padding:6px 14px;cursor:pointer;font-weight:700;font-size:12px">Open Credentials settings</button>'
-      + '<button id="jira-auth-banner-x" title="Dismiss" style="background:transparent;color:#A11820;border:none;font-size:20px;cursor:pointer;padding:0 6px;line-height:1">×</button>';
+    el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;padding:10px 16px;font-size:13px;font-weight:700;display:flex;align-items:center;gap:12px;box-shadow:0 1px 4px rgba(0,0,0,.08);border-bottom:2px solid';
+    el.innerHTML = '<span id="jira-banner-icon" style="font-size:16px">⚠️</span>'
+      + '<span id="jira-banner-msg" style="flex:1"></span>'
+      + '<button id="jira-banner-primary" style="color:#fff;border:none;border-radius:5px;padding:6px 14px;cursor:pointer;font-weight:700;font-size:12px"></button>'
+      + '<button id="jira-banner-x" title="Dismiss" style="background:transparent;border:none;font-size:20px;cursor:pointer;padding:0 6px;line-height:1">×</button>';
     document.body.appendChild(el);
-    document.getElementById('jira-auth-banner-fix').onclick = () => {
+    document.getElementById('jira-banner-x').onclick = hideJiraBanner;
+  }
+  const msg = document.getElementById('jira-banner-msg');
+  const icon = document.getElementById('jira-banner-icon');
+  const primary = document.getElementById('jira-banner-primary');
+  const x = document.getElementById('jira-banner-x');
+
+  let bg, border, color, msgText, primaryText, primaryAction;
+  if (kind === 'auth'){
+    bg = '#FCEBEB'; border = '#D6202B'; color = '#A11820';
+    icon.textContent = '⚠️';
+    msgText = (status === 403)
+      ? 'Jira returned 403 (forbidden). Your API token may lack access to one or more projects, or you\'re signed in with the wrong account email.'
+      : 'Your Jira credentials appear to be invalid or expired. The board can\'t load data — update your API token in Settings → Credentials to continue.';
+    primaryText = 'Open Credentials settings';
+    primaryAction = () => {
       try {
         if (typeof openSettings === 'function') openSettings();
         if (typeof setSettingsTab === 'function') setSettingsTab('credentials');
       } catch(e){}
     };
-    document.getElementById('jira-auth-banner-x').onclick = hideJiraAuthBanner;
+  } else if (kind === 'server'){
+    bg = '#FFF4E0'; border = '#E08000'; color = '#664000';
+    icon.textContent = '⚠️';
+    msgText = 'Jira returned ' + (status||'5xx') + '. The server looks unhealthy — usually transient. Click Retry to try again.';
+    primaryText = '↻ Retry';
+    primaryAction = () => { hideJiraBanner(); retryLastJiraCall(); };
+  } else if (kind === 'network'){
+    bg = '#FFF4E0'; border = '#E08000'; color = '#664000';
+    icon.textContent = '🔌';
+    msgText = 'Can\'t reach Jira (or the proxy). Check your internet connection — then click Retry.';
+    primaryText = '↻ Retry';
+    primaryAction = () => { hideJiraBanner(); retryLastJiraCall(); };
+  } else if (kind === 'timeout'){
+    bg = '#FFF4E0'; border = '#E08000'; color = '#664000';
+    icon.textContent = '⏱';
+    msgText = 'Jira request took longer than ' + (JIRA_TIMEOUT_MS/1000) + 's and was cancelled. Server may be slow — click Retry.';
+    primaryText = '↻ Retry';
+    primaryAction = () => { hideJiraBanner(); retryLastJiraCall(); };
+  } else {
+    return;
   }
-  const msg = document.getElementById('jira-auth-banner-msg');
-  if (msg){
-    msg.textContent = (status === 403)
-      ? 'Jira returned 403 (forbidden). Your API token may lack access to one or more projects, or you\'re signed in with the wrong account email.'
-      : 'Your Jira credentials appear to be invalid or expired. The board can\'t load data — update your API token in Settings → Credentials to continue.';
-  }
+
+  el.style.background = bg;
+  el.style.borderBottomColor = border;
+  el.style.color = color;
+  msg.textContent = msgText;
+  primary.style.background = border;
+  primary.textContent = primaryText;
+  primary.onclick = primaryAction;
+  x.style.color = color;
   el.style.display = 'flex';
 }
-function hideJiraAuthBanner(){
+function hideJiraBanner(){
   const el = document.getElementById('jira-auth-banner');
   if (el) el.style.display = 'none';
 }
+async function retryLastJiraCall(){
+  if (!_lastJiraCall) return;
+  const { method, path, body } = _lastJiraCall;
+  try {
+    if (method === 'GET') await jiraGet(path);
+    else if (method === 'POST') await jiraPost(path, body);
+    else if (method === 'PUT') await jiraPut(path, body);
+    try { if (typeof doFetch === 'function') doFetch(true); } catch {}
+  } catch(e){
+    if (typeof appLogMsg === 'function') appLogMsg('warn','jira','Retry failed: ' + (e.message || e));
+  }
+}
+// Back-compat aliases — older code may reference the v148 names.
+function showJiraAuthBanner(status){ showJiraBanner('auth', status); }
+function hideJiraAuthBanner(){ hideJiraBanner(); }
 
 function extractText(doc){
   if(!doc)return"";
@@ -5915,6 +6032,44 @@ function getActiveProjectsJQL() {
   return 'project in (' + keys.join(',') + ')';
 }
 
+// v150: Boot-time crawl that harvests every unique assignee across the
+// active project group's projects, so the Viewing user dropdown shows
+// everyone you might want to pick — not just the curated team list or
+// names accumulated through prior fetches. Runs once per session,
+// fire-and-forget so it doesn't block boot.
+let _viewingUserCrawlDone = false;
+let _viewingUserCrawlInFlight = false;
+async function crawlAssigneesForViewingUser(){
+  if (_viewingUserCrawlDone || _viewingUserCrawlInFlight) return;
+  _viewingUserCrawlInFlight = true;
+  try {
+    const scope = getActiveProjectsJQL();
+    if (!scope) return;
+    const jql = scope + ' AND assignee is not EMPTY ORDER BY updated DESC';
+    const url = '/rest/api/3/search/jql?jql=' + encodeURIComponent(jql)
+      + '&fields=assignee&maxResults=500';
+    const d = await jiraGet(url);
+    const issues = (d.issues || []);
+    const seen = new Set(teamMembers);
+    let added = 0;
+    for (const i of issues){
+      const name = i.fields?.assignee?.displayName;
+      if (name && !seen.has(name)){ teamMembers.push(name); seen.add(name); added++; }
+    }
+    if (added){
+      teamMembers.sort();
+      saveAll();
+      try { populateIamSelector && populateIamSelector(); } catch {}
+      if (typeof appLogMsg === 'function') appLogMsg('info','team','Auto-discovered '+added+' assignees from active project group');
+    }
+    _viewingUserCrawlDone = true;
+  } catch(e){
+    if (typeof appLogMsg === 'function') appLogMsg('warn','team','Assignee crawl failed: '+(e.message||e));
+  } finally {
+    _viewingUserCrawlInFlight = false;
+  }
+}
+
 /* ══ v88: GLOBAL SEARCH ═════════════════════════════════════════════
    Live Jira-wide search. As the user types we debounce, hit JQL once,
    and split results into two groups:
@@ -7773,6 +7928,10 @@ async function init(){
     populateProjFilter();
     populateCtrlProjFilter();
     populateGroupSelector();
+    // v150: proactively crawl assignees across the active project group so
+    // the Viewing user dropdown is complete on first load. Fire-and-forget,
+    // doesn't block the rest of init.
+    setTimeout(() => { crawlAssigneesForViewingUser().catch(() => {}); }, 100);
   }catch{}
   if(currentIam){document.getElementById("iam-sel").value=currentIam;updateManagerVisibility();await doFetch(false);}
   else showPage("welcome");
