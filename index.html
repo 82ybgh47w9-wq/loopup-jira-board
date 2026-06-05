@@ -708,7 +708,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v154</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v155</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -825,7 +825,9 @@ button,select,textarea,input{font-family:inherit}
     <button onclick="setView('manager')" id="btn-manager">Team</button>
     <button onclick="setView('activity')">Comments</button>
     <button onclick="setView('labels')">Labels</button>
-    <button onclick="setView('meetings')" id="btn-meetings" style="display:none">Meetings</button>
+    <!-- v155: tab label matches the in-section title now that the feature handles more than
+         meetings; also enabled for everyone by default (gate removed below). -->
+    <button onclick="setView('meetings')" id="btn-meetings" style="display:none">Meeting / Task Generator</button>
   </div>
 </div>
 
@@ -1936,7 +1938,33 @@ async function postComment(key, textOrBody) {
     return r.ok;
   } catch { return false; }
 }
-async function transitionIssue(key,targetStatus){appLogMsg("info","jira","Transitioning "+key+" to "+targetStatus);try{const d=await jiraGet("/rest/api/3/issue/"+key+"/transitions");const t=(d.transitions||[]).find(t=>t.name.toLowerCase()===targetStatus.toLowerCase())||(d.transitions||[]).find(t=>t.to?.name?.toLowerCase()===targetStatus.toLowerCase());if(!t)return false;const r=await jiraPost("/rest/api/3/issue/"+key+"/transitions",{transition:{id:t.id}});return r.ok||r.status===204;}catch{return false;}}
+async function transitionIssue(key,targetStatus){
+  appLogMsg("info","jira","Transitioning "+key+" to "+targetStatus);
+  try{
+    const d=await jiraGet("/rest/api/3/issue/"+key+"/transitions");
+    const t=(d.transitions||[]).find(t=>t.name.toLowerCase()===targetStatus.toLowerCase())
+         ||(d.transitions||[]).find(t=>t.to?.name?.toLowerCase()===targetStatus.toLowerCase());
+    if(!t)return false;
+    const r=await jiraPost("/rest/api/3/issue/"+key+"/transitions",{transition:{id:t.id}});
+    const ok = r.ok||r.status===204;
+    // v155: any path that transitions to Done — drag-drop, swimlane move,
+    // detail pane click — also drops the active-task flag for the assignee
+    // so a finished item stops appearing as "what I'm working on".
+    if (ok && normStatus(targetStatus) === 'Done'){
+      try {
+        const issue = (typeof allIssues !== 'undefined') ? allIssues.find(i => i.key === key) : null;
+        const owner = (issue && issue.assignee && issue.assignee !== 'Unassigned')
+          ? issue.assignee
+          : (openIssue && openIssue.key === key ? openIssue.assignee : null);
+        if (owner && activeFlags[owner] === key){
+          await clearActiveFlag(owner);
+          appLogMsg('info','active','Auto-cleared active flag for '+owner+' (issue '+key+' Done)');
+        }
+      } catch(e){ appLogMsg('warn','active','Auto-clear inside transitionIssue failed: '+(e.message||e)); }
+    }
+    return ok;
+  }catch{return false;}
+}
 
 // v145: Dynamic workflow statuses on the detail pane. Cache per-issue so we
 // only hit /transitions once per pane open. Stores {id, name, category}
@@ -2441,19 +2469,18 @@ function populateGroupSelector(){
 }
 function updateManagerVisibility(){
   document.getElementById("btn-manager").style.display="inline-block";
-  // v109: Meetings tab is gated by a localStorage flag. To enable for a
-  // browser, run in console:  localStorage.setItem('meetings_beta','1')
-  // To disable:               localStorage.removeItem('meetings_beta')
-  // To open to all users:     replace next line with mb.style.display='inline-block'
+  // v155: Meeting / Task Generator tab is now visible to all users by default.
+  // Previously gated by a per-browser localStorage flag (meetings_beta) which
+  // meant turning it on in Settings only affected the local browser — other
+  // users had to enable it themselves, which wasn't obvious.
   const mb = document.getElementById("btn-meetings");
-  if(mb) mb.style.display = (localStorage.getItem('meetings_beta') === '1') ? "inline-block" : "none";
+  if(mb) mb.style.display = "inline-block";
 }
-// v109: also run the gate on page load in case updateManagerVisibility hasn't
-// fired by the time the user expects to see the tab. Idempotent and cheap.
+// v155: matching change on DOMContentLoaded — always show the tab.
 window.addEventListener('DOMContentLoaded', () => {
   try {
     const mb = document.getElementById("btn-meetings");
-    if(mb) mb.style.display = (localStorage.getItem('meetings_beta') === '1') ? "inline-block" : "none";
+    if(mb) mb.style.display = "inline-block";
   } catch(e) {}
 });
 
@@ -4011,6 +4038,18 @@ async function doPaneStatus(val){
   openIssue={...openIssue,status:val};
   saveAll();
   _syncPriCachesFromOpenIssue();
+  // v155: when an item moves to Done, clear it from the assignee's active
+  // task slot. The "active" flag is the assignee's "what I'm working on
+  // right now" — once they finish, it should drop automatically instead of
+  // them having to remember to click "clear active" too.
+  try {
+    if (normStatus(val) === 'Done' && openIssue.assignee && openIssue.assignee !== 'Unassigned'){
+      if (activeFlags[openIssue.assignee] === openIssue.key){
+        await clearActiveFlag(openIssue.assignee);
+        if (typeof appLogMsg === 'function') appLogMsg('info','active','Auto-cleared active flag for '+openIssue.assignee+' (issue '+openIssue.key+' marked Done)');
+      }
+    }
+  } catch(e){ if (typeof appLogMsg === 'function') appLogMsg('warn','active','Auto-clear failed: '+(e.message||e)); }
   renderPaneHdr(openIssue);renderPaneMain();updateStats();renderMain();
   await transitionIssue(openIssue.key,val);
   setTimeout(()=>doFetch(true),1500);
@@ -6794,15 +6833,15 @@ function renderSettings(){
           <button onclick="showLogViewer()" style="font-size:11px;padding:5px 12px;border-radius:6px;border:1px solid #E4E6E8;background:#fff;color:#292E37;cursor:pointer">View Log</button>
         </div>
       </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:#F7F8F9;border-radius:8px;margin-bottom:14px">
+      <!-- v155: Meetings/Generator tab is now enabled for everyone by default. The
+           per-browser toggle that used to live here was confusing because it only
+           affected the local browser, not other teammates — making admins think
+           they'd enabled it for everyone when they hadn't. -->
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:#E8F5E0;border:1px solid #5E8E38;border-radius:8px;margin-bottom:14px">
         <div>
-          <div style="font-size:12px;font-weight:700">Meetings tab (beta)</div>
-          <div style="font-size:11px;color:#9EA0A4">Show the Meeting / Task Generator in the top tab bar (this browser only)</div>
+          <div style="font-size:12px;font-weight:700;color:#2D7A2D">Meeting / Task Generator</div>
+          <div style="font-size:11px;color:#3D6B1E">Now available to all users — no toggle needed.</div>
         </div>
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:#292E37">
-          <input type="checkbox" ${localStorage.getItem('meetings_beta')==='1'?'checked':''} onchange="toggleMeetingsBeta(this.checked)">
-          <span>Enabled</span>
-        </label>
       </div>
       <div style="padding:10px 14px;background:#F7F8F9;border-radius:8px;margin-bottom:14px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
@@ -8610,6 +8649,7 @@ function installAutoRefreshHooks(){
 let mtgSource = 'auto';      // v148: default is now 'auto' (was 'paste')
 let mtgTasks = [];           // extracted tasks array
 let mtgExtracting = false;   // loading state
+let mtgPasteAsList = false;  // v155: "this is already a structured task list" mode
 let mtgExpandedTask = null;  // which task detail is open
 let mtgMeetingTitle = '';    // meeting subject
 let mtgMeetingDate = '';     // meeting date
@@ -9727,8 +9767,9 @@ function renderMtgInputArea() {
     area.innerHTML = `
       <div style="margin-bottom:10px">
         <!-- v154: relabelled to reflect any-text input, not just meetings -->
-        <label style="font-size:11px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.04em">Title</label>
-        <input id="mtg-title" class="mtg-attendees-input" placeholder="e.g. Marketing Engine — or 'ChatGPT brainstorm 2026-06-04'" value="${_escHtml(mtgMeetingTitle)}" oninput="mtgMeetingTitle=this.value">
+        <!-- v155: marked optional — for LLM dumps you might not have a meaningful title -->
+        <label style="font-size:11px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.04em">Title <span style="font-weight:400;color:#9EA0A4">(optional)</span></label>
+        <input id="mtg-title" class="mtg-attendees-input" placeholder="e.g. Marketing Engine — or 'ChatGPT brainstorm 2026-06-04' — or leave blank" value="${_escHtml(mtgMeetingTitle)}" oninput="mtgMeetingTitle=this.value">
       </div>
       <div style="margin-bottom:10px">
         <label style="font-size:11px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.04em">People <span style="font-weight:400;color:#9EA0A4">(comma-separated, optional)</span></label>
@@ -9738,6 +9779,17 @@ function renderMtgInputArea() {
         <label style="font-size:11px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.04em">Content</label>
         <textarea id="mtg-transcript" placeholder="Paste any content here — a meeting transcript, LLM output (e.g. ChatGPT), notes, or free text.&#10;&#10;WebVTT format (from Teams) works well, but plain text is fine too.&#10;&#10;The AI will identify action items, who they're assigned to, and suggest Jira placement." style="min-height:300px"></textarea>
       </div>
+      <!-- v155: structured-list mode. When ticked, the request to the AI carries a
+           directive to preserve titles/descriptions verbatim and only do
+           project/assignee/epic matching — useful when the input is already a clean
+           list (e.g. produced by ChatGPT). -->
+      <label style="display:flex;align-items:flex-start;gap:8px;margin-top:10px;padding:8px 10px;background:#F7F8F9;border:1px solid #E4E6E8;border-radius:6px;cursor:pointer;font-size:12px;color:#292E37">
+        <input type="checkbox" ${mtgPasteAsList?'checked':''} onchange="mtgPasteAsList=this.checked" style="margin-top:1px;cursor:pointer">
+        <span>
+          <b>Already a structured task list</b> — process as-is
+          <div style="font-size:11px;color:#9EA0A4;margin-top:2px">Use this when pasting an LLM-generated list with titles + descriptions. Each item will be preserved verbatim; the AI will only match project, assignee, and parent epic.</div>
+        </span>
+      </label>
       <button class="mtg-extract-btn" id="mtg-extract-btn" onclick="mtgExtract()" ${mtgExtracting ? 'disabled' : ''}>
         ${mtgExtracting ? spinHtml(16, '#fff') + ' Extracting…' : '⚡ Extract Tasks'}
       </button>
@@ -9835,16 +9887,27 @@ async function mtgExtract(opts) {
       return `${name}: ${theirRecent.join(' | ')}`;
     }).filter(Boolean).join('\n');
 
-    // Step 3: Call AI to extract tasks
+    // Step 3: Call AI to extract tasks.
+    // v155: when the user has toggled "Already a structured task list" we
+    // prepend a directive so the AI preserves titles/descriptions verbatim
+    // and only does the project/assignee/epic matching layer. The worker's
+    // existing prompt branches on this header automatically — no worker
+    // change required, but the instructions are self-contained so even a
+    // model that wasn't trained on the header still gets the right cue.
+    const structuredHeader = mtgPasteAsList
+      ? `[MODE: STRUCTURED_TASK_LIST]\nThe content below is a PRE-EXTRACTED list of tasks (e.g. produced by an LLM). Process each item as follows:\n  - Preserve the task TITLE/SUMMARY verbatim — DO NOT reword, rephrase, or merge.\n  - Preserve the task DESCRIPTION verbatim where present.\n  - DO NOT skip items unless they are obvious section headers (e.g. "## Next Steps").\n  - DO match each item to: project key, assignee (from team list), parent epic suggestion.\n  - DO assign a sensible priority (default Medium if unclear).\n\n--- USER CONTENT ---\n`
+      : '';
+    const finalContent = (structuredHeader + transcript).substring(0, 15000);
     const prompt = {
       task: 'extract_meeting_tasks',
-      transcript: transcript.substring(0, 15000),
+      transcript: finalContent,
       meetingTitle: mtgMeetingTitle,
       attendees: attendees,
       projects: projects.join(', '),
       epics: epics.map(e => `${e.key}: ${e.summary} (${e.project})`).join('\n'),
       teamMembers: teamMembers.join(', '),
-      assigneeProfiles: assigneeProfiles
+      assigneeProfiles: assigneeProfiles,
+      mode: mtgPasteAsList ? 'structured_list' : 'transcript'   // explicit field too
     };
 
     const r = await fetch(PROXY + '/ai', {
