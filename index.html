@@ -708,7 +708,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v156</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v157</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -3010,6 +3010,37 @@ function _swimCategoryFor(status){
   if (/hold|block|wait|stall|pause|impediment/.test(s)) return 'indeterminate';
   return 'new';
 }
+// v157: user-preferred ordering of known statuses. Lower index = higher
+// up the swim view. Unknown statuses fall in after these, ordered by
+// category and then alphabetically.
+const SWIM_PREFERRED_ORDER = [
+  'Done',
+  '__ACTIVE__',
+  'In Progress',
+  'On Hold',
+  'Blocked',
+  'In Review',
+  'QA',
+  'Selected for Development',
+  'Selected',
+  'Backlog',
+  'Cancelled'
+];
+// v157: default collapsed state per status label — matches user spec.
+const SWIM_DEFAULT_COLLAPSED = {
+  'Done': true,
+  'Active': false,
+  'In Progress': false,
+  'On Hold': false,
+  'Blocked': false,
+  'In Review': false,
+  'QA': false,
+  'Selected for Development': true,
+  'Selected': true,
+  'Backlog': true,
+  'Cancelled': true
+};
+
 function getDynamicSwimRows(){
   // Use the visible team's filtered issues so the lanes reflect what's
   // actually on screen, not statuses from unrelated projects.
@@ -3027,6 +3058,10 @@ function getDynamicSwimRows(){
     const cat = _swimCategoryFor(s);
     if (byCat[cat]) byCat[cat].push(s);
   }
+  // v157: always include 'Done' so the lane (and its count) shows even
+  // when Show Done is unticked. Managers want to glance at "how much has
+  // shipped" without flooding the board with finished items.
+  if (!seen.has('Done')) byCat.done.push('Done');
   for (const c of Object.keys(byCat)) byCat[c].sort((a,b)=>a.localeCompare(b));
 
   // Palette for known LoopUp statuses; unknowns use category fallback.
@@ -3050,8 +3085,8 @@ function getDynamicSwimRows(){
   };
   const slugify = s => 'st_' + (s || '').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
   const rows = [];
-  // Active always first.
-  rows.push({ key:'active', label:'Active', statuses:['__active__'], color:'#5E8E38', bg:'#F0FBF0', _dynamic:false });
+  // Active always present (special).
+  rows.push({ key:'active', label:'Active', statuses:['__active__'], color:'#5E8E38', bg:'#F0FBF0', cat:'__special__', _dynamic:false });
   for (const cat of ['indeterminate','new','done']){
     for (const name of byCat[cat]){
       // v156: hide the Cancelled lane unless the Show Cancelled toggle is on.
@@ -3066,6 +3101,28 @@ function getDynamicSwimRows(){
         cat,
         _dynamic: true
       });
+    }
+  }
+  // v157: apply the preferred order. Known statuses sort by SWIM_PREFERRED_ORDER
+  // index; unknown statuses fall in after the known ones, grouped by category
+  // (indeterminate → new → done) and then alphabetically within.
+  const orderKey = r => r.key === 'active' ? '__ACTIVE__' : r.label;
+  rows.sort((a, b) => {
+    const ai = SWIM_PREFERRED_ORDER.indexOf(orderKey(a));
+    const bi = SWIM_PREFERRED_ORDER.indexOf(orderKey(b));
+    if (ai >= 0 && bi >= 0) return ai - bi;
+    if (ai >= 0) return -1;
+    if (bi >= 0) return 1;
+    const catOrder = ['__special__','indeterminate','new','done'];
+    if (a.cat !== b.cat) return catOrder.indexOf(a.cat) - catOrder.indexOf(b.cat);
+    return a.label.localeCompare(b.label);
+  });
+  // v157: seed default collapsed state for any lane that hasn't been
+  // toggled yet — so the first render matches the user's spec.
+  for (const r of rows){
+    if (swimCollapsed[r.key] === undefined){
+      const def = SWIM_DEFAULT_COLLAPSED[r.label];
+      swimCollapsed[r.key] = (def !== undefined) ? def : (r.cat === 'new' || r.cat === 'done');
     }
   }
   return rows;
@@ -3090,7 +3147,30 @@ function swimCard(issue, isActiveRow=false, isDone=false){
   </div>`;
 }
 
-function toggleSwim(key){ swimCollapsed[key]=!swimCollapsed[key]; renderManager(); }
+function toggleSwim(key){
+  // v157: if the user is expanding a Done lane while Show Done is off,
+  // auto-enable Show Done so the cards actually become visible. Manager
+  // glanced at the count, decided they want details — no need to make
+  // them tick a separate checkbox.
+  const expanding = swimCollapsed[key] === true; // we're about to flip from collapsed → expanded
+  if (expanding && !showDone){
+    try {
+      const rows = getDynamicSwimRows();
+      const row = rows.find(r => r.key === key);
+      // Done category, but not the Cancelled lane (Cancelled has its own toggle)
+      if (row && row.cat === 'done' && !row.statuses.some(s => isCancelledStatus(s))){
+        showDone = true;
+        showDoneByView = {mytasks:showDone, myepics:showDone, team:showDone, prioritise:showDone, manager:showDone};
+        saveAll();
+        try { syncGlobalShowDoneCheckbox(); } catch {}
+        appLogMsg('info','filter','Auto-enabled Show Done — Done lane expanded in Team view');
+      }
+    } catch(e){ appLogMsg('warn','filter','Auto-enable Show Done failed: '+(e.message||e)); }
+  }
+  swimCollapsed[key] = !swimCollapsed[key];
+  saveAll();
+  renderManager();
+}
 
 function renderManager(){
   // v156: use exact status matching against the dynamic swim rows. We
@@ -3127,9 +3207,22 @@ function renderManager(){
   // ── Swimlane rows (v156: dynamic, see getDynamicSwimRows above) ──
   SWIM_ROWS_DYN.forEach(row => {
     const collapsed = swimCollapsed[row.key];
+    // v157: identify the Done lane so we can show its count even when
+    // Show Done is unticked. Cancelled lane is treated separately by its
+    // own toggle (it's hidden entirely when Show Cancelled is off).
+    const isDoneLane = row.cat === 'done' && !row.statuses.some(s => isCancelledStatus(s));
     const counts = vt.map(person => {
+      if(row.key==="active"){ const ak=activeFlags[person]; const issues=getFiltered(person); return ak&&issues.find(i=>i.key===ak)?1:0; }
+      if (isDoneLane){
+        // Count from raw allIssues so the Done badge is honest about how
+        // many items have shipped, regardless of the Show Done toggle.
+        return (allIssues || []).filter(i =>
+          i && i.assignee === person &&
+          (!ctrlProjFilter || i.project === ctrlProjFilter) &&
+          row.statuses.includes(i.status || 'Backlog')
+        ).length;
+      }
       const issues = getFiltered(person);
-      if(row.key==="active"){ const ak=activeFlags[person]; return ak&&issues.find(i=>i.key===ak)?1:0; }
       // v156: exact-status match against the lane's status list
       return issues.filter(i=>row.statuses.includes(exact(i))).length;
     });
