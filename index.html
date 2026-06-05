@@ -708,7 +708,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v157</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v158</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -8864,6 +8864,56 @@ let mtgSource = 'auto';      // v148: default is now 'auto' (was 'paste')
 let mtgTasks = [];           // extracted tasks array
 let mtgExtracting = false;   // loading state
 let mtgPasteAsList = false;  // v155: "this is already a structured task list" mode
+let mtgParentKey = '';       // v158: optional parent epic / issue key for structured-list mode
+
+// v158: Client-side parser for structured task lists. The Cloudflare worker's
+// system prompt is tuned for meeting-transcript extraction, so when the user
+// pastes a clean list ("Task Name: X / Description: Y / Priority N: ...") the
+// AI often returns zero items. This parser handles the structured case
+// without the AI, preserving the exact titles and descriptions the user
+// provided. Maps priority numbers per user spec: 1→Highest, 2→High,
+// 3→Medium, 4+→Low. opts.parent (if set) becomes parent_key on every task.
+function clientParseStructuredList(content, opts){
+  opts = opts || {};
+  const tasks = [];
+  if (!content) return tasks;
+
+  // Locate "Priority N:" section headers to bucket each task by section.
+  const priSections = [];
+  const priRe = /(?:^|\n)\s*Priority\s+(\d+)\s*[:.]?\s*([^\n]*)/gi;
+  let pm;
+  while ((pm = priRe.exec(content)) !== null){
+    priSections.push({ idx: pm.index, priority: parseInt(pm[1]) });
+  }
+  function priorityForIdx(idx){
+    let priNum = null;
+    for (const p of priSections){ if (p.idx <= idx) priNum = p.priority; }
+    if (priNum === 1) return 'Highest';
+    if (priNum === 2) return 'High';
+    if (priNum === 3) return 'Medium';
+    if (priNum != null && priNum >= 4) return 'Low';
+    return 'Medium';
+  }
+
+  // Primary format: "Task Name: <title> ... Description: <body>" pairs.
+  // The description runs until the next "Task Name:", next "Priority N:",
+  // or end of input. Allow flexible whitespace between elements.
+  const re = /Task\s*Name:\s*([^\n]+?)\s*Description:\s*([\s\S]*?)(?=\s*(?:Task\s*Name:|Priority\s+\d|$))/gi;
+  let m;
+  while ((m = re.exec(content)) !== null){
+    const summary = (m[1] || '').replace(/\s+/g,' ').trim();
+    const description = (m[2] || '').trim();
+    if (!summary) continue;
+    tasks.push({
+      summary,
+      description,
+      priority: priorityForIdx(m.index),
+      parent_key: opts.parent || '',
+      project: opts.project || ''
+    });
+  }
+  return tasks;
+}
 let mtgExpandedTask = null;  // which task detail is open
 let mtgMeetingTitle = '';    // meeting subject
 let mtgMeetingDate = '';     // meeting date
@@ -9998,12 +10048,21 @@ function renderMtgInputArea() {
            project/assignee/epic matching — useful when the input is already a clean
            list (e.g. produced by ChatGPT). -->
       <label style="display:flex;align-items:flex-start;gap:8px;margin-top:10px;padding:8px 10px;background:#F7F8F9;border:1px solid #E4E6E8;border-radius:6px;cursor:pointer;font-size:12px;color:#292E37">
-        <input type="checkbox" ${mtgPasteAsList?'checked':''} onchange="mtgPasteAsList=this.checked" style="margin-top:1px;cursor:pointer">
+        <input type="checkbox" id="mtg-paste-as-list" ${mtgPasteAsList?'checked':''} onchange="mtgPasteAsList=this.checked;document.getElementById('mtg-structured-options').style.display=this.checked?'block':'none'" style="margin-top:1px;cursor:pointer">
         <span>
           <b>Already a structured task list</b> — process as-is
-          <div style="font-size:11px;color:#9EA0A4;margin-top:2px">Use this when pasting an LLM-generated list with titles + descriptions. Each item will be preserved verbatim; the AI will only match project, assignee, and parent epic.</div>
+          <div style="font-size:11px;color:#9EA0A4;margin-top:2px">For LLM-generated lists. Looks for "Task Name: / Description:" pairs and "Priority N:" section headers. The AI is bypassed entirely — your titles and descriptions are preserved verbatim.</div>
         </span>
       </label>
+      <!-- v158: Extra options shown only when structured-list mode is on. -->
+      <div id="mtg-structured-options" style="display:${mtgPasteAsList?'block':'none'};margin-top:8px;padding:10px 12px;background:#E0F0F8;border:1px solid #C8E6F7;border-radius:6px">
+        <div style="font-size:11px;font-weight:700;color:#125462;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Parent epic / issue key <span style="font-weight:400;color:#5D7987">(optional)</span></div>
+        <input id="mtg-parent-key" placeholder="e.g. MKT-530" value="${_escHtml(mtgParentKey || '')}" oninput="mtgParentKey=this.value.trim().toUpperCase()" style="width:100%;padding:6px 10px;font-size:12px;border:1px solid #C8E6F7;border-radius:6px;background:#fff;text-transform:uppercase;box-sizing:border-box">
+        <div style="font-size:10px;color:#125462;margin-top:6px;line-height:1.5">
+          Every parsed task is placed under this parent.<br>
+          <b>Priority mapping:</b> 1 → Highest · 2 → High · 3 → Medium · 4 + → Low
+        </div>
+      </div>
       <button class="mtg-extract-btn" id="mtg-extract-btn" onclick="mtgExtract()" ${mtgExtracting ? 'disabled' : ''}>
         ${mtgExtracting ? spinHtml(16, '#fff') + ' Extracting…' : '⚡ Extract Tasks'}
       </button>
@@ -10086,6 +10145,61 @@ async function mtgExtract(opts) {
       .filter(i => isEpicLevel(i.type))
       .map(i => ({ key: i.key, summary: i.summary, project: i.project, status: i.status }))
       .slice(0, 80);
+
+    // v158: When "Already a structured task list" is on, try the client-side
+    // parser first. The Cloudflare worker's transcript-tuned prompt often
+    // returns zero items for clean LLM-generated lists, so we bypass it
+    // entirely if we can extract the tasks ourselves. The AI flow remains a
+    // fallback for any structured list the parser doesn't recognise.
+    if (mtgPasteAsList){
+      const parentKey = (document.getElementById('mtg-parent-key')?.value || mtgParentKey || '').trim().toUpperCase();
+      // Infer project from the parent key prefix when possible (e.g. MKT-530 → MKT)
+      const inferredProj = parentKey.includes('-') ? parentKey.split('-')[0] : '';
+      const projFromIssue = parentKey ? (allIssues.find(i => i.key === parentKey)?.project || '') : '';
+      const projForTasks = projFromIssue || inferredProj || projects[0] || '';
+
+      const parsed = clientParseStructuredList(transcript, {
+        parent: parentKey,
+        project: projForTasks
+      });
+      if (parsed.length){
+        appLogMsg('info', 'mtg', 'Structured-list parser: ' + parsed.length + ' tasks (parent=' + (parentKey||'none') + ', project=' + projForTasks + ')');
+        mtgTasks = parsed.map((t, i) => {
+          const epicKey = t.parent_key || '';
+          const ep = epicKey ? allIssues.find(x => x.key === epicKey) : null;
+          return {
+            id: 'mtg_' + Date.now() + '_' + i,
+            summary: t.summary,
+            description: t.description || '',
+            assignee: '',
+            assigneeId: null,
+            project: t.project || projForTasks,
+            epicKey: epicKey,
+            epicSummary: ep ? (ep.summary || '') : '',
+            _parentSuggestion: '',
+            initiativeKey: '', initiativeSummary: '',
+            legendKey: '', legendSummary: '',
+            status_target: 'Backlog',
+            priority: t.priority || 'Medium',
+            type: 'Task',
+            sourceQuote: '',
+            confidence: 'high',
+            duplicate: null,
+            included: true,
+            status: 'pending',
+            jiraKey: null,
+            expanded: false
+          };
+        });
+        // Walk up the hierarchy chain to fill Initiative/Legend if a parent was given
+        mtgTasks.forEach(t => { try { mtgFillHierarchy(t); } catch {} });
+        mtgExtracting = false;
+        renderMtgInputArea();
+        renderMtgStaging('ready');
+        return;
+      }
+      appLogMsg('warn', 'mtg', 'Structured-list parser found 0 tasks — falling back to AI');
+    }
 
     // v113: Build assignee profiles from existing Jira data so the AI can infer
     // domain expertise. For each team member, list their recent Task summaries.
