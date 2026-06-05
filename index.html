@@ -708,7 +708,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v158</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v159</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -3253,7 +3253,7 @@ function renderManager(){
         const safePerson = person.replace(/'/g, "\\'");
         html += `<div class="lane-drop-zone" ondragover="onDragOver(event,'${dropStatus}')" ondragleave="onDragLeave(event)" ondrop="onDropTeamLane(event,'${dropStatus}','${safePerson}')"
           style="min-width:220px;width:220px;padding:6px 8px;border-right:1px solid #E4E6E8;vertical-align:top;min-height:${row.key==="active"?"90px":row.key==="done"?"50px":"70px"}">
-          ${cards.length ? cards.map(i=>swimCard(i,row.key==="active",row.key==="done")).join("") : `<div style="font-size:11px;color:#C9CACC;padding:4px;font-style:italic">${row.key==="active"?"Nothing active":""}</div>`}
+          ${cards.length ? cards.map(i=>swimCard(i,row.key==="active",isDoneLane||row.cat==='done')).join("") : `<div style="font-size:11px;color:#C9CACC;padding:4px;font-style:italic">${row.key==="active"?"Nothing active":""}</div>`}
         </div>`;
       });
     } else {
@@ -8866,6 +8866,58 @@ let mtgExtracting = false;   // loading state
 let mtgPasteAsList = false;  // v155: "this is already a structured task list" mode
 let mtgParentKey = '';       // v158: optional parent epic / issue key for structured-list mode
 
+// v159: Typeahead search for the Parent epic/issue field. Matches by key
+// prefix (case-insensitive) and by summary word-match across allIssues.
+// Filters to epic-level types where sensible but still allows any issue
+// to be picked (a Task can be a sub-task parent, an Initiative can be an
+// Epic parent, etc.).
+function mtgParentSearch(query){
+  const dd = document.getElementById('mtg-parent-results');
+  if (!dd) return;
+  mtgParentKey = (query || '').trim().toUpperCase();
+  const q = (query || '').trim().toLowerCase();
+  if (q.length < 1){ dd.style.display = 'none'; dd.innerHTML = ''; return; }
+  // Score matches: key prefix > key contains > summary word match
+  const tokens = q.split(/\s+/).filter(t => t.length > 0);
+  const scored = [];
+  for (const iss of allIssues || []){
+    if (!iss || !iss.key) continue;
+    const key = iss.key.toLowerCase();
+    const sum = (iss.summary || '').toLowerCase();
+    let score = 0;
+    if (key.startsWith(q)) score += 100;
+    else if (key.includes(q)) score += 50;
+    for (const t of tokens){
+      if (sum.includes(t)) score += 5;
+    }
+    if (score > 0) scored.push({ iss, score });
+  }
+  scored.sort((a,b) => b.score - a.score);
+  const top = scored.slice(0, 15);
+  if (!top.length){
+    dd.innerHTML = '<div style="padding:8px 12px;font-size:12px;color:#9EA0A4;font-style:italic">No matches in current data — type a Jira key anyway (e.g. MKT-530), it\'ll be used directly.</div>';
+    dd.style.display = 'block';
+    return;
+  }
+  dd.innerHTML = top.map(({iss}) => {
+    const typeBadge = iss.type ? `<span style="font-size:9px;font-weight:700;background:${(TC[iss.type]||TC.Task).bg};color:${(TC[iss.type]||TC.Task).c};padding:1px 6px;border-radius:8px;text-transform:uppercase;margin-right:6px">${iss.type}</span>` : '';
+    return `<div onmousedown="mtgParentPick('${iss.key.replace(/'/g,"\\'")}')" style="padding:7px 12px;cursor:pointer;border-bottom:1px solid #F4F4F5;font-size:12px;display:flex;align-items:center;gap:8px"
+      onmouseover="this.style.background='#F7F8F9'" onmouseout="this.style.background='transparent'">
+      ${typeBadge}
+      <span style="font-weight:700;color:#257AA5;font-family:monospace">${iss.key}</span>
+      <span style="flex:1;color:#292E37;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_escHtml(iss.summary||'')}</span>
+    </div>`;
+  }).join('');
+  dd.style.display = 'block';
+}
+function mtgParentPick(key){
+  mtgParentKey = key;
+  const inp = document.getElementById('mtg-parent-key');
+  if (inp) inp.value = key;
+  const dd = document.getElementById('mtg-parent-results');
+  if (dd) dd.style.display = 'none';
+}
+
 // v158: Client-side parser for structured task lists. The Cloudflare worker's
 // system prompt is tuned for meeting-transcript extraction, so when the user
 // pastes a clean list ("Task Name: X / Description: Y / Priority N: ...") the
@@ -10029,39 +10081,44 @@ function renderMtgInputArea() {
 
   if (mtgSource === 'paste') {
     area.innerHTML = `
-      <div style="margin-bottom:10px">
-        <!-- v154: relabelled to reflect any-text input, not just meetings -->
-        <!-- v155: marked optional — for LLM dumps you might not have a meaningful title -->
-        <label style="font-size:11px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.04em">Title <span style="font-weight:400;color:#9EA0A4">(optional)</span></label>
-        <input id="mtg-title" class="mtg-attendees-input" placeholder="e.g. Marketing Engine — or 'ChatGPT brainstorm 2026-06-04' — or leave blank" value="${_escHtml(mtgMeetingTitle)}" oninput="mtgMeetingTitle=this.value">
-      </div>
-      <div style="margin-bottom:10px">
-        <label style="font-size:11px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.04em">People <span style="font-weight:400;color:#9EA0A4">(comma-separated, optional)</span></label>
-        <input id="mtg-attendees" class="mtg-attendees-input" placeholder="e.g. Marcus Greensit, Steve Flavell, Harry Newman" value="">
-      </div>
-      <div>
-        <label style="font-size:11px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.04em">Content</label>
-        <textarea id="mtg-transcript" placeholder="Paste any content here — a meeting transcript, LLM output (e.g. ChatGPT), notes, or free text.&#10;&#10;WebVTT format (from Teams) works well, but plain text is fine too.&#10;&#10;The AI will identify action items, who they're assigned to, and suggest Jira placement." style="min-height:300px"></textarea>
-      </div>
-      <!-- v155: structured-list mode. When ticked, the request to the AI carries a
-           directive to preserve titles/descriptions verbatim and only do
-           project/assignee/epic matching — useful when the input is already a clean
-           list (e.g. produced by ChatGPT). -->
-      <label style="display:flex;align-items:flex-start;gap:8px;margin-top:10px;padding:8px 10px;background:#F7F8F9;border:1px solid #E4E6E8;border-radius:6px;cursor:pointer;font-size:12px;color:#292E37">
-        <input type="checkbox" id="mtg-paste-as-list" ${mtgPasteAsList?'checked':''} onchange="mtgPasteAsList=this.checked;document.getElementById('mtg-structured-options').style.display=this.checked?'block':'none'" style="margin-top:1px;cursor:pointer">
+      <!-- v159: structured-list mode toggle now lives AT THE TOP of the panel so
+           ticking it can hide the meeting-only fields (Title, People). -->
+      <label style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;background:#F7F8F9;border:1px solid #E4E6E8;border-radius:6px;cursor:pointer;font-size:12px;color:#292E37;margin-bottom:10px">
+        <input type="checkbox" id="mtg-paste-as-list" ${mtgPasteAsList?'checked':''} onchange="mtgPasteAsList=this.checked;renderMtgInputArea()" style="margin-top:1px;cursor:pointer">
         <span>
           <b>Already a structured task list</b> — process as-is
           <div style="font-size:11px;color:#9EA0A4;margin-top:2px">For LLM-generated lists. Looks for "Task Name: / Description:" pairs and "Priority N:" section headers. The AI is bypassed entirely — your titles and descriptions are preserved verbatim.</div>
         </span>
       </label>
-      <!-- v158: Extra options shown only when structured-list mode is on. -->
-      <div id="mtg-structured-options" style="display:${mtgPasteAsList?'block':'none'};margin-top:8px;padding:10px 12px;background:#E0F0F8;border:1px solid #C8E6F7;border-radius:6px">
-        <div style="font-size:11px;font-weight:700;color:#125462;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Parent epic / issue key <span style="font-weight:400;color:#5D7987">(optional)</span></div>
-        <input id="mtg-parent-key" placeholder="e.g. MKT-530" value="${_escHtml(mtgParentKey || '')}" oninput="mtgParentKey=this.value.trim().toUpperCase()" style="width:100%;padding:6px 10px;font-size:12px;border:1px solid #C8E6F7;border-radius:6px;background:#fff;text-transform:uppercase;box-sizing:border-box">
+      ${mtgPasteAsList ? `
+      <!-- v158/v159: Parent epic picker — only shown in structured-list mode -->
+      <div style="margin-bottom:10px;padding:10px 12px;background:#E0F0F8;border:1px solid #C8E6F7;border-radius:6px;position:relative">
+        <div style="font-size:11px;font-weight:700;color:#125462;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Parent epic / issue <span style="font-weight:400;color:#5D7987">(optional)</span></div>
+        <input id="mtg-parent-key" placeholder="Type to search by key or summary…"
+          value="${_escHtml(mtgParentKey || '')}"
+          oninput="mtgParentSearch(this.value)"
+          onfocus="mtgParentSearch(this.value)"
+          onblur="setTimeout(()=>{const d=document.getElementById('mtg-parent-results'); if(d) d.style.display='none';}, 180)"
+          autocomplete="off"
+          style="width:100%;padding:6px 10px;font-size:12px;border:1px solid #C8E6F7;border-radius:6px;background:#fff;box-sizing:border-box">
+        <div id="mtg-parent-results" style="display:none;position:absolute;top:100%;left:10px;right:10px;background:#fff;border:1px solid #C8E6F7;border-radius:6px;max-height:240px;overflow-y:auto;z-index:50;box-shadow:0 4px 12px rgba(0,0,0,.12)"></div>
         <div style="font-size:10px;color:#125462;margin-top:6px;line-height:1.5">
-          Every parsed task is placed under this parent.<br>
-          <b>Priority mapping:</b> 1 → Highest · 2 → High · 3 → Medium · 4 + → Low
+          Every parsed task is placed under this parent. Leave blank for top-level tasks.
         </div>
+      </div>
+      ` : `
+      <div style="margin-bottom:10px">
+        <label style="font-size:11px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.04em">Title <span style="font-weight:400;color:#9EA0A4">(optional)</span></label>
+        <input id="mtg-title" class="mtg-attendees-input" placeholder="e.g. Marketing Engine — or leave blank" value="${_escHtml(mtgMeetingTitle)}" oninput="mtgMeetingTitle=this.value">
+      </div>
+      <div style="margin-bottom:10px">
+        <label style="font-size:11px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.04em">People <span style="font-weight:400;color:#9EA0A4">(comma-separated, optional)</span></label>
+        <input id="mtg-attendees" class="mtg-attendees-input" placeholder="e.g. Marcus Greensit, Steve Flavell, Harry Newman" value="">
+      </div>
+      `}
+      <div>
+        <label style="font-size:11px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.04em">Content</label>
+        <textarea id="mtg-transcript" placeholder="${mtgPasteAsList ? 'Paste your structured task list here — e.g. ChatGPT output with Task Name: / Description: pairs.' : 'Paste any content here — a meeting transcript, LLM output (e.g. ChatGPT), notes, or free text.&#10;&#10;WebVTT format (from Teams) works well, but plain text is fine too.&#10;&#10;The AI will identify action items and suggest Jira placement.'}" style="min-height:300px"></textarea>
       </div>
       <button class="mtg-extract-btn" id="mtg-extract-btn" onclick="mtgExtract()" ${mtgExtracting ? 'disabled' : ''}>
         ${mtgExtracting ? spinHtml(16, '#fff') + ' Extracting…' : '⚡ Extract Tasks'}
