@@ -716,7 +716,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v165</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v166</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -1318,6 +1318,29 @@ async function jiraPut(path,body){
       method:"PUT",
       headers:{Authorization:auth(),Accept:"application/json","Content-Type":"application/json"},
       body:JSON.stringify(body),
+      signal: to.signal
+    });
+  } catch(e){
+    to.cleanup();
+    if (e && e.name === 'AbortError') { _jiraObservedError(0, 'timeout'); throw new Error('Jira request timed out'); }
+    _jiraObservedError(0, 'network');
+    throw new Error('Network error reaching Jira: ' + (e && e.message || e));
+  }
+  to.cleanup();
+  if (r.ok) _jiraSuccess();
+  else _jiraObservedError(r.status);
+  return r;
+}
+// v166: DELETE helper, used for attachment + remote-link removal.
+async function jiraDelete(path){
+  _recordJiraCall('DELETE', path, null);
+  const t = encodeURIComponent(cfg.url + path);
+  const to = _withTimeout(JIRA_TIMEOUT_MS);
+  let r;
+  try {
+    r = await fetch(PROXY + "?target=" + t, {
+      method: "DELETE",
+      headers: { Authorization: auth(), Accept: "application/json" },
       signal: to.signal
     });
   } catch(e){
@@ -4042,6 +4065,9 @@ async function loadPaneAttachments(key){
       const author = a.author?.displayName || '';
       const safeName = _escHtml(a.filename||'Unnamed');
       const ext = (a.filename||'').split('.').pop().toUpperCase();
+      const filenameEsc = (a.filename||'').replace(/'/g,"\\'").replace(/"/g,'&quot;');
+      // v166: small × delete button on each attachment row. Click confirms,
+      // then DELETE /attachment/{id}, then re-renders the list.
       return `<a href="${BASE()}${key}" target="_blank" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;background:#F7F8F9;border:1px solid #EEF1F3;text-decoration:none;color:inherit;cursor:pointer" title="Open ${_escHtml(a.filename||'')} in Jira">
         <span style="font-size:22px;line-height:1;flex-shrink:0">${icon}</span>
         <div style="flex:1;min-width:0">
@@ -4049,6 +4075,10 @@ async function loadPaneAttachments(key){
           <div style="font-size:10px;color:#9EA0A4">${_escHtml(ext||mime.split('/').pop()||'')} · ${sizeStr}${author?' · '+_escHtml(author):''}${created?' · '+created:''}</div>
         </div>
         <span style="font-size:11px;color:#2E99CE;font-weight:700;white-space:nowrap;flex-shrink:0">Open in Jira ↗</span>
+        <button onclick="event.preventDefault();event.stopPropagation();deleteAttachment('${key}','${a.id}','${filenameEsc}')" title="Delete this attachment"
+          style="background:transparent;border:none;color:#9EA0A4;font-size:18px;line-height:1;cursor:pointer;padding:2px 8px;border-radius:4px;flex-shrink:0"
+          onmouseover="this.style.color='#D6202B';this.style.background='#FCEBEB'"
+          onmouseout="this.style.color='#9EA0A4';this.style.background='transparent'">×</button>
       </a>`;
     });
     // v102: render remote links — clickable directly (since they're external
@@ -4058,6 +4088,8 @@ async function loadPaneAttachments(key){
       const title = (r.object && r.object.title) || _prettyLinkLabel(url);
       const safeUrl = _escHtml(url);
       const safeTitle = _escHtml(title);
+      const titleEsc = (title || url).replace(/'/g,"\\'").replace(/"/g,'&quot;');
+      // v166: × delete button matches the attachment row pattern.
       return `<a href="${safeUrl}" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;background:#FCFCFD;border:1px solid #C8E6F7;text-decoration:none;color:inherit;cursor:pointer" title="${safeUrl}">
         <span style="font-size:22px;line-height:1;flex-shrink:0">🔗</span>
         <div style="flex:1;min-width:0">
@@ -4065,6 +4097,10 @@ async function loadPaneAttachments(key){
           <div style="font-size:10px;color:#9EA0A4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">External link · ${safeUrl}</div>
         </div>
         <span style="font-size:11px;color:#2E99CE;font-weight:700;white-space:nowrap;flex-shrink:0">Open ↗</span>
+        <button onclick="event.preventDefault();event.stopPropagation();deleteRemoteLink('${key}','${r.id}','${titleEsc}')" title="Remove this link"
+          style="background:transparent;border:none;color:#9EA0A4;font-size:18px;line-height:1;cursor:pointer;padding:2px 8px;border-radius:4px;flex-shrink:0"
+          onmouseover="this.style.color='#D6202B';this.style.background='#FCEBEB'"
+          onmouseout="this.style.color='#9EA0A4';this.style.background='transparent'">×</button>
       </a>`;
     });
     listEl.innerHTML = [...attRows, ...rlRows].join('');
@@ -4653,6 +4689,54 @@ async function addRemoteLink(issueKey, url, title){
   } catch(e){
     if(listEl) listEl.innerHTML = '<div style="font-size:12px;color:#D6202B;padding:10px">Link add failed: '+_escHtml(e.message||e)+'</div>';
     appLogMsg('error','attach','Remote link failed: '+(e.message||e));
+  }
+}
+// v166: confirm-then-delete an attachment from the open issue.
+async function deleteAttachment(issueKey, attId, filename){
+  if (!issueKey || !attId) return;
+  const niceName = (filename || 'this attachment').replace(/&quot;/g,'"');
+  if (!confirm('Delete attachment "' + niceName + '" from ' + issueKey + '?\n\nThis cannot be undone.')) return;
+  const listEl = document.getElementById('att-list');
+  if (listEl) listEl.innerHTML = '<div style="font-size:12px;color:#9EA0A4;padding:14px;display:flex;align-items:center;gap:6px">' + spinHtml(14) + ' Deleting attachment…</div>';
+  appLogMsg('info','attach','Deleting attachment ' + attId + ' from ' + issueKey);
+  try {
+    const r = await jiraDelete('/rest/api/3/attachment/' + encodeURIComponent(attId));
+    if (!(r.ok || r.status === 204)){
+      let detail=''; try { detail = await r.text(); } catch{}
+      throw new Error('HTTP ' + r.status + (detail ? ' — ' + detail.slice(0,200) : ''));
+    }
+    appLogMsg('info','attach','Deleted attachment ' + attId);
+    delete attachmentsCache[issueKey];
+    await loadPaneAttachments(issueKey);
+  } catch(e){
+    appLogMsg('error','attach','Delete attachment failed: ' + (e.message || e));
+    alert('Could not delete attachment: ' + (e.message || e));
+    delete attachmentsCache[issueKey];
+    await loadPaneAttachments(issueKey);
+  }
+}
+// v166: confirm-then-delete a remote link from the open issue.
+async function deleteRemoteLink(issueKey, linkId, title){
+  if (!issueKey || !linkId) return;
+  const niceTitle = (title || 'this link').replace(/&quot;/g,'"');
+  if (!confirm('Remove link "' + niceTitle + '" from ' + issueKey + '?\n\nThe external URL stays where it is — only the link from this Jira issue is removed.')) return;
+  const listEl = document.getElementById('att-list');
+  if (listEl) listEl.innerHTML = '<div style="font-size:12px;color:#9EA0A4;padding:14px;display:flex;align-items:center;gap:6px">' + spinHtml(14) + ' Removing link…</div>';
+  appLogMsg('info','attach','Deleting remote link ' + linkId + ' from ' + issueKey);
+  try {
+    const r = await jiraDelete('/rest/api/3/issue/' + encodeURIComponent(issueKey) + '/remotelink/' + encodeURIComponent(linkId));
+    if (!(r.ok || r.status === 204)){
+      let detail=''; try { detail = await r.text(); } catch{}
+      throw new Error('HTTP ' + r.status + (detail ? ' — ' + detail.slice(0,200) : ''));
+    }
+    appLogMsg('info','attach','Deleted remote link ' + linkId);
+    delete attachmentsCache[issueKey];
+    await loadPaneAttachments(issueKey);
+  } catch(e){
+    appLogMsg('error','attach','Delete remote link failed: ' + (e.message || e));
+    alert('Could not remove link: ' + (e.message || e));
+    delete attachmentsCache[issueKey];
+    await loadPaneAttachments(issueKey);
   }
 }
 
