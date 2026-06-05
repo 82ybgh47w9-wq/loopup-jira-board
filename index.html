@@ -708,7 +708,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v160</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v161</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -10285,7 +10285,12 @@ async function mtgExtract(opts) {
     // model that wasn't trained on the header still gets the right cue.
     const structuredHeader = mtgPasteAsList
       ? `[MODE: STRUCTURED_TASK_LIST]\nThe content below is a PRE-EXTRACTED list of tasks (e.g. produced by an LLM). Process each item as follows:\n  - Preserve the task TITLE/SUMMARY verbatim — DO NOT reword, rephrase, or merge.\n  - Preserve the task DESCRIPTION verbatim where present.\n  - DO NOT skip items unless they are obvious section headers (e.g. "## Next Steps").\n  - DO match each item to: project key, assignee (from team list), parent epic suggestion.\n  - DO assign a sensible priority (default Medium if unclear).\n\n--- USER CONTENT ---\n`
-      : '';
+      // v161: For transcript mode, ask the AI to attribute each task to the
+      // speaker who proposed/agreed to it. Teams WebVTT transcripts include
+      // speaker tags; chat-as-transcript fallbacks include sender names. The
+      // worker schema accepts arbitrary extra fields, so adding sourceSpeaker
+      // doesn't break anything — the UI surfaces it when present.
+      : `[MODE: TRANSCRIPT]\nWhen returning each task, ALSO include a "sourceSpeaker" field with the name of the speaker who proposed or accepted the action (use the name as it appears in the transcript). Leave it as "Unknown" if the source isn't clear. This is in addition to the existing sourceQuote field.\n\n--- TRANSCRIPT ---\n`;
     const finalContent = (structuredHeader + transcript).substring(0, 15000);
     const prompt = {
       task: 'extract_meeting_tasks',
@@ -10337,6 +10342,7 @@ async function mtgExtract(opts) {
       priority: t.priority || 'Medium',
       type: 'Task',
       sourceQuote: t.sourceQuote || '',
+      sourceSpeaker: t.sourceSpeaker || '',   // v161: who said it (transcript mode)
       confidence: t.confidence || 'medium',
       duplicate: null,
       included: true,
@@ -10627,7 +10633,10 @@ async function mtgLinkToExisting(taskId) {
     const sourceLine = 'From meeting "' + mtgMeetingTitle + '" (linked via Meeting / Task Generator):';
     const lines = [task.summary];
     if (task.description) lines.push(task.description);
-    if (task.sourceQuote) lines.push('Source quote: "' + task.sourceQuote + '"');
+    if (task.sourceQuote) {
+      const speakerPrefix = (task.sourceSpeaker && task.sourceSpeaker !== 'Unknown') ? (task.sourceSpeaker + ': ') : '';
+      lines.push('Source quote: ' + speakerPrefix + '"' + task.sourceQuote + '"');
+    }
 
     const body = {
       type: 'doc', version: 1,
@@ -10891,10 +10900,28 @@ function mtgToggleExpandCard(taskId){
   if(t){ t.expanded = !t.expanded; renderMtgStaging('ready'); }
 }
 
+// v161: After re-rendering the staging panel, the picker input element is
+// replaced and loses focus — so typing fast in the assignee/epic search
+// made the input disappear after the first letter. _mtgRestorePickerFocus
+// finds the (newly-rendered) open picker input and refocuses it with the
+// caret at the end of its value.
+function _mtgRestorePickerFocus(){
+  setTimeout(() => {
+    const inp = document.querySelector('.mtg-pill-pop input.mtg-pop-input');
+    if (inp && document.activeElement !== inp){
+      try {
+        inp.focus();
+        const len = (inp.value || '').length;
+        inp.setSelectionRange(len, len);
+      } catch {}
+    }
+  }, 0);
+}
+
 function mtgSearchEpicsDebounced(taskId, query){
   mtgPickerQuery = query;
   if(mtgSearchTimer) clearTimeout(mtgSearchTimer);
-  mtgSearchTimer = setTimeout(() => renderMtgStaging('ready'), 100);
+  mtgSearchTimer = setTimeout(() => { renderMtgStaging('ready'); _mtgRestorePickerFocus(); }, 100);
 }
 
 function mtgSearchUsersDebounced(taskId, query){
@@ -10903,10 +10930,12 @@ function mtgSearchUsersDebounced(taskId, query){
   if(query.length < 2){
     mtgPickerResults = [];
     renderMtgStaging('ready');
+    _mtgRestorePickerFocus();
     return;
   }
   mtgPickerLoading = true;
   renderMtgStaging('ready');
+  _mtgRestorePickerFocus();
   mtgSearchTimer = setTimeout(async () => {
     try {
       const users = await jiraGet('/rest/api/3/user/search?query=' + encodeURIComponent(query) + '&maxResults=10');
@@ -10917,6 +10946,7 @@ function mtgSearchUsersDebounced(taskId, query){
     }
     mtgPickerLoading = false;
     renderMtgStaging('ready');
+    _mtgRestorePickerFocus();
   }, 300);
 }
 
@@ -11048,16 +11078,36 @@ function renderMtgStaging(state, errorMsg) {
       </div>`;
     }
     if (kind === 'assignee') {
+      // v161: ordered list — Viewing user, then project peers (people who've
+      // been assignees on issues in this task's project), then the rest of
+      // the team, then Jira directory search results.
       const remote = mtgPickerResults || [];
-      const seeded = (teamMembers || []).filter(m => !mtgPickerQuery || m.toLowerCase().includes((mtgPickerQuery||'').toLowerCase())).slice(0, 8);
+      const q = (mtgPickerQuery || '').toLowerCase();
+      const matchesQ = s => !q || (s || '').toLowerCase().includes(q);
+      const me = currentIam || '';
+      const projAssignees = new Set();
+      if (task.project){
+        for (const it of (allIssues || [])){
+          if (it && it.project === task.project && it.assignee && it.assignee !== 'Unassigned'){
+            projAssignees.add(it.assignee);
+          }
+        }
+      }
+      const meList = (me && matchesQ(me)) ? [me] : [];
+      const projList = [...projAssignees].filter(n => n !== me).filter(matchesQ).sort();
+      const otherTeam = (teamMembers || []).filter(n => n !== me && !projAssignees.has(n) && matchesQ(n)).sort();
+      const renderRow = (name) => `<div class="mtg-pop-row" onclick="mtgPickAssignee('${task.id}','','${name.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><span class="s">${_escHtml(name)}</span></div>`;
+      const hdr = (label) => `<div style="font-size:10px;color:#9EA0A4;padding:6px 10px 2px;text-transform:uppercase;letter-spacing:.04em;font-weight:700">${label}</div>`;
       return `<div class="mtg-pill-pop" onclick="event.stopPropagation()">
         <input class="mtg-pop-input" placeholder="Search Jira users…" value="${_escHtml(mtgPickerQuery)}" oninput="mtgSearchUsersDebounced('${task.id}',this.value)">
         <div class="mtg-pop-row ${(!task.assigneeId && (!task.assignee||task.assignee==='Unassigned')) ? 'selected' : ''}" onclick="mtgPickAssignee('${task.id}','','Unassigned')"><span class="s">— Unassigned —</span></div>
+        ${meList.length ? hdr('You') + meList.map(renderRow).join('') : ''}
+        ${projList.length ? hdr(task.project ? ('Active in ' + task.project) : 'Project peers') + projList.map(renderRow).join('') : ''}
+        ${otherTeam.length ? hdr('Other team members') + otherTeam.map(renderRow).join('') : ''}
         ${mtgPickerLoading ? `<div class="mtg-pop-hint">${spinHtml(12)} Searching Jira…</div>` : ''}
-        ${remote.length ? remote.map(u => `<div class="mtg-pop-row ${u.accountId === task.assigneeId ? 'selected' : ''}" onclick="mtgPickAssignee('${task.id}','${u.accountId}','${(u.displayName||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')">
+        ${remote.length ? hdr('Jira directory') + remote.map(u => `<div class="mtg-pop-row ${u.accountId === task.assigneeId ? 'selected' : ''}" onclick="mtgPickAssignee('${task.id}','${u.accountId}','${(u.displayName||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')">
           <span class="s">${_escHtml(u.displayName||'')}</span>${u.email ? '<span style="font-size:10px;opacity:.7">' + _escHtml(u.email) + '</span>' : ''}
-        </div>`).join('') : (mtgPickerQuery && !mtgPickerLoading ? '<div class="mtg-pop-hint">No matching Jira users.</div>' : '')}
-        ${(!mtgPickerQuery && seeded.length) ? `<div style="font-size:10px;color:#9EA0A4;padding:6px 10px 2px;text-transform:uppercase;letter-spacing:.04em;font-weight:700">Team</div>` + seeded.map(m => `<div class="mtg-pop-row" onclick="mtgPickAssignee('${task.id}','','${m.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><span class="s">${_escHtml(m)}</span></div>`).join('') : ''}
+        </div>`).join('') : (mtgPickerQuery && !mtgPickerLoading && !meList.length && !projList.length && !otherTeam.length ? '<div class="mtg-pop-hint">No matching users — keep typing to search Jira.</div>' : '')}
       </div>`;
     }
     if (kind === 'legend') {
@@ -11199,7 +11249,7 @@ function renderMtgStaging(state, errorMsg) {
               <span style="font-size:9px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;width:60px;flex-shrink:0">Epic / MS</span>
               ${pill(task, 'epic', 'edit', task.epicKey ? task.epicKey + ' — ' + task.epicSummary : '', {placeholder: 'search Epic…'})}
             </div>
-            ${task.sourceQuote ? `<div style="margin-top:10px;font-size:11px;font-style:italic;color:#5D7987;padding:8px 10px;background:#fff;border-left:3px solid #2E99CE;border-radius:0 6px 6px 0;line-height:1.4">"${_escHtml(task.sourceQuote)}"</div>` : ''}
+            ${task.sourceQuote ? `<div style="margin-top:10px;font-size:11px;font-style:italic;color:#5D7987;padding:8px 10px;background:#fff;border-left:3px solid #2E99CE;border-radius:0 6px 6px 0;line-height:1.4">${task.sourceSpeaker && task.sourceSpeaker !== 'Unknown' ? `<div style="font-style:normal;font-weight:700;color:#125462;margin-bottom:3px;font-size:10px">🎙️ ${_escHtml(task.sourceSpeaker)}</div>` : ''}"${_escHtml(task.sourceQuote)}"</div>` : ''}
           </div>
         </div>
         ${/* v117: in-detail strip removed — duplicate is now shown as a prominent banner at the top of the card */ ''}
