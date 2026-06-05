@@ -716,7 +716,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v163</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v164</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -6668,10 +6668,30 @@ async function runSearch(q){
     // gets buried under recent tasks when sorting by updated DESC, but should
     // be the top hit when the user searches for "coverage".
     const esc = q.replace(/"/g, '\\"');
-    const isKey = /^[A-Za-z]+-\d+$/.test(q);
-
+    // v164: recognise Jira keys in several forms so users don't have to type
+    // the exact "MKT-530" syntax:
+    //   "MKT-530"  → exact key match
+    //   "MKT 530"  → space-separated → normalise to MKT-530
+    //   "mkt530"   → no separator → split letters/digits to MKT-530
+    //   "530"      → pure number → expand to key in (PRJ1-530, PRJ2-530, …)
+    //               using every project we know about from allProjects.
     const summaryClauses = ['summary ~ "'+esc+'"'];
-    if(isKey) summaryClauses.unshift('key = ' + q.toUpperCase());
+    const keyClauses = [];
+    const mHyphen = q.match(/^([A-Za-z]+)-(\d+)$/);
+    if (mHyphen) keyClauses.push('key = ' + (mHyphen[1] + '-' + mHyphen[2]).toUpperCase());
+    const mSpace = q.match(/^([A-Za-z]+)\s+(\d+)$/);
+    if (mSpace) keyClauses.push('key = ' + (mSpace[1] + '-' + mSpace[2]).toUpperCase());
+    const mGlued = q.match(/^([A-Za-z]+)(\d+)$/);
+    if (mGlued && !mHyphen && !mSpace) keyClauses.push('key = ' + (mGlued[1] + '-' + mGlued[2]).toUpperCase());
+    const mNum = q.match(/^(\d+)$/);
+    if (mNum && typeof allProjects !== 'undefined' && Array.isArray(allProjects) && allProjects.length){
+      const num = mNum[1];
+      const expanded = allProjects.map(p => p.key + '-' + num);
+      keyClauses.push('key in (' + expanded.join(',') + ')');
+    }
+    if (keyClauses.length){
+      summaryClauses.unshift(keyClauses.join(' OR '));
+    }
     const textClauses = ['text ~ "'+esc+'*"'];
 
     const fields = 'summary,issuetype,project,status,assignee,parent,priority,updated';
