@@ -708,7 +708,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v152</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v153</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -2817,9 +2817,12 @@ function setView(v){
   if(ctrlPri) ctrlPri.style.display=(isPri||isAct||isMtg||isLbl)?"none":"flex";
   const ctrlStat=document.getElementById("status-filter-ctrl")?.parentElement;
   if(ctrlStat) ctrlStat.style.display=(isPri||isAct||isMtg||isLbl)?"none":"flex";
-  // Search: hide on Activity, Meetings, Labels (each has its own filter bar)
+  // v153: search bar persists across all views. Previously it was hidden on
+  // Activity/Meetings/Labels under the rationale that each view has its own
+  // local filter — but users still expect Jira-wide search to be available
+  // everywhere.
   const searchBox=document.querySelector(".search-box");
-  if(searchBox) searchBox.style.display=(isAct||isMtg||isLbl)?"none":"flex";
+  if(searchBox) searchBox.style.display="flex";
   saveAll();
   renderMain();
   // v101: auto-refresh stale data on view change. Skipped for the very first
@@ -3331,9 +3334,13 @@ async function renderPaneDescendants(spec){
   }
   const list = items || [];
   const isDirectChildTab = spec.walk.length === 1;
-  const createBtn = isDirectChildTab && (spec.tabKey === 'tasks' || spec.tabKey === 'subtasks' || spec.tabKey === 'initiatives' || spec.tabKey === 'epics')
-    ? `<button onclick="createDescendantFromPane('${spec.tabKey}','${i.key}')" class="primary-btn" style="font-size:11px;padding:5px 14px">+ Create ${spec.label.replace(/s$/, '').toLowerCase()}</button>`
-    : '';
+  // v153: Surface a + Create button on every descendant tab — not just
+  // direct-child tabs. For non-direct (e.g. Initiative → Tasks two levels
+  // down), createDescendantFromPane opens the Create modal pre-filled with
+  // the right ancestor chain so the user can pick / create the intermediate
+  // level before finishing.
+  const createLabel = spec.label.replace(/s$/, '').replace(/Epics\/Milestone$/,'epic/milestone').replace(/\bEpic\/Milestone\b/, 'epic/milestone');
+  const createBtn = `<button onclick="createDescendantFromPane('${spec.tabKey}','${i.key}')" class="primary-btn" style="font-size:11px;padding:5px 14px">+ Create ${createLabel.toLowerCase()}</button>`;
   let html = '';
   if(!list.length){
     html = `<div style="padding:18px;text-align:center;color:#9EA0A4;font-size:13px;font-style:italic">No ${spec.label.toLowerCase()} found under ${i.key}.</div>`;
@@ -3411,23 +3418,74 @@ async function fetchDescendants(rootKey, levelsToTraverse){
 }
 
 function createDescendantFromPane(tabKey, parentKey){
-  // Open the create modal pre-filled with the chosen parent.
-  // For 'initiatives' / 'epics' tabs, parent is the legend/initiative itself.
-  // For 'tasks' / 'subtasks' (when offered as a direct-child tab), parent is the open issue.
+  // v153: open the create flow from any descendant tab — not just direct
+  // children. For non-direct cases (e.g. Initiative → Tasks), pre-fill the
+  // ancestor chain so the user only has to pick / create the intermediate
+  // level(s) before finishing.
   const i = openIssue;
   if(!i) return;
   try {
-    if(tabKey === 'tasks'){
-      // Pre-fill epic = parentKey (the Epic/Milestone we're under)
-      quickAddTask(parentKey, '', i.project);
-    } else if(tabKey === 'subtasks'){
-      // v103: real inline sub-task create flow. Was a placeholder alert.
+    const issueType = i.type;
+
+    // Existing fast paths — keep direct-child flows snappy.
+    if (tabKey === 'subtasks' && (issueType === 'Task' || issueType === 'Story' || issueType === 'Bug')){
       openInlineSubtaskCreate(parentKey);
-    } else {
-      // For initiatives / epics, we'd need a custom flow; for now point to Settings.
-      alert('To create a new '+tabKey.slice(0,-1)+' under '+parentKey+', use the "+ New" button in the Create-task modal\'s hierarchy section.');
+      return;
     }
+    if (tabKey === 'tasks' && (issueType === 'Epic' || issueType === 'Milestone')){
+      quickAddTask(parentKey, '', i.project);
+      return;
+    }
+
+    // Multi-level: open the full Create modal pre-filled with the ancestor
+    // chain we know. The user picks or creates the intermediate levels
+    // using the existing hierarchy section, then submits.
+    const preset = {
+      project: i.project,
+      selLegend: issueType === 'Legend' ? parentKey : '',
+      selInit:   issueType === 'Initiative' ? parentKey : '',
+      selEpic:   (issueType === 'Epic' || issueType === 'Milestone') ? parentKey : ''
+    };
+    openCreateWithHierarchyPreset(preset, tabKey);
   } catch(e){ alert('Could not start create flow: '+(e.message||e)); }
+}
+
+// v153: helper that opens the Create modal with a known ancestor chain
+// pre-selected. Used by the multi-level descendant tabs.
+function openCreateWithHierarchyPreset(preset, tabKey){
+  createState = {
+    projectKey: preset.project || '',
+    issueType: 'Task',
+    assignee: currentIam || '',
+    priority: 'Medium',
+    status: 'Selected',
+    summary: '', description: '', comment: '', dueDate: '',
+    selLegend: preset.selLegend || '',
+    selInit:   preset.selInit   || '',
+    selEpic:   preset.selEpic   || '',
+    legends: [], initiatives: [], epics: [],
+    aiSuggestions: [], aiLoading: false,
+    showHierarchy: true,
+    epicExpanded: !!(preset.selEpic),
+    epicFilter: '',
+    makeActive: false,
+    labels: [],
+    attachments: [],   // v153
+    remoteLinks: []    // v153
+  };
+  const overlay = document.getElementById('create-overlay');
+  if (overlay) overlay.classList.add('open');
+  renderCreateModal();
+  if (createState.projectKey){
+    loadCreateHierarchy(createState.projectKey).then(() => {
+      try { renderCreateModal(); } catch {}
+    });
+  }
+  // Pass-through hint for the future — could be used to scroll the modal
+  // to the right hierarchy row. Not strictly needed today.
+  if (typeof appLogMsg === 'function'){
+    appLogMsg('info', 'create', 'Opened Create modal pre-filled for tab=' + tabKey + ' presets=' + JSON.stringify({L:preset.selLegend, I:preset.selInit, E:preset.selEpic}));
+  }
 }
 
 // v103: open an inline form at the top of the Sub-tasks tab list — name
@@ -4747,7 +4805,8 @@ createState = {
   selLegend:'', selInit:'', selEpic:'',
   legends:[], initiatives:[], epics:[],
   aiSuggestions:[], aiLoading:false,
-  labels:[] // v141
+  labels:[], // v141
+  attachments:[], remoteLinks:[] // v153
 };
 
 function openCreate(defaultAssignee, e) {
@@ -4765,7 +4824,8 @@ function openCreate(defaultAssignee, e) {
     epicExpanded:false, epicFilter:'',
     // v93: "make active" preset (priority=Highest + status=In Progress + setActive)
     makeActive:false,
-    labels:[] // v141: labels to apply on creation
+    labels:[], // v141: labels to apply on creation
+    attachments:[], remoteLinks:[] // v153
   };
   document.getElementById('create-overlay').classList.add('open');
   renderCreateModal();
@@ -4867,6 +4927,75 @@ function crRemoveLabel(label){
   if (!createState || !Array.isArray(createState.labels)) return;
   createState.labels = createState.labels.filter(l => l.toLowerCase() !== (label || '').toLowerCase());
   _crRerenderLabels();
+}
+
+// v153: Attachments + remote links for the Create modal. Files and URLs are
+// queued client-side and uploaded to the new issue AFTER POST /issue succeeds
+// (Jira can't accept attachments inline with the create payload — they're a
+// separate endpoint that requires an issue key).
+function renderCreateAttachments(){
+  const s = createState || {};
+  const atts = Array.isArray(s.attachments) ? s.attachments : [];
+  const links = Array.isArray(s.remoteLinks) ? s.remoteLinks : [];
+  if (!atts.length && !links.length){
+    return '<div style="font-size:11px;color:#9EA0A4;font-style:italic;padding:4px 2px">No files or links yet.</div>';
+  }
+  let html = '<div style="display:flex;flex-direction:column;gap:4px">';
+  for (let i = 0; i < atts.length; i++){
+    const f = atts[i];
+    const sizeKb = Math.max(1, Math.round((f.size||0)/1024));
+    html += `<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;background:#F7F8F9;border:1px solid #E4E6E8;border-radius:6px;font-size:12px">
+      <span style="font-size:14px">📎</span>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_escHtml(f.name)}</span>
+      <span style="font-size:10px;color:#9EA0A4">${sizeKb} KB</span>
+      <button type="button" onclick="crRemoveAttachment(${i})" title="Remove" style="background:transparent;border:none;color:#D6202B;font-size:14px;cursor:pointer;padding:0 4px;line-height:1">×</button>
+    </div>`;
+  }
+  for (let i = 0; i < links.length; i++){
+    const l = links[i];
+    html += `<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;background:#F7F8F9;border:1px solid #E4E6E8;border-radius:6px;font-size:12px">
+      <span style="font-size:14px">🔗</span>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_escHtml(l.url)}"><b>${_escHtml(l.title || l.url)}</b> <span style="color:#9EA0A4">${_escHtml(l.url)}</span></span>
+      <button type="button" onclick="crRemoveRemoteLink(${i})" title="Remove" style="background:transparent;border:none;color:#D6202B;font-size:14px;cursor:pointer;padding:0 4px;line-height:1">×</button>
+    </div>`;
+  }
+  html += '</div>';
+  return html;
+}
+function _crRerenderAttachments(){
+  const wrap = document.getElementById('cr-attach-list');
+  if (wrap) wrap.innerHTML = renderCreateAttachments();
+}
+function crAddAttachments(fileList){
+  if (!fileList || !fileList.length) return;
+  if (!createState.attachments) createState.attachments = [];
+  for (const f of fileList){
+    createState.attachments.push(f);
+  }
+  _crRerenderAttachments();
+}
+function crRemoveAttachment(idx){
+  if (!createState.attachments) return;
+  createState.attachments.splice(idx, 1);
+  _crRerenderAttachments();
+}
+function crPromptRemoteLink(){
+  const url = prompt('Paste a URL to link (SharePoint, OneDrive, Confluence, Google Doc, etc.):');
+  if (!url) return;
+  const trimmed = url.trim();
+  if (!trimmed.match(/^https?:\/\//i)){
+    alert('Please paste a full URL starting with http:// or https://');
+    return;
+  }
+  const title = prompt('Optional label for this link (press Cancel to use the URL):') || (typeof _prettyLinkLabel === 'function' ? _prettyLinkLabel(trimmed) : trimmed);
+  if (!createState.remoteLinks) createState.remoteLinks = [];
+  createState.remoteLinks.push({ url: trimmed, title });
+  _crRerenderAttachments();
+}
+function crRemoveRemoteLink(idx){
+  if (!createState.remoteLinks) return;
+  createState.remoteLinks.splice(idx, 1);
+  _crRerenderAttachments();
 }
 
 function renderCreateModal() {
@@ -5017,6 +5146,19 @@ function renderCreateModal() {
       <div class="pane-lbl-wrap" id="cr-labels-wrap">${renderCreateLabels()}</div></div>
     <div style="margin-bottom:12px"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Description</div>
       <textarea id="cr-desc" placeholder="Add details…" oninput="createState.description=this.value" style="width:100%;min-height:60px;padding:10px 12px;border:1px solid #E4E6E8;border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box">${s.description}</textarea></div>
+    <!-- v153: parity with the detail-pane Attachments section. Files queued
+         in createState.attachments and links queued in createState.remoteLinks
+         get uploaded to the new issue after the POST /issue call succeeds. -->
+    <div style="margin-bottom:12px"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Attachments &amp; links</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
+        <label style="font-size:11px;color:#2E99CE;background:#E0F0F8;padding:5px 12px;border-radius:6px;cursor:pointer;font-weight:700;border:1px solid #C8E6F7;display:inline-flex;align-items:center;gap:5px">
+          📎 Upload file
+          <input type="file" multiple style="display:none" onchange="crAddAttachments(this.files); this.value='';">
+        </label>
+        <button type="button" onclick="crPromptRemoteLink()" style="font-size:11px;color:#125462;background:#fff;padding:5px 12px;border-radius:6px;cursor:pointer;font-weight:700;border:1px solid #C8E6F7;display:inline-flex;align-items:center;gap:5px">🔗 Paste link</button>
+      </div>
+      <div id="cr-attach-list">${renderCreateAttachments()}</div>
+    </div>
     <div style="margin-bottom:4px"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Comment</div>
       <textarea id="cr-comment" placeholder="Add a comment…" oninput="createState.comment=this.value" style="width:100%;min-height:50px;padding:10px 12px;border:1px solid #E4E6E8;border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box">${s.comment||''}</textarea></div>
     `}`;
@@ -5506,6 +5648,44 @@ async function submitCreate(){
       } catch(e) { appLogMsg('warn','create','Comment failed for '+newKey+': '+(e.message||e)); }
     }
 
+    // v153: upload any queued file attachments. Each is a separate
+    // multipart POST — same endpoint as the detail-pane attach flow.
+    if(Array.isArray(s.attachments) && s.attachments.length){
+      for (const file of s.attachments){
+        try {
+          const fd = new FormData();
+          fd.append('file', file);
+          const target = encodeURIComponent(cfg.url + '/rest/api/3/issue/' + newKey + '/attachments');
+          const r = await fetch(PROXY + '?target=' + target, {
+            method: 'POST',
+            headers: { 'Authorization': auth(), 'X-Atlassian-Token': 'no-check' },
+            body: fd
+          });
+          if(!(r.ok || r.status === 200 || r.status === 201)){
+            let detail=''; try { detail = await r.text(); } catch{}
+            throw new Error('HTTP ' + r.status + (detail?' — '+detail.slice(0,200):''));
+          }
+          appLogMsg('info','create','Attached '+file.name+' to '+newKey);
+        } catch(e) { appLogMsg('warn','create','Attachment failed for '+file.name+': '+(e.message||e)); }
+      }
+    }
+
+    // v153: post any queued remote links (paste-link URLs).
+    if(Array.isArray(s.remoteLinks) && s.remoteLinks.length){
+      for (const link of s.remoteLinks){
+        try {
+          const r = await jiraPost('/rest/api/3/issue/'+newKey+'/remotelink', {
+            object: { url: link.url, title: link.title || link.url }
+          });
+          if(!(r.ok || r.status === 200 || r.status === 201)){
+            let detail=''; try { detail = await r.text(); } catch{}
+            throw new Error('HTTP ' + r.status + (detail?' — '+detail.slice(0,200):''));
+          }
+          appLogMsg('info','create','Linked '+link.url+' to '+newKey);
+        } catch(e) { appLogMsg('warn','create','Remote link failed for '+link.url+': '+(e.message||e)); }
+      }
+    }
+
     // v93: if Make-active was toggled on, set the active flag for the
     // assignee now that we have the new issue's key. Uses the existing
     // setActiveFlag helper (Cloudflare KV) so other users immediately see
@@ -5523,6 +5703,24 @@ async function submitCreate(){
     }
 
     closeCreate();
+
+    // v153: invalidate the descendant cache so the detail pane's child
+    // tabs refresh on next render. Without this, a freshly created child
+    // didn't appear until the user manually re-opened the pane.
+    try {
+      // Clear cache for the open issue and any potential ancestor in the
+      // hierarchy chain. Keys we care about: openIssue.key, selEpic, selInit,
+      // selLegend. Simpler: blast the whole cache — it's small and rebuilt
+      // on demand.
+      for (const k in descendantsCache) delete descendantsCache[k];
+      // If a pane is open and we're on a descendant tab, re-render it.
+      if (typeof openIssue !== 'undefined' && openIssue && paneTab && paneTab !== 'main'){
+        const tabs = getPaneTabsFor(openIssue.type);
+        const spec = tabs.find(x => x.tabKey === paneTab);
+        if (spec) renderPaneDescendants(spec);
+      }
+    } catch(e) { appLogMsg('warn','create','descendant refresh failed: '+(e.message||e)); }
+
     // v95: optimistically insert the new task into allIssues so the user
     // sees it on the board immediately. Without this, the doFetch below can
     // miss the new issue (Jira's search index has 1-2s of lag between create
@@ -5616,7 +5814,8 @@ function quickAddTask(epicKey, epicSummary, projectKey) {
     aiSuggestions: [], aiLoading: false, showHierarchy: false,
     epicExpanded: !!(epicKey), epicFilter: '',
     makeActive: false,
-    labels: [] // v141
+    labels: [], // v141
+    attachments: [], remoteLinks: [] // v153
   };
   document.getElementById('create-overlay').classList.add('open');
   renderCreateModal();
