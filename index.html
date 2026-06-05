@@ -716,7 +716,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v162</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v163</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -3468,16 +3468,12 @@ function renderPaneHdr(i){
   document.getElementById("pane-hdr").innerHTML=`
     <div style="display:flex;justify-content:space-between;align-items:flex-start">
       <div style="flex:1;margin-right:10px">
-        <div style="display:flex;gap:8px;align-items:center;margin-bottom:5px;flex-wrap:wrap">
-          <!-- v99: prominent type label before the key so the user can tell
-               at a glance what hierarchy level they're looking at. Tinted
-               translucent-white pill so it sits naturally on the coloured
-               gradient background. The tbadge in the status row below is
-               now redundant and has been removed. The parent-key link that
-               was here is also gone — it duplicates the Hierarchy section
-               below the title bar. -->
-          <span style="font-size:10px;font-weight:700;color:#fff;background:rgba(255,255,255,.18);padding:3px 9px;border-radius:10px;text-transform:uppercase;letter-spacing:.06em;display:inline-flex;align-items:center;gap:4px">${typeIcon(i.type||'Task')}<span>${(i.type||'Task')}</span></span>
-          <a href="${BASE()}${i.key}" target="_blank" style="font-size:15px;font-weight:700;color:#fff;font-family:monospace">${i.key} ↗</a>
+        <div style="display:flex;gap:12px;align-items:baseline;margin-bottom:8px;flex-wrap:wrap">
+          <!-- v163: type label is now the dominant visual element. 22px
+               bold ALL-CAPS so it's instantly clear what hierarchy level
+               you're editing. Replaces the prior tiny 10px pill. -->
+          <span style="font-size:22px;font-weight:800;color:#fff;letter-spacing:.08em;text-transform:uppercase;line-height:1">${(i.type||'Task')}</span>
+          <a href="${BASE()}${i.key}" target="_blank" style="font-size:15px;font-weight:700;color:rgba(255,255,255,.85);font-family:monospace">${i.key} ↗</a>
         </div>
         <div style="font-size:14px;font-weight:700;color:#fff;line-height:1.35;margin-bottom:7px;display:flex;align-items:flex-start;gap:6px">
           <span id="pane-hdr-summary" style="flex:1">${i.summary}</span>
@@ -8879,43 +8875,89 @@ let mtgParentKey = '';       // v158: optional parent epic / issue key for struc
 // Filters to epic-level types where sensible but still allows any issue
 // to be picked (a Task can be a sub-task parent, an Initiative can be an
 // Epic parent, etc.).
+// v163: forgiving parent-issue search. Handles "MKT-530", "MKT 530", "mkt530",
+// and "530" all matching MKT-530. Falls back to a Jira /issue lookup when the
+// query looks like a key but no local match exists (covers issues outside the
+// currently fetched data).
+let _mtgParentDirectSeq = 0;
+function _mtgParentRenderRow(iss){
+  const tc = (TC && TC[iss.type]) || (TC && TC.Task) || { bg:'#EEF1F3', c:'#5D7987' };
+  const typeBadge = iss.type ? `<span style="font-size:9px;font-weight:700;background:${tc.bg};color:${tc.c};padding:1px 6px;border-radius:8px;text-transform:uppercase;margin-right:6px">${iss.type}</span>` : '';
+  return `<div onmousedown="mtgParentPick('${iss.key.replace(/'/g,"\\'")}')" style="padding:7px 12px;cursor:pointer;border-bottom:1px solid #F4F4F5;font-size:12px;display:flex;align-items:center;gap:8px"
+    onmouseover="this.style.background='#F7F8F9'" onmouseout="this.style.background='transparent'">
+    ${typeBadge}
+    <span style="font-weight:700;color:#257AA5;font-family:monospace">${iss.key}</span>
+    <span style="flex:1;color:#292E37;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_escHtml(iss.summary||'')}</span>
+  </div>`;
+}
 function mtgParentSearch(query){
   const dd = document.getElementById('mtg-parent-results');
   if (!dd) return;
   mtgParentKey = (query || '').trim().toUpperCase();
   const q = (query || '').trim().toLowerCase();
   if (q.length < 1){ dd.style.display = 'none'; dd.innerHTML = ''; return; }
-  // Score matches: key prefix > key contains > summary word match
+  // Normalize for matching — collapse to alnums so MKT-530 / MKT 530 /
+  // mkt530 all collide on "mkt530", and "530" matches the suffix.
+  const qNorm = q.replace(/[^a-z0-9]/g, '');
   const tokens = q.split(/\s+/).filter(t => t.length > 0);
   const scored = [];
   for (const iss of allIssues || []){
     if (!iss || !iss.key) continue;
     const key = iss.key.toLowerCase();
+    const keyNorm = key.replace(/[^a-z0-9]/g, '');
     const sum = (iss.summary || '').toLowerCase();
     let score = 0;
-    if (key.startsWith(q)) score += 100;
-    else if (key.includes(q)) score += 50;
+    if (key === q) score += 500;
+    else if (keyNorm === qNorm) score += 400;
+    else if (key.startsWith(q)) score += 200;
+    else if (keyNorm.startsWith(qNorm)) score += 150;
+    else if (key.includes(q)) score += 80;
+    else if (keyNorm.includes(qNorm)) score += 60;
     for (const t of tokens){
-      if (sum.includes(t)) score += 5;
+      if (t.length >= 2 && sum.includes(t)) score += 5;
     }
     if (score > 0) scored.push({ iss, score });
   }
   scored.sort((a,b) => b.score - a.score);
   const top = scored.slice(0, 15);
-  if (!top.length){
-    dd.innerHTML = '<div style="padding:8px 12px;font-size:12px;color:#9EA0A4;font-style:italic">No matches in current data — type a Jira key anyway (e.g. MKT-530), it\'ll be used directly.</div>';
+  if (top.length){
+    dd.innerHTML = top.map(({iss}) => _mtgParentRenderRow(iss)).join('');
     dd.style.display = 'block';
     return;
   }
-  dd.innerHTML = top.map(({iss}) => {
-    const typeBadge = iss.type ? `<span style="font-size:9px;font-weight:700;background:${(TC[iss.type]||TC.Task).bg};color:${(TC[iss.type]||TC.Task).c};padding:1px 6px;border-radius:8px;text-transform:uppercase;margin-right:6px">${iss.type}</span>` : '';
-    return `<div onmousedown="mtgParentPick('${iss.key.replace(/'/g,"\\'")}')" style="padding:7px 12px;cursor:pointer;border-bottom:1px solid #F4F4F5;font-size:12px;display:flex;align-items:center;gap:8px"
-      onmouseover="this.style.background='#F7F8F9'" onmouseout="this.style.background='transparent'">
-      ${typeBadge}
-      <span style="font-weight:700;color:#257AA5;font-family:monospace">${iss.key}</span>
-      <span style="flex:1;color:#292E37;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_escHtml(iss.summary||'')}</span>
-    </div>`;
-  }).join('');
+
+  // No local match — if it looks like a Jira key (letters+digits, optional
+  // separator), look it up directly so issues outside the fetched set
+  // still resolve. Sequence number guards against stale results when the
+  // user keeps typing.
+  const keyMatch = q.replace(/[\s_]+/g, '-').match(/^([a-z]+)\-?(\d+)$/i);
+  if (keyMatch){
+    const candidateKey = (keyMatch[1] + '-' + keyMatch[2]).toUpperCase();
+    const seq = ++_mtgParentDirectSeq;
+    dd.innerHTML = `<div style="padding:8px 12px;font-size:12px;color:#9EA0A4;display:flex;align-items:center;gap:6px">${spinHtml(12)} Looking up ${candidateKey} in Jira…</div>`;
+    dd.style.display = 'block';
+    jiraGet('/rest/api/3/issue/' + encodeURIComponent(candidateKey) + '?fields=summary,issuetype,project')
+      .then(d => {
+        if (seq !== _mtgParentDirectSeq) return;
+        if (!d || !d.key) return;
+        const iss = {
+          key: d.key,
+          summary: (d.fields && d.fields.summary) || '',
+          type: (d.fields && d.fields.issuetype && d.fields.issuetype.name) || 'Task',
+          project: (d.fields && d.fields.project && d.fields.project.key) || ''
+        };
+        dd.innerHTML = _mtgParentRenderRow(iss);
+        dd.style.display = 'block';
+      })
+      .catch(() => {
+        if (seq !== _mtgParentDirectSeq) return;
+        dd.innerHTML = `<div style="padding:8px 12px;font-size:12px;color:#9EA0A4;font-style:italic">No Jira issue matches ${_escHtml(candidateKey)}.</div>`;
+        dd.style.display = 'block';
+      });
+    return;
+  }
+
+  dd.innerHTML = '<div style="padding:8px 12px;font-size:12px;color:#9EA0A4;font-style:italic">No matches — type a full Jira key (e.g. MKT-530) and we\'ll look it up.</div>';
   dd.style.display = 'block';
 }
 function mtgParentPick(key){
