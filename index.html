@@ -708,7 +708,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v159</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v160</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -8931,8 +8931,12 @@ function clientParseStructuredList(content, opts){
   if (!content) return tasks;
 
   // Locate "Priority N:" section headers to bucket each task by section.
+  // v160: use \b word boundary instead of (?:^|\n) so this still works when
+  // the pasted content arrives as a single block with no newlines (common
+  // when copy-pasting from other LLM conversations). Requires a trailing
+  // colon so we don't accidentally match the word "priority" in prose.
   const priSections = [];
-  const priRe = /(?:^|\n)\s*Priority\s+(\d+)\s*[:.]?\s*([^\n]*)/gi;
+  const priRe = /\bPriority\s+(\d+)\s*:/gi;
   let pm;
   while ((pm = priRe.exec(content)) !== null){
     priSections.push({ idx: pm.index, priority: parseInt(pm[1]) });
