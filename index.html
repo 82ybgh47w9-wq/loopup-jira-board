@@ -708,7 +708,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v155</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v156</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -779,6 +779,10 @@ button,select,textarea,input{font-family:inherit}
   <!-- Show Done (per-view, shared checkbox writes to active view's state) -->
   <label id="show-done-wrap" style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;margin-left:4px" title="Include items in Done status">
     <input type="checkbox" id="show-done-global" onchange="onGlobalShowDoneChange(this)"> Show Done
+  </label>
+  <!-- v156: Show Cancelled — global, defaults off -->
+  <label id="show-cancelled-wrap" style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer" title="Include items in a Cancelled status">
+    <input type="checkbox" id="show-cancelled-global" onchange="onGlobalShowCancelledChange(this)"> Show Cancelled
   </label>
   <!-- Unassigned only (after Show Done) -->
   <label id="unassigned-filter-wrap" style="display:none;align-items:center;gap:5px;font-size:12px;cursor:pointer">
@@ -1122,9 +1126,11 @@ let priBandCollapsed = {Highest:false, High:false, Medium:false, Low:false, 'No 
 // a few hydration helpers) but the runtime behaviour reads/writes `showDone` only.
 let showDone = true;
 let showDoneByView = {mytasks:true, myepics:true, team:true, prioritise:true, manager:true};
+// v156: cancelled is a separate axis from done — hidden by default.
+let showCancelled = false;
 
 /* ══ PERSISTENCE ══ */
-function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,groupProjectAssignment,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed,doneDays,commentReadState,priViewMode,priBandCollapsed,showDone,showDoneByView,sharedTeams:[...sharedTeams],priProjKey}));}catch{}}
+function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,groupProjectAssignment,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed,doneDays,commentReadState,priViewMode,priBandCollapsed,showDone,showDoneByView,showCancelled,sharedTeams:[...sharedTeams],priProjKey}));}catch{}}
 function loadAll(){try{const d=JSON.parse(localStorage.getItem(STOR)||"{}");if(d.cfg)cfg=d.cfg;if(d.locStat)locStat=d.locStat;if(d.locPri)locPri=d.locPri;if(d.currentIam)currentIam=d.currentIam;if(d.currentProjFilter)currentProjFilter=d.currentProjFilter;
 if(d.currentProjectGroup)currentProjectGroup=d.currentProjectGroup;if(d.currentGroup)currentGroup=d.currentGroup;if(d.teamMembers)teamMembers=d.teamMembers;if(d.adminUsers)adminUsers=d.adminUsers;if(d.groups)groups=d.groups;
 if(d.groupProjectAssignment)groupProjectAssignment=d.groupProjectAssignment;if(d.excludedProjects)excludedProjects=d.excludedProjects;if(d.currentView)currentView=d.currentView;if(d.currentLevel)currentLevel=d.currentLevel;if(d.rowCollapsed)rowCollapsed={...rowCollapsed,...d.rowCollapsed};if(d.swimCollapsed)swimCollapsed={...swimCollapsed,...d.swimCollapsed};
@@ -1143,6 +1149,8 @@ if(typeof d.showDone === 'boolean'){
   showDone = Object.values(d.showDoneByView).some(v => !!v);
 }
 showDoneByView = {mytasks:showDone, myepics:showDone, team:showDone, prioritise:showDone, manager:showDone};
+// v156: cancelled flag (separate persistence key)
+if(typeof d.showCancelled === 'boolean') showCancelled = d.showCancelled;
 if(Array.isArray(d.sharedTeams)) sharedTeams = new Set(d.sharedTeams);
 if(typeof d.priProjKey === 'string') priProjKey = d.priProjKey;
 }catch{}}
@@ -2091,6 +2099,30 @@ function getShowDone(_view) {
   return !!showDone;
 }
 
+// v156: Cancelled is a separate axis from Done. A "Cancelled" status is
+// technically in Jira's done category but represents abandoned work, not
+// completed. Users typically want Done items visible but Cancelled hidden.
+function isCancelledStatus(status){
+  return /cancel|won.?t\s*do|abandon/i.test(status || '');
+}
+function onGlobalShowCancelledChange(checkbox){
+  showCancelled = !!checkbox.checked;
+  saveAll();
+  appLogMsg('info','filter','Show Cancelled = ' + showCancelled);
+  if (currentView === 'prioritise') {
+    if (document.getElementById('pri-proj')?.value) loadPriBoard();
+    else renderPriBoard();
+  } else if (currentView === 'myepics') {
+    renderMyEpics();
+  } else {
+    renderMain();
+  }
+}
+function syncGlobalShowCancelledCheckbox(){
+  const cb = document.getElementById('show-cancelled-global');
+  if (cb) cb.checked = !!showCancelled;
+}
+
 function toggleShowDone(_view, checkbox) {
   showDone = !!checkbox.checked;
   // Keep legacy per-view object in step in case any reader still reads it.
@@ -2133,6 +2165,8 @@ function syncGlobalShowDoneCheckbox() {
 
 function syncPerViewShowDoneCheckboxes() {
   syncGlobalShowDoneCheckbox();
+  // v156: also keep the Show Cancelled checkbox in sync
+  try { syncGlobalShowCancelledCheckbox(); } catch {}
   const myepicsCb = document.getElementById('myepics-show-done');
   if(myepicsCb) myepicsCb.checked = !!showDone;
   const priCb = document.getElementById('pri-show-done');
@@ -2191,6 +2225,8 @@ function getFiltered(forPerson){
     if(unassigned&&i.assignee!=="Unassigned")return false;
     // Show Done filter — hide Done items unless toggle is on (or status filter explicitly picks Done)
     if(!showDone && normStatus(i.status)==='Done' && normStatus(statFilter)!=='Done') return false;
+    // v156: Show Cancelled filter — hide cancelled items unless toggle is on
+    if(!showCancelled && isCancelledStatus(i.status) && !isCancelledStatus(statFilter)) return false;
     return true;
   });
 }
@@ -2948,6 +2984,10 @@ function renderMyTasks(){
 function toggleRowCollapse(s){rowCollapsed[s]=!rowCollapsed[s];saveAll();renderMyTasks();}
 
 /* ══ MANAGER VIEW — horizontal swimlanes ══ */
+// v156: Swim lanes are now built dynamically from whichever statuses
+// appear in the loaded issues, plus an always-present Active lane at the
+// top. The static SWIM_ROWS below is kept only as a fallback for the
+// very first render before any issues have loaded.
 const SWIM_ROWS = [
   {key:"done",    label:"Done",        statuses:["Done"],                               color:"#73777C", bg:"#F4F4F5"},
   {key:"active",  label:"Active",      statuses:["__active__"],                         color:"#5E8E38", bg:"#F0FBF0"},
@@ -2956,6 +2996,80 @@ const SWIM_ROWS = [
   {key:"backlog", label:"Backlog",     statuses:["Backlog"],                            color:"#9EA0A4", bg:"#EEF1F3"},
 ];
 let swimCollapsed = {done:true, active:false, ip:false, sel:false, backlog:true};
+
+// v156: Build the swim-lane list from the actual statuses present in
+// allIssues. Active is always first. Then statuses are grouped by Jira
+// category (indeterminate → new → done) and ordered within each group.
+// A pre-defined palette gives common statuses their familiar colours;
+// anything novel falls back to a category-based default.
+function _swimCategoryFor(status){
+  const s = (status || '').toLowerCase();
+  if (/cancel|won.?t\s*do|abandon/.test(s)) return 'done';
+  if (/done|complete|resolv|closed|deploy/.test(s)) return 'done';
+  if (/progress|review|qa|test|verif|implement|develop|build|coding/.test(s)) return 'indeterminate';
+  if (/hold|block|wait|stall|pause|impediment/.test(s)) return 'indeterminate';
+  return 'new';
+}
+function getDynamicSwimRows(){
+  // Use the visible team's filtered issues so the lanes reflect what's
+  // actually on screen, not statuses from unrelated projects.
+  const vt = (typeof getVisibleTeam === 'function') ? getVisibleTeam() : [];
+  let pool = [];
+  try {
+    pool = (allIssues || []).filter(i => i && i.assignee && (!vt.length || vt.includes(i.assignee)));
+  } catch { pool = allIssues || []; }
+  const byCat = { indeterminate:[], new:[], done:[] };
+  const seen = new Set();
+  for (const i of pool){
+    const s = (i.status || 'Backlog');
+    if (seen.has(s)) continue;
+    seen.add(s);
+    const cat = _swimCategoryFor(s);
+    if (byCat[cat]) byCat[cat].push(s);
+  }
+  for (const c of Object.keys(byCat)) byCat[c].sort((a,b)=>a.localeCompare(b));
+
+  // Palette for known LoopUp statuses; unknowns use category fallback.
+  const PALETTE = {
+    'In Progress': { color:'#2E99CE', bg:'#E0F0F8' },
+    'On Hold':     { color:'#E08000', bg:'#FFF4E0' },
+    'Blocked':     { color:'#D6202B', bg:'#FCEBEB' },
+    'In Review':   { color:'#8F6AC8', bg:'#F3EEFF' },
+    'QA':          { color:'#2E99CE', bg:'#E0F0F8' },
+    'Selected':    { color:'#8F6AC8', bg:'#F3EEFF' },
+    'Selected for Development': { color:'#8F6AC8', bg:'#F3EEFF' },
+    'Backlog':     { color:'#9EA0A4', bg:'#EEF1F3' },
+    'Done':        { color:'#73777C', bg:'#F4F4F5' },
+    'Cancelled':   { color:'#A11820', bg:'#FCEBEB' },
+    'Resolved':    { color:'#2D7A2D', bg:'#E8F5E0' }
+  };
+  const CAT_DEFAULT = {
+    indeterminate: { color:'#2E99CE', bg:'#E0F0F8' },
+    new:           { color:'#9EA0A4', bg:'#EEF1F3' },
+    done:          { color:'#73777C', bg:'#F4F4F5' }
+  };
+  const slugify = s => 'st_' + (s || '').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
+  const rows = [];
+  // Active always first.
+  rows.push({ key:'active', label:'Active', statuses:['__active__'], color:'#5E8E38', bg:'#F0FBF0', _dynamic:false });
+  for (const cat of ['indeterminate','new','done']){
+    for (const name of byCat[cat]){
+      // v156: hide the Cancelled lane unless the Show Cancelled toggle is on.
+      if (isCancelledStatus(name) && !showCancelled) continue;
+      const c = PALETTE[name] || CAT_DEFAULT[cat];
+      rows.push({
+        key: slugify(name),
+        label: name,
+        statuses: [name],      // exact match — no normStatus collapsing
+        color: c.color,
+        bg: c.bg,
+        cat,
+        _dynamic: true
+      });
+    }
+  }
+  return rows;
+}
 
 function swimCard(issue, isActiveRow=false, isDone=false){
   const isActive = activeFlags[issue.assignee]===issue.key;
@@ -2979,13 +3093,19 @@ function swimCard(issue, isActiveRow=false, isDone=false){
 function toggleSwim(key){ swimCollapsed[key]=!swimCollapsed[key]; renderManager(); }
 
 function renderManager(){
+  // v156: use exact status matching against the dynamic swim rows. We
+  // still keep `ns` (normStatus) available if any inline expression in
+  // here relies on it — but lane assignment now uses i.status directly.
   const ns = i => normStatus(i.status);
+  const exact = i => (i.status || 'Backlog');
   const vt = getVisibleTeam();
   const wrap = document.getElementById("manager-wrap");
   if(!vt || vt.length === 0) {
     wrap.innerHTML = emptyStateMessage('👥','No team members visible','Add team members in Settings → Team, or select a different team from the topbar.');
     return;
   }
+  // v156: build the swim rows from current data
+  const SWIM_ROWS_DYN = getDynamicSwimRows();
 
   let html = `<div style="display:flex;flex-direction:column;width:100%;min-height:100%;overflow:auto">`;
 
@@ -3004,13 +3124,14 @@ function renderManager(){
       </div>`).join("")}
   </div>`;
 
-  // ── Swimlane rows ──
-  SWIM_ROWS.forEach(row => {
+  // ── Swimlane rows (v156: dynamic, see getDynamicSwimRows above) ──
+  SWIM_ROWS_DYN.forEach(row => {
     const collapsed = swimCollapsed[row.key];
     const counts = vt.map(person => {
       const issues = getFiltered(person);
       if(row.key==="active"){ const ak=activeFlags[person]; return ak&&issues.find(i=>i.key===ak)?1:0; }
-      return issues.filter(i=>row.statuses.includes(ns(i))).length;
+      // v156: exact-status match against the lane's status list
+      return issues.filter(i=>row.statuses.includes(exact(i))).length;
     });
     const total = counts.reduce((a,b)=>a+b,0);
 
@@ -3030,7 +3151,7 @@ function renderManager(){
         const activeKey = activeFlags[person];
         let cards = [];
         if(row.key==="active"){ const ai=activeKey?issues.find(i=>i.key===activeKey):null; if(ai)cards=[ai]; }
-        else { cards = issues.filter(i=>row.statuses.includes(ns(i))); }
+        else { cards = issues.filter(i=>row.statuses.includes(exact(i))); }
         const dropStatus = row.key==="active"?"In Progress":row.statuses[0];
         // v93: Team view drops should reassign as well as transition status.
         // We pass the column's owner (`person`) into onDropTeamLane so the
