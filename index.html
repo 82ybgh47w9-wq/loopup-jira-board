@@ -716,7 +716,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v164</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v165</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -6627,12 +6627,16 @@ function searchTypeRank(t){ return SEARCH_TYPE_ORDER[t] || 99; }
 // surfaced to the top of a "coverage" search instead of buried under recently-
 // updated tasks that happen to mention the word in a comment.
 function searchRelevanceRank(it, q){
-  if(!q) return 2;
+  if(!q) return 3;
   const ql = q.toLowerCase();
   const sum = (it.summary||'').toLowerCase();
-  // 0 = summary contains the whole query (e.g. "coverage" in "...Coverage")
-  // 1 = source marked summary-match by the server-side query (Jira's summary~)
-  // 2 = text-only match
+  // v165: key matches always rank top — they're the single highest-confidence
+  // hit (exact ticket reference). Ranking:
+  //   -1 = key match (e.g. user typed "530" and we found MKT-530 via key=)
+  //    0 = summary contains the whole query
+  //    1 = source marked summary-match by Jira's summary~ JQL
+  //    2 = text-only match
+  if(it._relevance === 'key') return -1;
   if(sum.includes(ql)) return 0;
   if(it._relevance === 'summary') return 1;
   return 2;
@@ -6695,17 +6699,28 @@ async function runSearch(q){
     const textClauses = ['text ~ "'+esc+'*"'];
 
     const fields = 'summary,issuetype,project,status,assignee,parent,priority,updated';
-    const buildUrl = (jql) => '/rest/api/3/search/jql?jql=' + encodeURIComponent(jql) + '&fields=' + fields + '&maxResults=100';
+    const buildUrl = (jql, max) => '/rest/api/3/search/jql?jql=' + encodeURIComponent(jql) + '&fields=' + fields + '&maxResults=' + (max||100);
     const summaryJql = '(' + summaryClauses.join(' OR ') + ') ORDER BY updated DESC';
     const textJql    = '(' + textClauses.join(' OR ')    + ') ORDER BY updated DESC';
+    // v165: dedicated key-match query so MKT-530 etc. are never pushed out
+    // of the 100-result summary cap by recently-updated text matches.
+    const keyJql = keyClauses.length ? '(' + keyClauses.join(' OR ') + ') ORDER BY key' : null;
 
-    const [summaryRes, textRes] = await Promise.all([
-      jiraGet(buildUrl(summaryJql)).catch(e=>{ appLogMsg('warn','search','summary query failed: '+(e.message||e)); return {issues:[]}; }),
-      jiraGet(buildUrl(textJql)).catch(e=>{ appLogMsg('warn','search','text query failed: '+(e.message||e)); return {issues:[]}; })
-    ]);
+    const pSummary = jiraGet(buildUrl(summaryJql, 100)).catch(e=>{ appLogMsg('warn','search','summary query failed: '+(e.message||e)); return {issues:[]}; });
+    const pText    = jiraGet(buildUrl(textJql, 100)).catch(e=>{ appLogMsg('warn','search','text query failed: '+(e.message||e)); return {issues:[]}; });
+    const pKey     = keyJql ? jiraGet(buildUrl(keyJql, 50)).catch(e=>{ appLogMsg('warn','search','key query failed: '+(e.message||e)); return {issues:[]}; }) : Promise.resolve({issues:[]});
+
+    const [keyRes, summaryRes, textRes] = await Promise.all([pKey, pSummary, pText]);
 
     const seen = new Set();
     const items = [];
+    for(const issue of (keyRes.issues||[])){
+      if(seen.has(issue.key)) continue;
+      seen.add(issue.key);
+      const parsed = parseIssue(issue);
+      parsed._relevance = 'key';
+      items.push(parsed);
+    }
     for(const issue of (summaryRes.issues||[])){
       if(seen.has(issue.key)) continue;
       seen.add(issue.key);
@@ -6720,7 +6735,7 @@ async function runSearch(q){
       parsed._relevance = 'text';
       items.push(parsed);
     }
-    appLogMsg('info','search','Search "'+q+'": '+items.length+' merged results (summary='+(summaryRes.issues||[]).length+', text='+(textRes.issues||[]).length+')');
+    appLogMsg('info','search','Search "'+q+'": '+items.length+' merged results (key='+(keyRes.issues||[]).length+', summary='+(summaryRes.issues||[]).length+', text='+(textRes.issues||[]).length+')');
 
     const inProjGroupKeys = (currentProjectGroup && projectGroups[currentProjectGroup]) ? new Set(projectGroups[currentProjectGroup]) : null;
     const teamSet = (currentGroup && groups[currentGroup]) ? new Set(groups[currentGroup]) : null;
