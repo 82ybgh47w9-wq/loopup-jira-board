@@ -285,6 +285,14 @@ button,select,textarea,input{font-family:inherit}
 .mtg-task-card:hover{border-color:#2E99CE40}
 .mtg-task-card.is-dupe{border-color:#E08000;background:#FFFCF5}
 .mtg-task-card.is-created{border-color:#5E8E38;background:#F7FBF3}
+/* v162: fade-out for the "✓ Synced" badge after a successful Jira push */
+@keyframes mtgFadeOk { 0%,60% { opacity:1; } 100% { opacity:0; } }
+.mtg-bulk-bar{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#125462;color:#fff;border-radius:8px;margin-bottom:10px;flex-wrap:wrap}
+.mtg-bulk-bar select,.mtg-bulk-bar input[type=text]{background:#fff;color:#292E37;border:1px solid #C9CACC;border-radius:6px;padding:4px 8px;font-size:12px}
+.mtg-bulk-bar button{background:#fff;color:#125462;border:none;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer}
+.mtg-bulk-bar button:hover{background:#E0F0F8}
+.mtg-bulk-bar button.danger{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4)}
+.mtg-row-select{margin-right:6px;cursor:pointer;width:14px;height:14px}
 .mtg-task-card.is-excluded{opacity:.45}
 .mtg-task-main{display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer}
 .mtg-task-check{width:20px;height:20px;border-radius:5px;border:2px solid #C9CACC;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;font-size:11px;color:#fff;transition:.15s}
@@ -708,7 +716,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v161</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v162</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -10665,6 +10673,7 @@ async function mtgLinkToExisting(taskId) {
 
 // v111: Global state for inline picker pop-ups (only one open at a time).
 let mtgOpenPicker = null; // { taskId, kind }
+let mtgSelected = new Set(); // v162: task IDs currently selected for bulk update
 let mtgPickerQuery = '';
 let mtgPickerResults = [];
 let mtgPickerLoading = false;
@@ -10734,6 +10743,13 @@ function mtgPositionOpenPicker(){
     if(!st || installed) return;
     installed = true;
     st.addEventListener('scroll', () => {
+      // v162: don't close the picker if the user is actively typing in
+      // the popover's search input. The staging panel re-renders on each
+      // keystroke (innerHTML reset) which fires a scroll event — without
+      // this guard the picker collapsed after the first letter typed.
+      if (mtgOpenPicker && document.activeElement &&
+          document.activeElement.classList &&
+          document.activeElement.classList.contains('mtg-pop-input')) return;
       if(mtgOpenPicker) mtgClosePicker();
     });
   };
@@ -10874,6 +10890,8 @@ function mtgPickAssignee(taskId, accountId, displayName){
   t.assigneeId = accountId || null;
   mtgOpenPicker = null;
   renderMtgStaging('ready');
+  // v162: when the task is already in Jira, push the change immediately
+  if (t.status === 'created' && t.jiraKey) mtgSyncFieldToJira(t, 'assignee');
 }
 
 function mtgPickStatus(taskId, status){
@@ -10881,6 +10899,7 @@ function mtgPickStatus(taskId, status){
   t.status_target = status;
   mtgOpenPicker = null;
   renderMtgStaging('ready');
+  if (t.status === 'created' && t.jiraKey) mtgSyncFieldToJira(t, 'status');
 }
 
 function mtgPickPriority(taskId, priority){
@@ -10888,16 +10907,144 @@ function mtgPickPriority(taskId, priority){
   t.priority = priority;
   mtgOpenPicker = null;
   renderMtgStaging('ready');
+  if (t.status === 'created' && t.jiraKey) mtgSyncFieldToJira(t, 'priority');
+}
+
+// v162: push a field change to Jira for tasks that are already created.
+// Sets task._syncing/._syncStatus so the card can render a subtle
+// "syncing…" / "✓ Synced" indicator that fades after a few seconds.
+async function mtgSyncFieldToJira(task, field){
+  if (!task || !task.jiraKey) return;
+  task._syncing = true;
+  task._syncStatus = null;
+  task._syncedAt = 0;
+  try { renderMtgStaging('ready'); } catch {}
+  try {
+    if (field === 'assignee'){
+      const fields = {};
+      if (task.assigneeId) fields.assignee = { accountId: task.assigneeId };
+      else if (task.assignee && task.assignee !== 'Unassigned'){
+        try {
+          const users = await jiraGet('/rest/api/3/user/search?query=' + encodeURIComponent(task.assignee) + '&maxResults=1');
+          const arr = Array.isArray(users) ? users : [];
+          if (arr.length && arr[0].accountId) fields.assignee = { accountId: arr[0].accountId };
+        } catch {}
+      } else {
+        fields.assignee = null;
+      }
+      const r = await jiraPut('/rest/api/3/issue/' + task.jiraKey, { fields });
+      if (!(r.ok || r.status === 204)) throw new Error('Jira ' + r.status);
+    } else if (field === 'priority'){
+      const ok = await updatePriority(task.jiraKey, task.priority || 'Medium');
+      if (!ok) throw new Error('Jira priority update failed');
+    } else if (field === 'status'){
+      const ok = await transitionIssue(task.jiraKey, task.status_target || 'Backlog');
+      if (!ok) throw new Error('Jira transition failed');
+    } else if (field === 'summary'){
+      const r = await jiraPut('/rest/api/3/issue/' + task.jiraKey, { fields: { summary: task.summary || '' } });
+      if (!(r.ok || r.status === 204)) throw new Error('Jira ' + r.status);
+    }
+    task._syncStatus = 'ok';
+    task._syncedAt = Date.now();
+    appLogMsg('info','mtg','Synced ' + field + ' on ' + task.jiraKey);
+  } catch(e){
+    task._syncStatus = 'error';
+    task._syncError = (e && e.message) ? e.message : String(e);
+    appLogMsg('warn','mtg','Sync ' + field + ' on ' + task.jiraKey + ' failed: ' + task._syncError);
+  } finally {
+    task._syncing = false;
+    try { renderMtgStaging('ready'); } catch {}
+    // Auto-clear the "✓ Synced" badge after a few seconds
+    if (task._syncStatus === 'ok'){
+      setTimeout(() => {
+        if (task._syncStatus === 'ok' && Date.now() - task._syncedAt > 4000){
+          task._syncStatus = null;
+          try { renderMtgStaging('ready'); } catch {}
+        }
+      }, 4500);
+    }
+  }
 }
 
 function mtgUpdateField(taskId, field, value){
   const t = mtgTasks.find(x => x.id === taskId);
-  if(t) t[field] = value;
+  if(!t) return;
+  if (t[field] === value) return; // no-op if unchanged (avoids needless sync)
+  t[field] = value;
+  // v162: created tasks sync their summary edits back to Jira immediately.
+  if (t.status === 'created' && t.jiraKey && (field === 'summary')){
+    mtgSyncFieldToJira(t, 'summary');
+  }
 }
 
 function mtgToggleExpandCard(taskId){
   const t = mtgTasks.find(x => x.id === taskId);
   if(t){ t.expanded = !t.expanded; renderMtgStaging('ready'); }
+}
+
+// v162: bulk-select state helpers.
+function mtgToggleSelect(taskId){
+  if (mtgSelected.has(taskId)) mtgSelected.delete(taskId);
+  else mtgSelected.add(taskId);
+  renderMtgStaging('ready');
+}
+function mtgSelectAll(checked){
+  mtgSelected = checked ? new Set(mtgTasks.map(t => t.id)) : new Set();
+  renderMtgStaging('ready');
+}
+function mtgClearSelection(){
+  mtgSelected = new Set();
+  renderMtgStaging('ready');
+}
+
+// v162: apply a single field/value change to every selected task. For
+// pending tasks this updates the staged state; for created tasks it
+// also pushes the change to Jira (sync indicator on each card).
+async function mtgBulkApply(field, value){
+  if (!value || !mtgSelected.size) return;
+  const targets = mtgTasks.filter(t => mtgSelected.has(t.id));
+  for (const t of targets){
+    if (field === 'priority') t.priority = value;
+    else if (field === 'status') t.status_target = value;
+    else if (field === 'assignee') {
+      // Treat value as a display name; try to resolve account ID for created tasks
+      t.assignee = value;
+      t.assigneeId = null;
+    }
+    else if (field === 'addLabel') {
+      t.labels = Array.isArray(t.labels) ? t.labels : [];
+      if (!t.labels.includes(value)) t.labels.push(value);
+    }
+  }
+  renderMtgStaging('ready');
+  // Push to Jira in parallel for already-created tasks
+  const syncPromises = [];
+  for (const t of targets){
+    if (t.status !== 'created' || !t.jiraKey) continue;
+    if (field === 'priority') syncPromises.push(mtgSyncFieldToJira(t, 'priority'));
+    else if (field === 'status') syncPromises.push(mtgSyncFieldToJira(t, 'status'));
+    else if (field === 'assignee') syncPromises.push(mtgSyncFieldToJira(t, 'assignee'));
+    else if (field === 'addLabel') syncPromises.push(mtgSyncLabelsToJira(t));
+  }
+  if (syncPromises.length){
+    appLogMsg('info','mtg','Bulk-applying '+field+' to '+syncPromises.length+' created tasks');
+    await Promise.allSettled(syncPromises);
+  }
+}
+async function mtgSyncLabelsToJira(task){
+  if (!task.jiraKey) return;
+  task._syncing = true;
+  try { renderMtgStaging('ready'); } catch {}
+  try {
+    const r = await jiraPut('/rest/api/3/issue/' + task.jiraKey, { fields: { labels: (task.labels || []).slice() } });
+    if (!(r.ok || r.status === 204)) throw new Error('Jira ' + r.status);
+    task._syncStatus = 'ok'; task._syncedAt = Date.now();
+  } catch(e){
+    task._syncStatus = 'error'; task._syncError = (e && e.message) || String(e);
+  } finally {
+    task._syncing = false;
+    try { renderMtgStaging('ready'); } catch {}
+  }
 }
 
 // v161: After re-rendering the staging panel, the picker input element is
@@ -11167,7 +11314,48 @@ function renderMtgStaging(state, errorMsg) {
     </div>`;
   };
 
+  // v162: bulk-select bar — only rendered when at least one task is selected.
   let html = '';
+  const selCount = mtgSelected.size;
+  const allSelected = mtgTasks.length > 0 && selCount === mtgTasks.length;
+  // Always show the Select-all checkbox at the very top of the list.
+  html += `<div style="display:flex;align-items:center;gap:8px;padding:6px 4px;margin-bottom:6px;font-size:11px;color:#5D7987">
+    <input type="checkbox" id="mtg-select-all" ${allSelected ? 'checked' : ''} ${selCount > 0 && !allSelected ? 'data-indet="1"' : ''} onchange="mtgSelectAll(this.checked)" style="cursor:pointer;width:14px;height:14px" title="Select all tasks">
+    <span>${selCount ? `<b>${selCount}</b> of ${mtgTasks.length} selected` : `Select tasks for bulk update`}</span>
+    ${selCount ? `<button onclick="mtgClearSelection()" style="margin-left:auto;background:transparent;color:#5D7987;border:1px solid #C9CACC;border-radius:6px;padding:3px 9px;font-size:11px;cursor:pointer">Clear</button>` : ''}
+  </div>`;
+  // Bulk action bar — only when ≥1 selected
+  if (selCount > 0){
+    const priOptsList = ['Highest','High','Medium','Low'];
+    const statusOptsList = ['Backlog','Selected','In Progress','Done'];
+    // Pull the curated team + Viewing user for the assignee dropdown.
+    const meName = currentIam || '';
+    const assigneeOpts = [];
+    if (meName) assigneeOpts.push(meName);
+    for (const m of (teamMembers || [])){
+      if (m && m !== meName && !assigneeOpts.includes(m)) assigneeOpts.push(m);
+    }
+    html += `<div class="mtg-bulk-bar">
+      <span style="font-weight:700">Bulk update ${selCount} task${selCount === 1 ? '' : 's'}:</span>
+      <select onchange="if(this.value){mtgBulkApply('assignee',this.value);this.value='';}">
+        <option value="">Set Assignee…</option>
+        ${assigneeOpts.map(n => `<option value="${_escHtml(n)}">${_escHtml(n)}</option>`).join('')}
+      </select>
+      <select onchange="if(this.value){mtgBulkApply('priority',this.value);this.value='';}">
+        <option value="">Set Priority…</option>
+        ${priOptsList.map(p => `<option value="${p}">${p}</option>`).join('')}
+      </select>
+      <select onchange="if(this.value){mtgBulkApply('status',this.value);this.value='';}">
+        <option value="">Set Status…</option>
+        ${statusOptsList.map(s => `<option value="${s}">${s}</option>`).join('')}
+      </select>
+      <input type="text" id="mtg-bulk-label" placeholder="Add label…" style="width:130px"
+        onkeydown="if(event.key==='Enter'&&this.value.trim()){mtgBulkApply('addLabel',this.value.trim());this.value='';}">
+      <button onclick="const v=document.getElementById('mtg-bulk-label').value.trim(); if(v){mtgBulkApply('addLabel',v); document.getElementById('mtg-bulk-label').value='';}">Add label</button>
+      <button class="danger" onclick="mtgClearSelection()">Done</button>
+    </div>`;
+  }
+
   for (const task of mtgTasks) {
     const missing = mtgValidateTask(task);
     const canPush = missing.length === 0 && task.status === 'pending' && task.included;
@@ -11207,11 +11395,16 @@ function renderMtgStaging(state, errorMsg) {
 
     html += `<div class="${klass}" id="mtg-card-${task.id}">
       <div class="mtg-card2-top">
+        <!-- v162: bulk-select checkbox (separate from the "include in push" checkbox below) -->
+        <input type="checkbox" class="mtg-row-select" ${mtgSelected.has(task.id) ? 'checked' : ''} onclick="event.stopPropagation();mtgToggleSelect('${task.id}')" title="Select for bulk update">
         <div class="mtg-check2 ${task.included ? 'checked' : ''}" onclick="event.stopPropagation();mtgToggleInclude('${task.id}')">${task.included ? '✓' : ''}</div>
         <div class="mtg-card2-summary" contenteditable="true" spellcheck="true" onblur="mtgUpdateField('${task.id}','summary',this.textContent.trim())">${_escHtml(task.summary)}</div>
         <div class="mtg-card2-actions">
-          ${task.status === 'created' ? `<span style="font-size:11px;font-weight:700;color:#2D7A2D">✓ ${task.jiraKey || 'Created'}</span>` : ''}
-          ${task.status === 'linked' ? `<span style="font-size:11px;font-weight:700;color:#125462">↳ Linked to ${task.linkedTo}</span>` : ''}
+          ${task.status === 'created' ? `<button onclick="event.stopPropagation();openPane('${(task.jiraKey||'').replace(/'/g,"\\'")}')" title="Open ${_escHtml(task.jiraKey||'')} in detail pane" style="font-size:11px;font-weight:700;color:#2D7A2D;background:transparent;border:1px solid #5E8E38;border-radius:6px;padding:3px 8px;cursor:pointer">✓ ${_escHtml(task.jiraKey || 'Created')} →</button>` : ''}
+          ${task._syncing ? `<span style="font-size:10px;color:#2E99CE;display:inline-flex;align-items:center;gap:4px;padding:2px 6px">${spinHtml(10,'#2E99CE')} Syncing…</span>` : ''}
+          ${task._syncStatus === 'ok' && !task._syncing ? `<span style="font-size:10px;font-weight:700;color:#2D7A2D;background:#E8F5E0;border-radius:6px;padding:2px 7px;animation:mtgFadeOk 4s ease-in forwards" title="Saved to Jira just now">✓ Synced</span>` : ''}
+          ${task._syncStatus === 'error' && !task._syncing ? `<span style="font-size:10px;font-weight:700;color:#A11820;background:#FCEBEB;border-radius:6px;padding:2px 7px" title="${_escHtml(task._syncError||'Sync failed')}">⚠ Sync failed</span>` : ''}
+          ${task.status === 'linked' ? `<button onclick="event.stopPropagation();openPane('${(task.linkedTo||'').replace(/'/g,"\\'")}')" title="Open ${_escHtml(task.linkedTo||'')} in detail pane" style="font-size:11px;font-weight:700;color:#125462;background:transparent;border:1px solid #2E99CE;border-radius:6px;padding:3px 8px;cursor:pointer">↳ Linked to ${_escHtml(task.linkedTo||'')} →</button>` : ''}
           ${task.status === 'ignored' ? `<span style="font-size:11px;font-weight:700;color:#9EA0A4">✕ Ignored</span><button class="mtg-restore-btn" onclick="event.stopPropagation();mtgRestoreTask('${task.id}')" title="Restore this task to pending">Restore</button>` : ''}
           ${task.status === 'creating' ? `<span style="font-size:11px;color:#2E99CE;display:flex;align-items:center;gap:4px">${spinHtml(12, '#2E99CE')} Working…</span>` : ''}
           ${task.status === 'error' ? `<span style="font-size:11px;font-weight:700;color:#D6202B">✗ Failed</span>` : ''}
