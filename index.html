@@ -708,7 +708,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v153</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v154</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -965,12 +965,15 @@ button,select,textarea,input{font-family:inherit}
       <!-- LEFT: Input panel -->
       <div class="mtg-left">
         <div class="mtg-left-hdr">
-          <h3>Meeting Task Extractor</h3>
-          <p>Extract action items from Teams meetings and stage for Jira</p>
+          <!-- v154: broadened scope — no longer just meetings, also covers
+               LLM outputs and any pasted text. -->
+          <h3>Meeting / Task Generator</h3>
+          <p>From meeting transcripts or any text — AI extracts tasks for Jira</p>
           <div class="mtg-source-tabs" id="mtg-source-tabs">
             <!-- v148: Auto-fetch is now the left/default option. -->
+            <!-- v154: "Paste Transcript" renamed to "Paste Content" to signal it accepts any text. -->
             <button class="active" onclick="setMtgSource('auto')">Auto-fetch</button>
-            <button onclick="setMtgSource('paste')">Paste Transcript</button>
+            <button onclick="setMtgSource('paste')">Paste Content</button>
           </div>
         </div>
         <div class="mtg-paste-area" id="mtg-input-area">
@@ -6794,7 +6797,7 @@ function renderSettings(){
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:#F7F8F9;border-radius:8px;margin-bottom:14px">
         <div>
           <div style="font-size:12px;font-weight:700">Meetings tab (beta)</div>
-          <div style="font-size:11px;color:#9EA0A4">Show the Meeting Task Extractor in the top tab bar (this browser only)</div>
+          <div style="font-size:11px;color:#9EA0A4">Show the Meeting / Task Generator in the top tab bar (this browser only)</div>
         </div>
         <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:#292E37">
           <input type="checkbox" ${localStorage.getItem('meetings_beta')==='1'?'checked':''} onchange="toggleMeetingsBeta(this.checked)">
@@ -9429,7 +9432,7 @@ async function msFetchAndExtract(meetingId){
     });
     if (btn) btn.innerHTML = '✓ Extracted — see staging area on the right (re-run if you edit the transcript below)';
   } catch(e){
-    if (ta) { ta.disabled = false; ta.placeholder = 'Paste the meeting transcript here…'; }
+    if (ta) { ta.disabled = false; ta.placeholder = 'Paste meeting transcript, LLM output, notes, or any text…'; }
     if (btn) { btn.disabled = false; btn.innerHTML = '↻ Try again'; }
     alert('Could not fetch transcript:\n\n' + (e.message || e) + '\n\nYou can still paste the transcript manually below and click Re-extract.');
   }
@@ -9723,16 +9726,17 @@ function renderMtgInputArea() {
   if (mtgSource === 'paste') {
     area.innerHTML = `
       <div style="margin-bottom:10px">
-        <label style="font-size:11px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.04em">Meeting title</label>
-        <input id="mtg-title" class="mtg-attendees-input" placeholder="e.g. Marketing Engine" value="${_escHtml(mtgMeetingTitle)}" oninput="mtgMeetingTitle=this.value">
+        <!-- v154: relabelled to reflect any-text input, not just meetings -->
+        <label style="font-size:11px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.04em">Title</label>
+        <input id="mtg-title" class="mtg-attendees-input" placeholder="e.g. Marketing Engine — or 'ChatGPT brainstorm 2026-06-04'" value="${_escHtml(mtgMeetingTitle)}" oninput="mtgMeetingTitle=this.value">
       </div>
       <div style="margin-bottom:10px">
-        <label style="font-size:11px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.04em">Attendees <span style="font-weight:400;color:#9EA0A4">(comma-separated)</span></label>
+        <label style="font-size:11px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.04em">People <span style="font-weight:400;color:#9EA0A4">(comma-separated, optional)</span></label>
         <input id="mtg-attendees" class="mtg-attendees-input" placeholder="e.g. Marcus Greensit, Steve Flavell, Harry Newman" value="">
       </div>
       <div>
-        <label style="font-size:11px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.04em">Transcript / meeting notes</label>
-        <textarea id="mtg-transcript" placeholder="Paste the meeting transcript here. WebVTT format (from Teams) works best, but plain text notes are fine too.&#10;&#10;The AI will identify action items, who they're assigned to, and suggest Jira placement." style="min-height:300px"></textarea>
+        <label style="font-size:11px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.04em">Content</label>
+        <textarea id="mtg-transcript" placeholder="Paste any content here — a meeting transcript, LLM output (e.g. ChatGPT), notes, or free text.&#10;&#10;WebVTT format (from Teams) works well, but plain text is fine too.&#10;&#10;The AI will identify action items, who they're assigned to, and suggest Jira placement." style="min-height:300px"></textarea>
       </div>
       <button class="mtg-extract-btn" id="mtg-extract-btn" onclick="mtgExtract()" ${mtgExtracting ? 'disabled' : ''}>
         ${mtgExtracting ? spinHtml(16, '#fff') + ' Extracting…' : '⚡ Extract Tasks'}
@@ -10168,7 +10172,7 @@ async function mtgLinkToExisting(taskId) {
   renderMtgStaging('ready');
 
   try {
-    const sourceLine = 'From meeting "' + mtgMeetingTitle + '" (linked via Meeting Task Extractor):';
+    const sourceLine = 'From meeting "' + mtgMeetingTitle + '" (linked via Meeting / Task Generator):';
     const lines = [task.summary];
     if (task.description) lines.push(task.description);
     if (task.sourceQuote) lines.push('Source quote: "' + task.sourceQuote + '"');
@@ -11206,7 +11210,7 @@ async function mtgPushOne(taskId) {
 
   try {
     const desc = (task.description ? task.description + '\n\n' : '')
-      + '---\nExtracted from meeting "' + mtgMeetingTitle + '" by Meeting Task Extractor.';
+      + '---\nExtracted from meeting "' + mtgMeetingTitle + '" by Meeting / Task Generator.';
 
     const payload = {
       fields: {
