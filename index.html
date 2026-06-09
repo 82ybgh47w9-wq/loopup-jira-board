@@ -716,7 +716,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v166</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v167</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -803,8 +803,15 @@ button,select,textarea,input{font-family:inherit}
        worth offering anyway, so we hide the control. The DOM node stays
        in place (with the checkbox `checked` by default) because renderMyTasks
        reads document.getElementById('matrix-toggle')?.checked. -->
-  <label id="matrix-toggle-wrap" style="display:none !important;align-items:center;gap:5px;font-size:12px;cursor:pointer">
-    <input type="checkbox" id="matrix-toggle" checked onchange="renderMain()"> Priority cols
+  <!-- v167: revealed the priority-column toggle (was hidden because the off-state
+       crashed in an older build). Now used by both My Tasks and Epic Focus. -->
+  <label id="matrix-toggle-wrap" style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;margin-left:4px" title="Group tasks by priority columns (Highest / High / Medium / Low). When off, tasks within each status sort by priority but render in one column.">
+    <input type="checkbox" id="matrix-toggle" checked onchange="onMatrixToggleChange()"> Priority cols
+  </label>
+  <!-- v167: compact card mode — kicks in only when the priority columns are
+       off, giving you a horizontal one-line layout with more info per card. -->
+  <label id="compact-toggle-wrap" style="display:none;align-items:center;gap:5px;font-size:12px;cursor:pointer" title="Compact one-line cards with more info per row. Only available when Priority cols is off.">
+    <input type="checkbox" id="compact-toggle" onchange="renderMain()"> Compact
   </label>
   <!-- v75: Anomaly counters (right-aligned). Always visible, greyed when count is 0. -->
   <div id="anomaly-counters" style="display:flex;gap:5px;margin-left:auto;align-items:center" title="Data quality checks">
@@ -834,6 +841,8 @@ button,select,textarea,input{font-family:inherit}
     <button onclick="setView('myepics')">My Epics</button>
     <button onclick="setView('done')">Done</button>
     <button onclick="setView('prioritise')">Prioritise</button>
+    <!-- v167: focus on a single Epic — same layout as My Tasks but scoped to one parent -->
+    <button onclick="setView('epicfocus')">Epic Focus</button>
     <button onclick="setView('manager')" id="btn-manager">Team</button>
     <button onclick="setView('activity')">Comments</button>
     <button onclick="setView('labels')">Labels</button>
@@ -870,6 +879,29 @@ button,select,textarea,input{font-family:inherit}
       <button onclick="openCreate(document.getElementById('mytasks-person-sel')?.value||currentIam)" class="primary-btn" style="font-size:11px;padding:5px 14px;margin-left:auto">+ Create task</button>
     </div>
     <div class="matrix-wrap"><table class="matrix-table" id="matrix-table"></table></div>
+  </div>
+  <!-- v167: Epic Focus page — pick a single epic and see all its child tasks
+       in the same matrix layout as My Tasks. -->
+  <div id="page-epicfocus" style="display:none;flex-direction:column">
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 15px;background:#F7F8F9;border-bottom:1px solid #E4E6E8;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em">Filter by</span>
+        <select id="epicfocus-user-sel" onchange="onEpicFocusUserChange()" style="padding:4px 8px;border:1px solid #E4E6E8;border-radius:6px;font-size:12px;font-weight:600;color:#125462;background:#fff"></select>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:280px;position:relative">
+        <span style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em">Epic</span>
+        <input id="epicfocus-search" placeholder="Search Epics by key or name…"
+          oninput="onEpicFocusSearch(this.value)"
+          onfocus="onEpicFocusSearch(this.value)"
+          onblur="setTimeout(closeEpicFocusDropdown,200)"
+          autocomplete="off"
+          style="flex:1;padding:5px 10px;border:1px solid #E4E6E8;border-radius:6px;font-size:12px;background:#fff">
+        <div id="epicfocus-results" style="display:none;position:absolute;top:100%;left:60px;right:0;background:#fff;border:1px solid #C9CACC;border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:340px;overflow-y:auto;z-index:50"></div>
+        <span id="epicfocus-selected" style="font-size:11px;font-weight:700;color:#125462"></span>
+      </div>
+      <button id="epicfocus-create-btn" onclick="epicFocusCreateTask()" class="primary-btn" style="font-size:11px;padding:5px 14px" disabled>+ Create task in epic</button>
+    </div>
+    <div class="matrix-wrap"><table class="matrix-table" id="epicfocus-table"></table></div>
   </div>
   <div id="page-manager" style="display:none">
     <div class="manager-wrap" id="manager-wrap"></div>
@@ -1133,12 +1165,15 @@ let priBandCollapsed = {Highest:false, High:false, Medium:false, Low:false, 'No 
 // Prioritise. The legacy `showDoneByView` variable is kept declared (referenced in
 // a few hydration helpers) but the runtime behaviour reads/writes `showDone` only.
 let showDone = true;
+// v167: Epic Focus state — persisted so reload returns to the same epic.
+let epicFocusKey = '';
+let epicFocusUserFilter = '';   // '' = all users; otherwise an assignee name
 let showDoneByView = {mytasks:true, myepics:true, team:true, prioritise:true, manager:true};
 // v156: cancelled is a separate axis from done — hidden by default.
 let showCancelled = false;
 
 /* ══ PERSISTENCE ══ */
-function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,groupProjectAssignment,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed,doneDays,commentReadState,priViewMode,priBandCollapsed,showDone,showDoneByView,showCancelled,sharedTeams:[...sharedTeams],priProjKey}));}catch{}}
+function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,groupProjectAssignment,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed,doneDays,commentReadState,priViewMode,priBandCollapsed,showDone,showDoneByView,showCancelled,epicFocusKey,epicFocusUserFilter,sharedTeams:[...sharedTeams],priProjKey}));}catch{}}
 function loadAll(){try{const d=JSON.parse(localStorage.getItem(STOR)||"{}");if(d.cfg)cfg=d.cfg;if(d.locStat)locStat=d.locStat;if(d.locPri)locPri=d.locPri;if(d.currentIam)currentIam=d.currentIam;if(d.currentProjFilter)currentProjFilter=d.currentProjFilter;
 if(d.currentProjectGroup)currentProjectGroup=d.currentProjectGroup;if(d.currentGroup)currentGroup=d.currentGroup;if(d.teamMembers)teamMembers=d.teamMembers;if(d.adminUsers)adminUsers=d.adminUsers;if(d.groups)groups=d.groups;
 if(d.groupProjectAssignment)groupProjectAssignment=d.groupProjectAssignment;if(d.excludedProjects)excludedProjects=d.excludedProjects;if(d.currentView)currentView=d.currentView;if(d.currentLevel)currentLevel=d.currentLevel;if(d.rowCollapsed)rowCollapsed={...rowCollapsed,...d.rowCollapsed};if(d.swimCollapsed)swimCollapsed={...swimCollapsed,...d.swimCollapsed};
@@ -1159,6 +1194,9 @@ if(typeof d.showDone === 'boolean'){
 showDoneByView = {mytasks:showDone, myepics:showDone, team:showDone, prioritise:showDone, manager:showDone};
 // v156: cancelled flag (separate persistence key)
 if(typeof d.showCancelled === 'boolean') showCancelled = d.showCancelled;
+// v167: Epic Focus selection persistence
+if(typeof d.epicFocusKey === 'string') epicFocusKey = d.epicFocusKey;
+if(typeof d.epicFocusUserFilter === 'string') epicFocusUserFilter = d.epicFocusUserFilter;
 if(Array.isArray(d.sharedTeams)) sharedTeams = new Set(d.sharedTeams);
 if(typeof d.priProjKey === 'string') priProjKey = d.priProjKey;
 }catch{}}
@@ -2382,7 +2420,8 @@ async function onDropMatrix(e,status,priority){
 
 /* ══ INIT & FETCH ══ */
 function showPage(name){
-  ["welcome","loading","error","mytasks","myepics","manager","people","done","prioritise","activity","meetings","labels"].forEach(p=>{
+  // v167: added "epicfocus" to the page list
+  ["welcome","loading","error","mytasks","myepics","manager","people","done","prioritise","activity","meetings","labels","epicfocus"].forEach(p=>{
     const el=document.getElementById("page-"+p);
     if(el) el.style.display="none";
   });
@@ -2901,9 +2940,18 @@ function setView(v){
     sd.style.display = hideOnViews.includes(v) ? 'none' : 'flex';
     if(!hideOnViews.includes(v)) syncGlobalShowDoneCheckbox();
   }
-  // v92: Matrix toggle stays hidden everywhere — see comment on the markup.
-  // (Previously it was shown on My Tasks; the underlying non-matrix code path
-  // had a PO variable bug, and the matrix layout is the only useful one.)
+  // v167: matrix + compact toggles only appear on My Tasks and Epic Focus
+  // (the two views that drive the matrix layout). Compact only enables when
+  // the matrix is OFF.
+  const matWrap = document.getElementById('matrix-toggle-wrap');
+  const cmpWrap = document.getElementById('compact-toggle-wrap');
+  const matrixViews = ['mytasks','epicfocus'];
+  if (matWrap) matWrap.style.display = matrixViews.includes(v) ? 'flex' : 'none';
+  if (cmpWrap){
+    const mat = document.getElementById('matrix-toggle');
+    const matrixOn = mat ? mat.checked !== false : true;
+    cmpWrap.style.display = (matrixViews.includes(v) && !matrixOn) ? 'flex' : 'none';
+  }
   // Shared filter bar Project/Priority/Status: 
   //   - hidden on Activity (no concept of project/status/priority for comments)
   //   - hidden on Prioritise (has its own Project picker + status pills below the tabs)
@@ -2953,6 +3001,7 @@ function renderMain(){
   else if(currentView==="manager"){showPage("manager");renderManager();}
   else if(currentView==="people"){showPage("people");renderPeople();}
   else if(currentView==="prioritise"){showPage("prioritise");populatePriProjects();loadPriBoard();}
+  else if(currentView==="epicfocus"){showPage("epicfocus");renderEpicFocus();}
   else if(currentView==="activity"){showPage("activity");renderActivity();}
   else{showPage("done");renderDone();}
   updateStats();
@@ -3012,7 +3061,237 @@ function renderMyTasks(){
   });
   html+="</tbody>";table.innerHTML=html;
 }
-function toggleRowCollapse(s){rowCollapsed[s]=!rowCollapsed[s];saveAll();renderMyTasks();}
+function toggleRowCollapse(s){rowCollapsed[s]=!rowCollapsed[s];saveAll();renderMain();}
+
+// v167: handler for the Priority cols toggle. Updates the compact-toggle's
+// visibility (compact only makes sense when matrix is OFF) and re-renders.
+function onMatrixToggleChange(){
+  const mat = document.getElementById('matrix-toggle');
+  const cmpWrap = document.getElementById('compact-toggle-wrap');
+  if (cmpWrap){
+    const matrixViews = ['mytasks','epicfocus'];
+    const matrixOn = mat ? mat.checked !== false : true;
+    cmpWrap.style.display = (matrixViews.includes(currentView) && !matrixOn) ? 'flex' : 'none';
+  }
+  renderMain();
+}
+
+/* ══ EPIC FOCUS VIEW (v167) ══════════════════════════════════════════
+   Pick a single Epic (or Milestone) and see all its child tasks in the
+   same matrix layout as My Tasks. Optional user filter narrows the epic
+   picker by who's assigned to issues in the epic. The Priority cols
+   toggle shares state with My Tasks; when off, a Compact toggle gives
+   one-line cards with more info per row (priority, assignee, updated,
+   comment count).                                                       */
+function _isEpicLevelType(t){ return t === 'Epic' || t === 'Milestone'; }
+
+function _epicFocusAvailableEpics(){
+  // Epics & Milestones in the loaded set. Optional user filter keeps only
+  // epics that have at least one child task assigned to the given user.
+  const epics = (allIssues || []).filter(i => _isEpicLevelType(i.type));
+  if (!epicFocusUserFilter) return epics;
+  const ok = new Set();
+  for (const i of allIssues){
+    if (i.assignee === epicFocusUserFilter && i.parent_key){
+      ok.add(i.parent_key);
+    }
+  }
+  return epics.filter(e => ok.has(e.key));
+}
+
+function populateEpicFocusUserSel(){
+  const sel = document.getElementById('epicfocus-user-sel');
+  if (!sel) return;
+  const opts = ['<option value="">All users</option>'];
+  for (const m of (teamMembers || [])){
+    const selAttr = (m === epicFocusUserFilter) ? ' selected' : '';
+    opts.push('<option value="' + _escHtml(m) + '"' + selAttr + '>' + _escHtml(m) + '</option>');
+  }
+  sel.innerHTML = opts.join('');
+}
+function onEpicFocusUserChange(){
+  const sel = document.getElementById('epicfocus-user-sel');
+  epicFocusUserFilter = sel ? sel.value : '';
+  saveAll();
+  // Surface the change in the search dropdown if it's open
+  const inp = document.getElementById('epicfocus-search');
+  if (inp) onEpicFocusSearch(inp.value || '');
+  renderEpicFocus();
+}
+function onEpicFocusSearch(q){
+  const dd = document.getElementById('epicfocus-results');
+  if (!dd) return;
+  const epics = _epicFocusAvailableEpics();
+  const qq = (q || '').trim().toLowerCase();
+  const qNorm = qq.replace(/[^a-z0-9]/g, '');
+  const tokens = qq.split(/\s+/).filter(t => t.length > 0);
+  let scored = [];
+  for (const e of epics){
+    const key = e.key.toLowerCase();
+    const keyNorm = key.replace(/[^a-z0-9]/g, '');
+    const sum = (e.summary || '').toLowerCase();
+    let score = 0;
+    if (!qq){ score = 1; }
+    else {
+      if (key === qq) score += 500;
+      else if (keyNorm === qNorm) score += 400;
+      else if (key.startsWith(qq)) score += 200;
+      else if (keyNorm.startsWith(qNorm)) score += 150;
+      else if (key.includes(qq)) score += 80;
+      else if (keyNorm.includes(qNorm)) score += 60;
+      for (const t of tokens) if (t.length >= 2 && sum.includes(t)) score += 5;
+    }
+    if (score > 0) scored.push({ e, score });
+  }
+  scored.sort((a,b) => b.score - a.score);
+  const top = scored.slice(0, 50);
+  if (!top.length){
+    dd.innerHTML = '<div style="padding:8px 12px;font-size:12px;color:#9EA0A4;font-style:italic">No matching Epic / Milestone.</div>';
+    dd.style.display = 'block';
+    return;
+  }
+  dd.innerHTML = top.map(({e}) => {
+    const tc = (TC[e.type] || TC.Task);
+    const childCount = allIssues.filter(i => i.parent_key === e.key).length;
+    return `<div onmousedown="selectEpicFocus('${e.key.replace(/'/g,"\\'")}')" style="padding:7px 12px;cursor:pointer;border-bottom:1px solid #F4F4F5;font-size:12px;display:flex;align-items:center;gap:8px"
+      onmouseover="this.style.background='#F7F8F9'" onmouseout="this.style.background='transparent'">
+      <span style="font-size:9px;font-weight:700;background:${tc.bg};color:${tc.c};padding:1px 6px;border-radius:8px;text-transform:uppercase">${e.type}</span>
+      <span style="font-weight:700;color:#257AA5;font-family:monospace">${e.key}</span>
+      <span style="flex:1;color:#292E37;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_escHtml(e.summary||'')}</span>
+      <span style="font-size:10px;color:#9EA0A4">${childCount} task${childCount===1?'':'s'}</span>
+    </div>`;
+  }).join('');
+  dd.style.display = 'block';
+}
+function closeEpicFocusDropdown(){
+  const dd = document.getElementById('epicfocus-results');
+  if (dd) dd.style.display = 'none';
+}
+function selectEpicFocus(key){
+  epicFocusKey = key;
+  saveAll();
+  closeEpicFocusDropdown();
+  const inp = document.getElementById('epicfocus-search');
+  if (inp) inp.value = '';
+  renderEpicFocus();
+}
+function epicFocusCreateTask(){
+  if (!epicFocusKey) return;
+  const epic = (allIssues || []).find(i => i.key === epicFocusKey);
+  if (typeof quickAddTask === 'function'){
+    quickAddTask(epicFocusKey, epic ? (epic.summary||'') : '', epic ? (epic.project||'') : '');
+  }
+}
+
+function renderEpicFocus(){
+  populateEpicFocusUserSel();
+  const table = document.getElementById('epicfocus-table');
+  if (!table) return;
+
+  const createBtn = document.getElementById('epicfocus-create-btn');
+  const selEl = document.getElementById('epicfocus-selected');
+  if (selEl) selEl.textContent = '';
+
+  if (!epicFocusKey){
+    table.innerHTML = '<thead><tr><th></th></tr></thead><tbody><tr><td>' +
+      '<div style="padding:30px;text-align:center;color:#9EA0A4">' +
+      '<div style="font-size:14px;font-weight:600;color:#5D7987;margin-bottom:6px">Pick an Epic to focus</div>' +
+      '<div style="font-size:12px">Type in the search box above to find an Epic or Milestone. Use the user filter to narrow the list.</div>' +
+      '</div></td></tr></tbody>';
+    if (createBtn) createBtn.disabled = true;
+    return;
+  }
+  const epic = (allIssues || []).find(i => i.key === epicFocusKey);
+  if (!epic){
+    table.innerHTML = '<thead><tr><th></th></tr></thead><tbody><tr><td>' +
+      '<div style="padding:30px;text-align:center;color:#9EA0A4">' +
+      '<div style="font-size:13px;color:#D6202B;margin-bottom:6px">Selected epic ' + _escHtml(epicFocusKey) + ' is not in the current data.</div>' +
+      '<div style="font-size:11px">It might be outside your active project group. Pick another, or open Settings → Projects to widen scope.</div>' +
+      '</div></td></tr></tbody>';
+    if (createBtn) createBtn.disabled = false;
+    return;
+  }
+
+  // Header card: selected Epic with summary + child count.
+  if (selEl) selEl.textContent = epicFocusKey + ' — ' + (epic.summary || '');
+  if (createBtn) createBtn.disabled = false;
+
+  // Children of this epic (Tasks/Stories/Bugs whose parent_key matches).
+  // Respect the global Show Done / Show Cancelled flags.
+  let issues = (allIssues || []).filter(i => i.parent_key === epicFocusKey);
+  // Don't include hierarchy-level descendants (epics under initiatives etc.)
+  const hierTypes = ['Epic','Milestone','Initiative','Legend'];
+  issues = issues.filter(i => !hierTypes.includes(i.type));
+  if (!showDone) issues = issues.filter(i => normStatus(i.status) !== 'Done');
+  if (!showCancelled) issues = issues.filter(i => !isCancelledStatus(i.status));
+
+  const useMatrix = document.getElementById('matrix-toggle')?.checked !== false;
+  const compact = !useMatrix && document.getElementById('compact-toggle')?.checked === true;
+
+  const ns = i => normStatus(i.status);
+  const showActive = !!currentIam;
+  let html = '<thead><tr><th style="min-width:110px;text-align:left;position:sticky;left:0;z-index:3">Status</th>' +
+    (useMatrix ? PRI_COLS.map(p => '<th class="pri-' + p + '">' + p + '</th>').join('') : '<th>Tasks</th>') +
+    '</tr></thead><tbody>';
+  STATUS_ROWS.forEach(rowStatus => {
+    const rowIssues = issues.filter(i => ns(i) === rowStatus);
+    const collapsed = rowCollapsed[rowStatus];
+    const sc = SC[rowStatus] || SC.Backlog;
+    html += `<tr class="row-hdr" onclick="toggleRowCollapse('${rowStatus}')"><td colspan="${useMatrix?5:2}" style="position:sticky;left:0;background:#F7F8F9">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:13px;color:#9EA0A4;transition:.15s;display:inline-block;transform:${collapsed?'none':'rotate(90deg)'}">›</span>
+        <span style="color:${sc.c};font-weight:700">${rowStatus}</span>
+        <span class="badge" style="background:${sc.bg};color:${sc.c}">${rowIssues.length}</span>
+        ${rowStatus==='Done'?'<span style="font-size:10px;color:#9EA0A4">(last '+doneDays+' days)</span>':''}
+      </div>
+    </td></tr>`;
+    if (!collapsed){
+      html += '<tr>';
+      html += '<td class="matrix-cell" style="width:110px;position:sticky;left:0;background:#fff"></td>';
+      if (useMatrix){
+        PRI_COLS.forEach(pri => {
+          const cell = rowIssues.filter(i => i.priority === pri).sort((a,b) => a.summary.localeCompare(b.summary));
+          html += `<td class="matrix-cell" ondragover="onDragOver(event,'${rowStatus}')" ondragleave="onDragLeave(event)" ondrop="onDropMatrix(event,'${rowStatus}','${pri}')"><div class="matrix-cell-inner lane-drop-zone">
+            ${cell.length ? cell.map(i => cardHtml(i, showActive, true, true)).join('') : '<div style="font-size:11px;color:#E4E6E8;padding:4px">—</div>'}
+          </div></td>`;
+        });
+      } else {
+        const sorted = rowIssues.sort((a,b) => (PRI_ORD[a.priority]||99) - (PRI_ORD[b.priority]||99));
+        const renderer = compact ? cardHtmlCompact : (i) => cardHtml(i, showActive, true, true);
+        html += `<td class="matrix-cell" colspan="1"><div class="matrix-cell-inner lane-drop-zone" ondragover="onDragOver(event,'${rowStatus}')" ondragleave="onDragLeave(event)" ondrop="onDrop(event,'${rowStatus}')">
+          ${sorted.length ? sorted.map(i => renderer(i, showActive)).join('') : '<div style="font-size:11px;color:#E4E6E8;padding:4px">—</div>'}
+        </div></td>`;
+      }
+      html += '</tr>';
+    }
+  });
+  html += '</tbody>';
+  table.innerHTML = html;
+}
+
+// v167: compact one-line card layout — used when the Priority cols toggle
+// is off and Compact is on. Shows summary + priority + assignee + updated +
+// comment count in a single horizontal row, much shorter than the regular
+// card. Drag-and-drop works the same way as the standard card.
+function cardHtmlCompact(issue){
+  const isActive = activeFlags[issue.assignee] === issue.key;
+  const isDone = normStatus(issue.status) === 'Done';
+  const lc = isDone ? '#2D7A2D' : (TC[issue.type]||TC.Task).c;
+  const pc = PC[issue.priority] || PC.Medium;
+  const updated = issue.updated || '';
+  const cc = issue.commentCount || 0;
+  const sumStyle = isDone ? 'text-decoration:line-through;color:#2D7A2D' : 'color:#292E37';
+  return `<div class="card compact ${isActive?'is-active':''} ${isDone?'is-done':''}"
+    style="border-left:3px solid ${lc};display:flex;align-items:center;gap:8px;padding:6px 10px;margin-bottom:4px;background:#fff;border-radius:6px;${isDone?'opacity:.8;background:#F0FAEC':''}"
+    onclick="openPane('${issue.key}')" draggable="true" ondragstart="onDragStart(event,'${issue.key}')" ondragend="onDragEnd(event)">
+    <span style="font-size:11px;font-weight:700;color:#257AA5;font-family:monospace;min-width:80px;flex-shrink:0">${issue.key}</span>
+    <span style="flex:1;font-size:12px;${sumStyle};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${issue.summary||''}</span>
+    <span class="badge" style="background:${pc.bg};color:${pc.c};font-size:10px;flex-shrink:0"><span class="pri-dot" style="background:${pc.d}"></span>${issue.priority||'Medium'}</span>
+    ${issue.assignee && issue.assignee !== 'Unassigned' ? `<span style="font-size:11px;color:#5D7987;flex-shrink:0;display:inline-flex;align-items:center;gap:4px">${ava(issue.assignee, 18)} ${_escHtml(issue.assignee)}</span>` : '<span style="font-size:11px;color:#C9CACC;font-style:italic;flex-shrink:0">Unassigned</span>'}
+    ${updated ? `<span style="font-size:10px;color:#9EA0A4;flex-shrink:0" title="Last updated">${updated}</span>` : ''}
+    ${cc ? `<span style="font-size:10px;color:#9EA0A4;flex-shrink:0" title="${cc} comments">💬${cc}</span>` : ''}
+  </div>`;
+}
 
 /* ══ MANAGER VIEW — horizontal swimlanes ══ */
 // v156: Swim lanes are now built dynamically from whichever statuses
