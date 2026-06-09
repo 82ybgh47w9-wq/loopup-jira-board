@@ -745,7 +745,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v176</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v176b</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -996,16 +996,18 @@ button,select,textarea,input{font-family:inherit}
     <div id="pri-controls" style="display:flex;align-items:center;gap:8px;padding:8px 15px;background:#fff;border-bottom:1px solid #E4E6E8;flex-shrink:0;flex-wrap:wrap">
       <!-- v176: searchable project picker (replaces the basic select). Hidden
            input id=pri-proj keeps the existing readers happy (~6 sites that
-           do document.getElementById('pri-proj').value). -->
-      <div style="position:relative;display:inline-block;min-width:240px">
+           do document.getElementById('pri-proj').value). Wider field + × clear. -->
+      <div style="position:relative;display:inline-block;min-width:380px">
         <input type="hidden" id="pri-proj">
         <input id="pri-proj-search" class="proj-select"
           placeholder="Search projects by name or key…"
           autocomplete="off"
           oninput="priProjSearch(this.value)"
-          onfocus="priProjSearch(this.value)"
-          onblur="setTimeout(priProjCloseDropdown, 180)"
-          style="width:240px;padding:4px 10px;border:1px solid #C9CACC;border-radius:6px;font-size:12px;background:#fff">
+          onfocus="priProjFocus(this)"
+          onblur="priProjBlur(this)"
+          style="width:380px;padding:4px 30px 4px 10px;border:1px solid #C9CACC;border-radius:6px;font-size:12px;background:#fff;text-overflow:ellipsis">
+        <button id="pri-proj-clear" type="button" onmousedown="event.preventDefault();priProjClear()" title="Clear selection"
+          style="display:none;position:absolute;right:6px;top:50%;transform:translateY(-50%);width:18px;height:18px;border:none;background:#E4E6E8;color:#73777C;border-radius:50%;font-size:11px;line-height:1;cursor:pointer;padding:0;font-weight:700">×</button>
         <div id="pri-proj-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #C9CACC;border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:340px;overflow-y:auto;z-index:60;margin-top:2px"></div>
       </div>
       <div id="pri-status-filter-wrap" style="display:flex;gap:3px;flex-wrap:wrap">
@@ -8541,6 +8543,7 @@ async function populatePriProjects() {
   // search input shows the selected project's label ("MKT — Marketing").
   const hidden = document.getElementById('pri-proj');
   const search = document.getElementById('pri-proj-search');
+  const clearBtn = document.getElementById('pri-proj-clear');
   if (!hidden) return;
   // Restoration priority: existing hidden value > saved priProjKey > top-bar filter.
   const chosen = hidden.value || priProjKey || currentProjFilter || '';
@@ -8553,6 +8556,7 @@ async function populatePriProjects() {
       search.value = '';
     }
   }
+  if (clearBtn) clearBtn.style.display = chosen ? 'flex' : 'none';
 }
 
 // v176: Searchable project picker. Filters by ANY word in the project key
@@ -8614,12 +8618,15 @@ function priProjPick(key){
   const hidden = document.getElementById('pri-proj');
   const search = document.getElementById('pri-proj-search');
   const dd = document.getElementById('pri-proj-results');
+  const clearBtn = document.getElementById('pri-proj-clear');
   if (hidden) hidden.value = key;
   priProjKey = key;
   if (search){
     const p = (typeof allProjects !== 'undefined') ? allProjects.find(x => x.key === key) : null;
     search.value = key + (p && p.name ? ' — ' + p.name : '');
+    search.dataset.picked = '1'; // tell the blur handler not to restore
   }
+  if (clearBtn) clearBtn.style.display = 'flex';
   if (dd) dd.style.display = 'none';
   saveAll();
   try { loadPriBoard(true); } catch(e){ appLogMsg('warn','pri','loadPriBoard failed: ' + (e.message || e)); }
@@ -8627,6 +8634,46 @@ function priProjPick(key){
 function priProjCloseDropdown(){
   const dd = document.getElementById('pri-proj-results');
   if (dd) dd.style.display = 'none';
+}
+// v176b: on focus, clear the visible label so the dropdown shows ALL projects
+// (otherwise priProjSearch uses the existing "KEY — Name" string as a query and
+// returns "No matching projects"). Stash the previous label so we can restore it
+// on blur if the user clicks away without picking anything.
+function priProjFocus(el){
+  if (!el) return;
+  el.dataset.prev = el.value || '';
+  el.dataset.picked = '';
+  el.value = '';
+  priProjSearch('');
+  // tiny delay so the click on the × button (which fires before blur) wins
+}
+function priProjBlur(el){
+  // Close dropdown after a short delay so a click on a result fires first.
+  setTimeout(function(){
+    priProjCloseDropdown();
+    if (!el) return;
+    // If the user picked something, priProjPick already set the value.
+    if (el.dataset.picked === '1'){ el.dataset.picked = ''; return; }
+    // Otherwise restore the previously displayed label so the field doesn't go blank.
+    if (el.dataset.prev){ el.value = el.dataset.prev; }
+  }, 180);
+}
+function priProjClear(){
+  const hidden = document.getElementById('pri-proj');
+  const search = document.getElementById('pri-proj-search');
+  const clearBtn = document.getElementById('pri-proj-clear');
+  if (hidden) hidden.value = '';
+  priProjKey = '';
+  if (search){ search.value = ''; search.dataset.prev = ''; search.dataset.picked = ''; }
+  if (clearBtn) clearBtn.style.display = 'none';
+  saveAll();
+  // Re-open the picker so the user can immediately type/choose the next project.
+  if (search){ search.focus(); priProjSearch(''); }
+  // Clear the board view too — without a project the Prioritise board is empty.
+  try {
+    const board = document.getElementById('pri-board');
+    if (board) board.innerHTML = '<div style="padding:24px;color:#9EA0A4;font-size:13px;text-align:center">Pick a project to load its board.</div>';
+  } catch(e){}
 }
 
 async function loadPriBoard(force) {
