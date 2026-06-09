@@ -421,6 +421,10 @@ button,select,textarea,input{font-family:inherit}
 .card.compact .cc-date{width:85px;flex-shrink:0;font-size:10px;color:#9EA0A4;text-align:right}
 .card.compact.is-done{opacity:.85;background:#F0FAEC}
 .card.compact.is-done .cc-title{text-decoration:line-through;color:#2D7A2D}
+/* v170: drop indicators for in-list reordering on the compact card. */
+.card.compact.drag-over-above{box-shadow:inset 0 3px 0 #2E99CE}
+.card.compact.drag-over-below{box-shadow:inset 0 -3px 0 #2E99CE}
+.card.compact.dragging{opacity:.4}
 .lbl-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid #E4E6E8;background:#fff;border-radius:8px;margin-bottom:6px;cursor:grab;transition:.12s}
 .lbl-row:hover{border-color:#C9CACC;box-shadow:0 1px 3px rgba(0,0,0,.06)}
 .lbl-row.dragging{opacity:.4;cursor:grabbing}
@@ -730,7 +734,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v169</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v170</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -2363,6 +2367,113 @@ function onDragEnd(e){
 }
 function onDragOver(e,status){e.preventDefault();e.currentTarget.classList.add("drag-over");}
 function onDragLeave(e){e.currentTarget.classList.remove("drag-over");}
+
+// v170: in-list reordering for compact-card views (My Tasks compact, Epic
+// Focus compact). When you drop a card onto ANOTHER card within the same
+// cell, we reorder them locally and persist the new order in localStorage.
+// Cross-status drops still bubble up to the cell handler (onDrop), so the
+// status change continues to work.
+const LOCAL_ORDER_KEY = 'loopup-task-order';
+function _loadAllLocalOrders(){
+  try { const s = localStorage.getItem(LOCAL_ORDER_KEY); return s ? JSON.parse(s) : {}; }
+  catch { return {}; }
+}
+function _saveAllLocalOrders(map){
+  try { localStorage.setItem(LOCAL_ORDER_KEY, JSON.stringify(map)); } catch {}
+}
+function localOrderKey(scope, status){ return scope + '|' + status; }
+function getLocalOrder(scope, status){
+  const all = _loadAllLocalOrders();
+  return all[localOrderKey(scope, status)] || null;
+}
+function setLocalOrder(scope, status, keys){
+  const all = _loadAllLocalOrders();
+  all[localOrderKey(scope, status)] = keys;
+  _saveAllLocalOrders(all);
+}
+// Apply a local order to an array of issues. Items present in the saved
+// order come first (in their saved positions); new/unranked items fall to
+// the end in their original input order.
+function applyLocalOrder(issues, scope, status){
+  const order = getLocalOrder(scope, status);
+  if (!order || !order.length) return issues;
+  const byKey = new Map(issues.map(i => [i.key, i]));
+  const ordered = [];
+  const seen = new Set();
+  for (const k of order){
+    if (byKey.has(k)){ ordered.push(byKey.get(k)); seen.add(k); }
+  }
+  for (const i of issues){
+    if (!seen.has(i.key)) ordered.push(i);
+  }
+  return ordered;
+}
+// Card-level drag handlers — fire BEFORE the cell handler thanks to event
+// bubbling, but only act when dropping onto a card in the SAME status cell.
+// Cross-status drops are handled by the cell's onDrop (existing behaviour).
+function onCompactCardDragOver(e){
+  e.preventDefault();
+  e.stopPropagation();
+  const card = e.currentTarget;
+  if (!card) return;
+  const rect = card.getBoundingClientRect();
+  const above = e.clientY < rect.top + rect.height/2;
+  document.querySelectorAll('.card.compact.drag-over-above,.card.compact.drag-over-below').forEach(c => c.classList.remove('drag-over-above','drag-over-below'));
+  card.classList.add(above ? 'drag-over-above' : 'drag-over-below');
+}
+function onCompactCardDragLeave(e){
+  if (e.currentTarget && e.currentTarget.classList){
+    e.currentTarget.classList.remove('drag-over-above','drag-over-below');
+  }
+}
+function onCompactCardDrop(e, targetKey, scope, status){
+  e.preventDefault();
+  e.stopPropagation();
+  const card = e.currentTarget;
+  if (card) card.classList.remove('drag-over-above','drag-over-below');
+  const sourceKey = dragKey || (e.dataTransfer && e.dataTransfer.getData('text/plain')) || window._dragKey;
+  if (!sourceKey || sourceKey === targetKey) return;
+
+  const src = (allIssues || []).find(i => i.key === sourceKey);
+  if (!src) return;
+  const srcStatus = normStatus(src.status);
+
+  // Cross-status drop → defer to the existing onDrop flow (status change).
+  if (srcStatus !== status){
+    locStat[sourceKey] = status;
+    saveAll(); updateStats(); renderMain();
+    transitionIssue(sourceKey, status);
+    setTimeout(() => doFetch(true), 1500);
+    return;
+  }
+
+  // Same-status drop → reorder locally.
+  const rect = card.getBoundingClientRect();
+  const insertBefore = e.clientY < rect.top + rect.height/2;
+
+  // Read the current cell's card keys from the DOM (preserves whatever
+  // order is on-screen, including any prior local ordering).
+  const cellEl = card.parentElement;
+  const cardKeys = cellEl ? [...cellEl.querySelectorAll('.card.compact')]
+    .map(c => c.getAttribute('data-key')).filter(Boolean) : [];
+  if (!cardKeys.length) return;
+  // Remove source from current position, insert before/after target.
+  const out = cardKeys.filter(k => k !== sourceKey);
+  const idx = out.indexOf(targetKey);
+  if (idx < 0){ return; }
+  out.splice(insertBefore ? idx : idx + 1, 0, sourceKey);
+  setLocalOrder(scope, status, out);
+  renderMain();
+}
+// Helper: figure out which scope a given view is in for local-order storage.
+function localOrderScope(){
+  if (currentView === 'epicfocus') return 'epic:' + (epicFocusKey || '');
+  if (currentView === 'mytasks'){
+    const p = (typeof myTasksViewPerson !== 'undefined' && myTasksViewPerson) || currentIam || '';
+    return 'my:' + p;
+  }
+  return 'global';
+}
 async function onDrop(e,status){
   e.preventDefault();e.currentTarget.classList.remove("drag-over");
   if(!dragKey){dragKey=e.dataTransfer.getData("text/plain")||window._dragKey;}
@@ -3085,7 +3196,9 @@ function renderMyTasks(){
       } else {
         // v168: respect the Compact toggle here too, so My Tasks matches Epic Focus
         const compact = document.getElementById('compact-toggle')?.checked === true;
-        const sorted=rowIssues.sort((a,b)=>(PRI_ORD[a.priority]||99)-(PRI_ORD[b.priority]||99));
+        let sorted = rowIssues.slice().sort((a,b)=>(PRI_ORD[a.priority]||99)-(PRI_ORD[b.priority]||99));
+        // v170: when in compact mode, apply any user-defined local order
+        if (compact) sorted = applyLocalOrder(sorted, localOrderScope(), rowStatus);
         const renderer = compact ? cardHtmlCompact : (i)=>cardHtml(i,showActive,true,true);
         html+=`<td class="matrix-cell" colspan="1"><div class="matrix-cell-inner lane-drop-zone" ondragover="onDragOver(event,'${rowStatus}')" ondragleave="onDragLeave(event)" ondrop="onDrop(event,'${rowStatus}')">
           ${sorted.length?sorted.map(renderer).join(""):'<div style="font-size:11px;color:#E4E6E8;padding:4px">—</div>'}
@@ -3291,7 +3404,9 @@ function renderEpicFocus(){
           </div></td>`;
         });
       } else {
-        const sorted = rowIssues.sort((a,b) => (PRI_ORD[a.priority]||99) - (PRI_ORD[b.priority]||99));
+        let sorted = rowIssues.slice().sort((a,b) => (PRI_ORD[a.priority]||99) - (PRI_ORD[b.priority]||99));
+        // v170: respect any user-defined local order for this scope+status.
+        if (compact) sorted = applyLocalOrder(sorted, localOrderScope(), rowStatus);
         const renderer = compact ? cardHtmlCompact : (i) => cardHtml(i, showActive, true, true);
         html += `<td class="matrix-cell" colspan="1"><div class="matrix-cell-inner lane-drop-zone" ondragover="onDragOver(event,'${rowStatus}')" ondragleave="onDragLeave(event)" ondrop="onDrop(event,'${rowStatus}')">
           ${sorted.length ? sorted.map(i => renderer(i, showActive)).join('') : '<div style="font-size:11px;color:#E4E6E8;padding:4px">—</div>'}
@@ -3312,6 +3427,8 @@ function renderEpicFocus(){
 // Icons (comments/attachments/subtasks) · Labels · Priority · Assignee ·
 // Updated date. Widths defined in CSS (.card.compact .cc-*) so cards line
 // up vertically across rows regardless of content length.
+// v170: drop-aware — onCompactCardDrop handles reordering within the same
+// status cell; cross-status drops bubble up to the cell's onDrop handler.
 function cardHtmlCompact(issue){
   const isActive = activeFlags[issue.assignee] === issue.key;
   const isDone = normStatus(issue.status) === 'Done';
@@ -3319,7 +3436,6 @@ function cardHtmlCompact(issue){
   const pc = PC[issue.priority] || PC.Medium;
   const updated = issue.updated || '';
   const labels = Array.isArray(issue.labels) ? issue.labels : [];
-  // Show up to 2 labels inline; if more, append "+N" chip.
   const visLabels = labels.slice(0, 2);
   const extraLabels = labels.length - visLabels.length;
   const labelsHtml = labels.length
@@ -3328,9 +3444,21 @@ function cardHtmlCompact(issue){
   const assigneeHtml = (issue.assignee && issue.assignee !== 'Unassigned')
     ? `${ava(issue.assignee, 18)}<span class="nm">${_escHtml(issue.assignee)}</span>`
     : '<span style="color:#C9CACC;font-style:italic">Unassigned</span>';
+  const scope = localOrderScope();
+  const status = normStatus(issue.status);
+  const safeKey = (issue.key || '').replace(/'/g,"\\'");
+  const safeScope = scope.replace(/'/g,"\\'");
+  const safeStatus = status.replace(/'/g,"\\'");
   return `<div class="card compact ${isActive?'is-active':''} ${isDone?'is-done':''}"
     style="border-left:3px solid ${lc}"
-    onclick="openPane('${issue.key}')" draggable="true" ondragstart="onDragStart(event,'${issue.key}')" ondragend="onDragEnd(event)">
+    data-key="${issue.key}"
+    onclick="openPane('${safeKey}')"
+    draggable="true"
+    ondragstart="onDragStart(event,'${safeKey}')"
+    ondragend="onDragEnd(event)"
+    ondragover="onCompactCardDragOver(event)"
+    ondragleave="onCompactCardDragLeave(event)"
+    ondrop="onCompactCardDrop(event,'${safeKey}','${safeScope}','${safeStatus}')">
     <span class="cc-key">${issue.key}</span>
     <span class="cc-title" title="${_escHtml(issue.summary||'')}">${issue.summary||''}</span>
     <span class="cc-icons">${issueIconRow(issue)}</span>
