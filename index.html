@@ -261,6 +261,8 @@ button,select,textarea,input{font-family:inherit}
 .pri-card.unassigned-card{border-left-color:#F0A500}
 .pri-drop-zone{min-height:50px;border-radius:6px;transition:.15s}
 .pri-drop-zone.drag-over{background:#E0F0F8;border:2px dashed #2E99CE}
+/* v178: when an epic body is empty, show a friendlier dashed target so users know they can drop a task to reparent it */
+.pri-drop-zone.drag-over .pri-epty-hint{border-color:#2E99CE;color:#125462;background:#F3F9FC}
 .pri-rank-num{font-size:9px;font-weight:700;color:#C9CACC;margin-right:4px;min-width:16px}
 /* v140: visual when dragging an epic over a different priority band */
 .pri-band-droppable.drag-over-band{outline:3px dashed #2E99CE;outline-offset:-3px;background:#E0F0F8}
@@ -752,7 +754,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v177</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v178</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -8299,6 +8301,42 @@ function priCardHtml(t, rank) {
   </div>`;
 }
 
+// v178: toast helper — shared by priDrop, priCardDropEl, and the epic-card drop
+// handlers. Surfaces both success ("moved") and failure (Jira refused), since
+// the previous `.catch(()=>{})` was swallowing errors silently.
+function priToast(msg, kind){
+  const bg = kind === 'err' ? '#D6202B' : (kind === 'warn' ? '#E08000' : '#5E8E38');
+  const t = document.createElement('div');
+  t.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:'+bg+';color:#fff;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;z-index:9999;max-width:80vw;text-align:center;box-shadow:0 4px 12px rgba(0,0,0,0.25)';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), kind === 'err' ? 5000 : 2500);
+}
+
+// v178: shared reparent helper — pushes the parent change to Jira and toasts
+// success or failure. Used by both drop paths (drop on column body, drop on
+// existing card). Pre-flight rejects cross-project moves (Jira blocks these
+// at the API level for company-managed projects).
+async function priReparentInJira(taskKey, newEpicKey, fromEpicKey){
+  try {
+    const taskProj = taskKey.split('-')[0];
+    const epicProj = newEpicKey.split('-')[0];
+    if (taskProj !== epicProj){
+      priToast('⚠ Can\'t move ' + taskKey + ' to ' + newEpicKey + ' — different projects', 'err');
+      appLogMsg('warn','pri-reparent','Cross-project move blocked: ' + taskKey + ' (' + taskProj + ') → ' + newEpicKey + ' (' + epicProj + ')');
+      return false;
+    }
+    await jiraPut('/rest/api/3/issue/' + taskKey, { fields: { parent: { key: newEpicKey } } });
+    priToast('↗ ' + taskKey + ' reparented to ' + newEpicKey);
+    appLogMsg('info','pri-reparent','Reparented ' + taskKey + ' from ' + (fromEpicKey||'(none)') + ' to ' + newEpicKey);
+    return true;
+  } catch(err){
+    priToast('✗ Couldn\'t reparent ' + taskKey + ': ' + (err.message || err), 'err');
+    appLogMsg('warn','pri-reparent','Jira refused reparent of ' + taskKey + ' → ' + newEpicKey + ': ' + (err.message || err));
+    return false;
+  }
+}
+
 async function priDrop(e, epicKey) {
   // v140: epic-drag uses the band-level handler; bail out here so we
   // don't accidentally treat it as a task drop
@@ -8321,15 +8359,20 @@ async function priDrop(e, epicKey) {
   const [moved] = activeArr3.splice(taskIdx, 1);
 
   if(epicKey !== '__none__' && epicKey !== priDragEpic) {
+    const sourceEpic = priDragEpic;
+    // Resolve target summary across BOTH priEpics (Projects tab) and _myEpics (My Epics tab).
+    const tgtEpicObj = priEpics.find(x=>x.key===epicKey) || (window._myEpics||[]).find(x=>x.key===epicKey);
     moved.parent_key = epicKey;
-    moved.parent_summary = priEpics.find(x=>x.key===epicKey)?.summary||'';
-    jiraPut('/rest/api/3/issue/'+priDragKey, {fields:{parent:{key:epicKey}}}).then(r=>{
-      const t=document.createElement('div');
-      t.style.cssText='position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#5E8E38;color:#fff;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;z-index:9999';
-      t.textContent='↗ Task moved to '+epicKey+' in Jira';
-      document.body.appendChild(t);
-      setTimeout(()=>t.remove(),2500);
-    }).catch(()=>{});
+    moved.parent_summary = tgtEpicObj?.summary || moved.parent_summary || '';
+    // v178: surface success/failure via toast; revert local change on failure.
+    priReparentInJira(priDragKey, epicKey, sourceEpic).then(ok => {
+      if (!ok){
+        moved.parent_key = sourceEpic === '__none__' ? null : sourceEpic;
+        moved.parent_summary = (priEpics.find(x=>x.key===sourceEpic) || (window._myEpics||[]).find(x=>x.key===sourceEpic))?.summary || '';
+        if (currentView === 'myepics') renderMyEpicsBoard();
+        else renderPriBoard();
+      }
+    });
   }
 
   const activeArr4 = currentView === 'myepics' ? myEpicsTasks : priIssues;
@@ -8541,7 +8584,7 @@ function renderMyEpicsBoard() {
         ondragover="priDragOver(event,'${epic.key}')" ondragleave="priDragLeave(event)" ondrop="priDrop(event,'${epic.key}')">
         ${tasks.length
           ? tasks.map((t,idx)=>priCardHtml(t,idx+1)).join('')
-          : '<div style="font-size:12px;color:#C9CACC;padding:8px;font-style:italic">No tasks</div>'}
+          : '<div class="pri-epty-hint" style="font-size:11px;color:#C9CACC;padding:16px 8px;font-style:italic;text-align:center;border:1px dashed transparent;border-radius:6px;min-height:48px;display:flex;align-items:center;justify-content:center">No tasks — drop a task here to reparent</div>'}
       </div>`;
     el.appendChild(col);
   });
@@ -8887,7 +8930,9 @@ function renderPriBoard() {
       </div>
       <div class="pri-epic-body pri-drop-zone" data-epic="${epic.key}"
         ondragover="priDragOver(event,'${epic.key}')" ondragleave="priDragLeave(event)" ondrop="priDrop(event,'${epic.key}')">
-        ${epicTasks.map((t,idx) => priCardHtml(t, idx+1)).join('')}
+        ${epicTasks.length
+          ? epicTasks.map((t,idx) => priCardHtml(t, idx+1)).join('')
+          : '<div class="pri-epty-hint" style="font-size:11px;color:#C9CACC;padding:16px 8px;font-style:italic;text-align:center;border:1px dashed transparent;border-radius:6px;min-height:48px;display:flex;align-items:center;justify-content:center">No tasks — drop a task here to reparent</div>'}
       </div>`;
     board.appendChild(col);
   });
@@ -8940,15 +8985,27 @@ function priCardDropEl(e, el) {
 
   // Move to different epic if needed
   if(priDragEpic !== targetEpic && targetEpic !== '__none__') {
+    const sourceEpic = priDragEpic;
+    const taskKey = priDragKey;
+    const tgtEpicObj = priEpics.find(x=>x.key===targetEpic) || (window._myEpics||[]).find(x=>x.key===targetEpic);
     moved.parent_key = targetEpic;
-    moved.parent_summary = priEpics.find(x=>x.key===targetEpic)?.summary||'';
-    jiraPut('/rest/api/3/issue/'+priDragKey, {fields:{parent:{key:targetEpic}}}).then(r=>{
-      const t=document.createElement('div');
-      t.style.cssText='position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#5E8E38;color:#fff;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;z-index:9999';
-      t.textContent='↗ Task moved to '+targetEpic+' in Jira';
-      document.body.appendChild(t);
-      setTimeout(()=>t.remove(),2500);
-    }).catch(()=>{});
+    moved.parent_summary = tgtEpicObj?.summary || moved.parent_summary || '';
+    // v178: shared toast + revert-on-failure helper. The old .catch(()=>{})
+    // silently swallowed Jira refusals (e.g. cross-project moves), making it
+    // look like the reparent had succeeded.
+    priReparentInJira(taskKey, targetEpic, sourceEpic).then(ok => {
+      if (!ok){
+        // revert local change so view matches Jira reality
+        const targetArr = currentView === 'myepics' ? myEpicsTasks : priIssues;
+        const idx = targetArr.findIndex(t => t.key === taskKey);
+        if (idx !== -1){
+          targetArr[idx].parent_key = sourceEpic === '__none__' ? null : sourceEpic;
+          targetArr[idx].parent_summary = (priEpics.find(x=>x.key===sourceEpic) || (window._myEpics||[]).find(x=>x.key===sourceEpic))?.summary || '';
+        }
+        if (currentView === 'myepics') renderMyEpicsBoard();
+        else renderPriBoard();
+      }
+    });
   }
 
   const newTargetIdx = activeArr.findIndex(t => t.key === targetKey);
