@@ -745,7 +745,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v176b</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v176c</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -996,18 +996,20 @@ button,select,textarea,input{font-family:inherit}
     <div id="pri-controls" style="display:flex;align-items:center;gap:8px;padding:8px 15px;background:#fff;border-bottom:1px solid #E4E6E8;flex-shrink:0;flex-wrap:wrap">
       <!-- v176: searchable project picker (replaces the basic select). Hidden
            input id=pri-proj keeps the existing readers happy (~6 sites that
-           do document.getElementById('pri-proj').value). Wider field + × clear. -->
-      <div style="position:relative;display:inline-block;min-width:380px">
+           do document.getElementById('pri-proj').value). Note: do NOT use
+           class="proj-select" here — that class has max-width:180px which
+           shrinks the input and pushes the × button outside it. -->
+      <div style="position:relative;display:inline-block;width:460px;max-width:460px;flex-shrink:0">
         <input type="hidden" id="pri-proj">
-        <input id="pri-proj-search" class="proj-select"
+        <input id="pri-proj-search"
           placeholder="Search projects by name or key…"
           autocomplete="off"
           oninput="priProjSearch(this.value)"
           onfocus="priProjFocus(this)"
           onblur="priProjBlur(this)"
-          style="width:380px;padding:4px 30px 4px 10px;border:1px solid #C9CACC;border-radius:6px;font-size:12px;background:#fff;text-overflow:ellipsis">
+          style="width:100%;box-sizing:border-box;padding:6px 32px 6px 10px;border:1px solid #C9CACC;border-radius:6px;font-size:12px;background:#fff;text-overflow:ellipsis;max-width:none">
         <button id="pri-proj-clear" type="button" onmousedown="event.preventDefault();priProjClear()" title="Clear selection"
-          style="display:none;position:absolute;right:6px;top:50%;transform:translateY(-50%);width:18px;height:18px;border:none;background:#E4E6E8;color:#73777C;border-radius:50%;font-size:11px;line-height:1;cursor:pointer;padding:0;font-weight:700">×</button>
+          style="display:none;position:absolute;right:6px;top:50%;transform:translateY(-50%);align-items:center;justify-content:center;width:20px;height:20px;border:none;background:#E4E6E8;color:#73777C;border-radius:50%;font-size:14px;line-height:1;cursor:pointer;padding:0;font-weight:700">×</button>
         <div id="pri-proj-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #C9CACC;border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:340px;overflow-y:auto;z-index:60;margin-top:2px"></div>
       </div>
       <div id="pri-status-filter-wrap" style="display:flex;gap:3px;flex-wrap:wrap">
