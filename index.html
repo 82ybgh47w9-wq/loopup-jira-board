@@ -797,7 +797,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v182</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v183</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -964,9 +964,11 @@ button,select,textarea,input{font-family:inherit}
     </div>
     <div class="matrix-wrap"><table class="matrix-table" id="matrix-table"></table></div>
   </div>
-  <!-- v167: Epic Focus page — pick a single epic and see all its child tasks
-       in the same matrix layout as My Tasks. v168: flex + min-height:0 so
-       the matrix-wrap inside can scroll vertically. -->
+  <!-- v167: Epics page (originally "Epic Focus", shortened to "Epics" in v175).
+       Variable names + element IDs still use the "epicfocus" prefix for
+       backwards-compat with persisted state; the user-facing label is "Epics".
+       Pick a single epic and see all its child tasks in the same matrix layout
+       as My Tasks. v168: flex + min-height:0 so the matrix-wrap can scroll. -->
   <div id="page-epicfocus" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden">
     <div style="display:flex;align-items:center;gap:10px;padding:8px 15px;background:#F7F8F9;border-bottom:1px solid #E4E6E8;flex-wrap:wrap">
       <div style="display:flex;align-items:center;gap:6px">
@@ -3858,6 +3860,8 @@ function cardHtmlCompact(issue){
   const isActive = activeFlags[issue.assignee] === issue.key;
   const isDone = normStatus(issue.status) === 'Done';
   const lc = isDone ? '#2D7A2D' : (TC[issue.type]||TC.Task).c;
+  // v183: align with the v181 unified palette — picks the right card-state-* class
+  const stateCls = cardStateClass(issue, isActive);
   const pc = PC[issue.priority] || PC.Medium;
   const updated = issue.updated || '';
   const labels = Array.isArray(issue.labels) ? issue.labels : [];
@@ -3874,7 +3878,7 @@ function cardHtmlCompact(issue){
   const safeKey = (issue.key || '').replace(/'/g,"\\'");
   const safeScope = scope.replace(/'/g,"\\'");
   const safeStatus = status.replace(/'/g,"\\'");
-  return `<div class="card compact ${isActive?'is-active':''} ${isDone?'is-done':''}"
+  return `<div class="card compact ${stateCls} ${isActive?'is-active':''} ${isDone?'is-done':''}"
     style="border-left:3px solid ${lc}"
     data-key="${issue.key}"
     onclick="openPane('${safeKey}')"
@@ -4043,10 +4047,12 @@ function swimCard(issue, isActiveRow=false, isDone=false){
   const isActive = activeFlags[issue.assignee]===issue.key;
   const lc = isDone ? '#2D7A2D' : (TC[issue.type]||TC.Task).c;
   const par=issue.parent_key?`<span style="font-size:9px;color:#C9CACC;font-family:monospace">↑${issue.parent_key}</span>`:"";
-  return `<div class="card ${isActive?"is-active":""} ${isDone?"is-done":""}" style="border-left:3px solid ${lc};margin-bottom:4px;${isDone?"opacity:.75;background:#F0FAEC":""}"
+  // v183: align with v181 unified palette — let cardStateClass own background + strike-through
+  const stateCls = cardStateClass(issue, isActive);
+  return `<div class="card ${stateCls} ${isActive?"is-active":""} ${isDone?"is-done":""}" style="border-left:3px solid ${lc};margin-bottom:4px"
     onclick="openPane('${issue.key}')" draggable="true" ondragstart="onDragStart(event,'${issue.key}')" ondragend="onDragEnd(event)">
     <div class="card-keyrow">${klink(issue.key)}${par}</div>
-    <div class="card-summary" style="${isDone?"text-decoration:line-through;color:#2D7A2D":""}">${issue.summary}</div>
+    <div class="card-summary">${issue.summary}</div>
     <div class="card-meta">
       ${tbadge(issue.type)}${pbadge(issue.priority)}
       <span style="display:inline-flex;align-items:center;gap:6px;margin-left:auto">${issueIconRow(issue)}</span>
