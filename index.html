@@ -263,16 +263,34 @@ button,select,textarea,input{font-family:inherit}
 .pri-drop-zone.drag-over{background:#E0F0F8;border:2px dashed #2E99CE}
 /* v178: when an epic body is empty, show a friendlier dashed target so users know they can drop a task to reparent it */
 .pri-drop-zone.drag-over .pri-epty-hint{border-color:#2E99CE;color:#125462;background:#F3F9FC}
-/* v179: active (In Progress) task cards get a soft green tint so they pop visually next to Backlog / Selected.
-   Done already uses #F0FAEC + line-through; In Progress now uses a slightly more saturated mint. */
-.pri-card.is-active{background:#EAF6E5}
-.pri-card.is-active.is-done{background:#F0FAEC} /* Done wins if both somehow apply */
-/* v179: epic cards (both vertical column header and horizontal sticky card) get a subtle blue-grey tint
-   so they're visually distinct from white task cards. */
-.pri-epic-col .pri-epic-hdr{background:#F2F6FA !important}
-.pri-epic-col.epic-done .pri-epic-hdr{background:#F0FAEC !important}
-.pri-epic-card-h{background:#F2F6FA !important}
-.pri-epic-card-h.epic-done{background:#F0FAEC !important}
+/* v181: unified card-state colour palette — one set of classes applied across
+   ALL card renderers (cardHtml, cardHtmlCompact, priCardHtml, priCardHtmlH,
+   priEpicMatrix epic card). Drives visual consistency across My Tasks, Team,
+   Projects (Epics+Tasks and Epics Only), My Epics, Epic Focus, Labels.
+   Order of precedence (handled by cardStateClass()):
+     Done (final state) > Active (LoopUp 'currently working on') > On Hold
+     > In Progress > Selected > Epic (Epic/Milestone type, no other state)
+     > Default white.
+*/
+.card-state-default{background:#fff}
+.card-state-inprogress{background:#EAF6E5}
+.card-state-onhold{background:#E3F0F8}
+.card-state-selected{background:#F1F4F7}
+.card-state-done{background:#E5F5DD;opacity:0.88}
+.card-state-done .card-summary,
+.card-state-done [data-card-summary],
+.card-state-done .pri-emc-sum{text-decoration:line-through;color:#2D7A2D}
+.card-state-active{background:#5E8E38}
+.card-state-active .card-summary,
+.card-state-active [data-card-summary],
+.card-state-active .pri-emc-sum{color:#fff}
+.card-state-active .card-keyrow a,
+.card-state-active [data-card-summary] a{color:#E5F5DD !important}
+.card-state-epic{background:#F0E4FA}
+.card-state-epic.card-state-done{background:#E5F5DD}
+/* Epic column header (vertical Projects view) follows the same palette */
+.pri-epic-col .pri-epic-hdr{background:#F0E4FA !important}
+.pri-epic-col.epic-done .pri-epic-hdr{background:#E5F5DD !important}
 /* v179: Epics-Only matrix view styling */
 #pri-epic-matrix{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}
 #pri-epic-matrix th{position:sticky;top:0;background:#F7F8F9;padding:8px 10px;font-weight:700;color:#5D7987;text-align:left;border-bottom:2px solid #C9CACC;font-size:11px;text-transform:uppercase;letter-spacing:.04em;z-index:2}
@@ -781,7 +799,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v180</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v181</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -2347,6 +2365,27 @@ const spinHtml=(sz=16,col="#2E99CE")=>`<svg class="spinner" width="${sz}" height
 
 function normStatus(s){if(!s)return"Backlog";const l=s.toLowerCase();if(l.includes("progress"))return"In Progress";if(l.includes("select")||l.includes("development"))return"Selected";if(l.includes("done")||l.includes("complet")||l.includes("resolv")||l.includes("closed"))return"Done";return"Backlog";}
 
+// v181: pick a single card-state class for any issue based on its status and
+// (optionally) whether it's the LoopUp "currently active" task for its
+// assignee. Drives the unified card colour palette across all views.
+function cardStateClass(issue, isActiveFlag){
+  if (!issue) return 'card-state-default';
+  const ns = normStatus(issue.status);
+  const isEpic = ['Epic','Milestone'].includes(issue.type);
+  // Done is terminal — wins over every other state (so a Done epic looks Done,
+  // not Epic-purple).
+  if (ns === 'Done') return 'card-state-done' + (isEpic ? ' card-state-epic' : '');
+  // Active (the LoopUp "I'm working on this" flag) outranks status colour
+  if (isActiveFlag) return 'card-state-active';
+  // On Hold is detected via the raw status text since normStatus collapses
+  // anything not Progress/Selected/Done into "Backlog".
+  if (/on\s*hold|blocked|pending|waiting/i.test(issue.status||'')) return 'card-state-onhold';
+  if (ns === 'In Progress') return 'card-state-inprogress';
+  if (ns === 'Selected') return 'card-state-selected';
+  if (isEpic) return 'card-state-epic';
+  return 'card-state-default';
+}
+
 function getVisibleTeam(){if(currentGroup&&groups[currentGroup])return groups[currentGroup];return teamMembers;}
 
 /* ══ SHOW DONE TOGGLE HELPERS ════════════════════════════════════════════
@@ -2369,7 +2408,8 @@ function onGlobalShowCancelledChange(checkbox){
   saveAll();
   appLogMsg('info','filter','Show Cancelled = ' + showCancelled);
   if (currentView === 'prioritise') {
-    if (document.getElementById('pri-proj')?.value) loadPriBoard();
+    // v181: force a Jira refetch since the JQL filter changes with the toggle
+    if (document.getElementById('pri-proj')?.value) loadPriBoard(true);
     else renderPriBoard();
   } else if (currentView === 'myepics') {
     renderMyEpics();
@@ -2390,7 +2430,8 @@ function toggleShowDone(_view, checkbox) {
   appLogMsg('info','filter','Show Done = '+showDone);
   // Re-render every surface that filters on Done so the change is visible everywhere.
   if(currentView === 'prioritise') {
-    if(document.getElementById('pri-proj')?.value) loadPriBoard();
+    // v181: force a Jira refetch — toggling Show Done changes JQL clause
+    if(document.getElementById('pri-proj')?.value) loadPriBoard(true);
     else renderPriBoard();
   } else if(currentView === 'myepics') {
     renderMyEpics();
@@ -2408,7 +2449,8 @@ function onGlobalShowDoneChange(checkbox) {
   appLogMsg('info','filter','Show Done = '+showDone);
   // Re-render the active view; Prioritise reloads because its JQL excludes Done at query time.
   if(currentView === 'prioritise') {
-    if(document.getElementById('pri-proj')?.value) loadPriBoard();
+    // v181: force refetch when toggle changes (JQL clause depends on showDone)
+    if(document.getElementById('pri-proj')?.value) loadPriBoard(true);
     else renderPriBoard();
   } else if(currentView === 'myepics') {
     renderMyEpics();
@@ -2495,14 +2537,14 @@ function cardHtml(issue,showActiveBtn=false,compact=false,draggable=false){
   const isActive=activeFlags[issue.assignee]===issue.key;
   const isDone = normStatus(issue.status) === 'Done';
   const lc = isDone ? '#2D7A2D' : (TC[issue.type]||TC.Task).c;
-  const doneCardExt = isDone ? ';opacity:0.75;background:#F0FAEC' : '';
-  const doneSumExt = isDone ? 'text-decoration:line-through;color:#2D7A2D' : '';
+  // v181: unified palette via cardStateClass
+  const stateCls = cardStateClass(issue, isActive);
   const par=issue.parent_key?`<span style="font-size:10px;color:#C9CACC">↑</span>${klink(issue.parent_key)}${issue.parent_summary?`<span style="font-size:10px;color:#C9CACC"> ${issue.parent_summary.slice(0,20)}${issue.parent_summary.length>20?"…":""}</span>`:""}`:""
   const dragAttr=draggable?`draggable="true" ondragstart="onDragStart(event,'${issue.key}')" ondragend="onDragEnd(event)"`:"";
-  const activeBtnHtml=showActiveBtn?`<button onclick="event.stopPropagation();(async()=>{await toggleActive('${issue.assignee.replace(/'/g,"\\'")}','${issue.key}');renderMain()})()" style="font-size:10px;padding:3px 9px;border-radius:12px;border:none;cursor:pointer;font-weight:700;margin-left:4px;${isActive?'background:#5E8E38;color:#fff':'background:#EEF1F3;color:#5D7987;border:1px solid #C9CACC'}">${isActive?"● Active":"Make Active"}</button>`:""
-  return`<div class="card ${isActive?"is-active":""} ${isDone?"is-done":""}" style="border-left:3px solid ${lc}${doneCardExt}" onclick="openPane('${issue.key}')" ${dragAttr}>
+  const activeBtnHtml=showActiveBtn?`<button onclick="event.stopPropagation();(async()=>{await toggleActive('${issue.assignee.replace(/'/g,"\\'")}','${issue.key}');renderMain()})()" style="font-size:10px;padding:3px 9px;border-radius:12px;border:none;cursor:pointer;font-weight:700;margin-left:4px;${isActive?'background:#fff;color:#5E8E38;border:1px solid #fff':'background:#EEF1F3;color:#5D7987;border:1px solid #C9CACC'}">${isActive?"● Active":"Make Active"}</button>`:""
+  return`<div class="card ${stateCls} ${isActive?"is-active":""} ${isDone?"is-done":""}" style="border-left:3px solid ${lc}" onclick="openPane('${issue.key}')" ${dragAttr}>
     <div class="card-keyrow">${klink(issue.key)}${par}${activeBtnHtml}</div>
-    <div class="card-summary" style="${doneSumExt}">${issue.summary}</div>
+    <div class="card-summary">${issue.summary}</div>
     <div class="card-meta">${tbadge(issue.type)}${pbadge(issue.priority)}${!compact?ava(issue.assignee,20):""}<span style="display:inline-flex;align-items:center;gap:6px;margin-left:auto">${issueIconRow(issue)}</span></div>
   </div>`;
 }
@@ -8370,11 +8412,11 @@ function priCardHtml(t, rank) {
   const pc = PC[t.priority] || PC.Medium;
   const isUnassigned = t.assignee === 'Unassigned';
   const isDone = normStatus(t.status) === 'Done';
-  // v179: mark "In Progress" tasks active so CSS shades them light green
-  const isActiveTask = !isDone && normStatus(t.status) === 'In Progress';
-  const cardExtra = isDone ? ';opacity:0.75;background:#F0FAEC' : (isActiveTask ? ';background:#EAF6E5' : '');
-  const sumStyle = isDone ? 'font-size:12px;font-weight:600;color:#2D7A2D;line-height:1.3;margin-bottom:5px;text-decoration:line-through' : 'font-size:12px;font-weight:600;color:#292E37;line-height:1.3;margin-bottom:5px';
-  return `<div class="pri-card ${isUnassigned?'unassigned-card':''} ${isDone?'is-done':''} ${isActiveTask?'is-active':''}"
+  // v181: unified card palette — let cardStateClass pick the right shade.
+  const isUserActive = activeFlags[t.assignee] === t.key;
+  const stateCls = cardStateClass(t, isUserActive);
+  const sumStyle = 'font-size:12px;font-weight:600;line-height:1.3;margin-bottom:5px';
+  return `<div class="pri-card ${stateCls} ${isUnassigned?'unassigned-card':''} ${isDone?'is-done':''}"
     draggable="true"
     data-key="${t.key}"
     data-epic="${t.parent_key||'__none__'}"
@@ -8383,15 +8425,14 @@ function priCardHtml(t, rank) {
     ondragend="priDragEnd(event)"
     ondragover="priCardDragOver(event)"
     ondragleave="priCardDragLeave(event)"
-    ondrop="priCardDropEl(event,this)"
-    style="${cardExtra}">
+    ondrop="priCardDropEl(event,this)">
     <div style="display:flex;align-items:center;gap:4px;margin-bottom:3px">
       <span class="pri-rank-num">#${rank}</span>
       <a href="${BASE()}${t.key}" target="_blank" onclick="event.stopPropagation()" class="card-key">${t.key}</a>
       ${t.parent_key ? `<span style="font-size:9px;color:#C9CACC;font-family:monospace">↑${t.parent_key}</span>` : ''}
       <div style="margin-left:auto">${ava(t.assignee, 20)}</div>
     </div>
-    <div style="${sumStyle}">${t.summary}</div>
+    <div data-card-summary style="${sumStyle}">${t.summary}</div>
     <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
       <span class="badge" style="background:${sc.bg};color:${sc.c}">${t.status}</span>
       <span class="badge" style="background:${pc.bg};color:${pc.c}"><span class="pri-dot" style="background:${pc.d}"></span>${t.priority}</span>
@@ -8527,7 +8568,8 @@ async function renderMyEpics() {
       // Fetch direct children - Tasks and Sub-tasks only (NOT Milestones/Epics)
       // Conditionally exclude Done tasks based on per-view toggle
       const myEpicsShowDone = getShowDone('myepics');
-      const doneClause = myEpicsShowDone ? '' : ' AND statusCategory != Done';
+      // v181: include Done items if showCancelled is on too — cancelled lives in Done category
+      const doneClause = (myEpicsShowDone || showCancelled) ? '' : ' AND statusCategory != Done';
       const jql = 'issueType in (Task,"Sub-task",Story,Bug) AND parent in ('+epicKeys.join(',')+')' + doneClause + ' ORDER BY rank ASC';
       const td = await jiraGet('/rest/api/3/search/jql?jql='+encodeURIComponent(jql)+'&fields=summary,status,assignee,priority,issuetype,updated,parent,labels&maxResults=200');
       myEpicsTasks = (td.issues||[]).map(parseIssue);
@@ -8618,6 +8660,8 @@ function renderMyEpicsBoard() {
     // Hide Done tasks unless toggle is on (or status filter explicitly picks Done)
     const showDoneMEB = getShowDone('myepics');
     if(!showDoneMEB && normStatus(statFilter)!=='Done') tasks = tasks.filter(t => normStatus(t.status)!=='Done');
+    // v181: also apply Show Cancelled filter
+    if(!showCancelled) tasks = tasks.filter(t => !isCancelledStatus(t.status));
     // Hide epic column entirely if filters active and no tasks remain
     const filterActive = ctrlProjFilter||priFilter||statFilter||unassignedOnly||search;
     if(filterActive && tasks.length===0) return; // skip this epic column
@@ -8867,8 +8911,13 @@ async function loadPriBoard(force) {
   try {
     const fields = 'summary,status,assignee,priority,issuetype,parent,customfield_10014';
     const showDone = getShowDone('prioritise');
-    const epicDoneClause = showDone ? '' : ' AND statusCategory != Done';
-    const taskDoneClause = showDone ? '' : ' AND statusCategory != Done';
+    // v181: also include Done-category issues when Show Cancelled is on, since
+    // Cancelled / Won't Do / Abandoned statuses live under the Done category
+    // in Jira's data model. Without this, ticking Show Cancelled with Show Done
+    // off has no effect — cancelled items were never fetched in the first place.
+    const includeDone = showDone || showCancelled;
+    const epicDoneClause = includeDone ? '' : ' AND statusCategory != Done';
+    const taskDoneClause = includeDone ? '' : ' AND statusCategory != Done';
 
     // v97: paginate both fetches. Previously the Tasks fetch was capped at
     // 200 items; large projects like MKT have many more, so lower-ranked
@@ -8945,6 +8994,8 @@ function renderPriBoard() {
     // user's filter selection takes precedence.
     tasks = tasks.filter(i => normStatus(i.status) !== 'Done');
   }
+  // v181: also honour Show Cancelled — hide cancelled tasks unless toggle is on
+  if (!showCancelled) tasks = tasks.filter(i => !isCancelledStatus(i.status));
   if (unassignedOnly) tasks = tasks.filter(i => i.assignee === 'Unassigned');
 
   // Group tasks by parent epic
@@ -9431,18 +9482,20 @@ async function renderPriEpicMatrix(){
   // Filter the epic list the same way as the other views
   let epics = [...(priEpics||[])].map(gm).filter(e => ['Epic','Milestone'].includes(e.type));
   if (!showDoneME) epics = epics.filter(e => normStatus(e.status) !== 'Done');
+  if (!showCancelled) epics = epics.filter(e => !isCancelledStatus(e.status)); // v181
   if (unassignedOnly) epics = epics.filter(e => e.assignee === 'Unassigned');
   // Apply user-saved order so cells inherit the same ordering
   epics = applyPriEpicOrder(epics);
 
-  // Build header row
-  const PRI_LIST = ['Highest','High','Medium','Low','No priority'];
+  // Build header row. v181: drop "No priority" column — every epic should have
+  // a priority, and the empty column was just wasted screen space.
+  const PRI_LIST = ['Highest','High','Medium','Low'];
   const ROWS = ['In Progress','Selected','Backlog','Done'];
 
   let html = '<table id="pri-epic-matrix" cellspacing="0" cellpadding="0">';
   html += '<thead><tr><th style="width:120px;position:sticky;left:0;z-index:3">Status \\ Priority</th>';
   PRI_LIST.forEach(p => {
-    const pc = p === 'No priority' ? {bg:'#F4F4F5',c:'#73777C'} : (PC[p] || PC.Medium);
+    const pc = PC[p] || PC.Medium;
     html += '<th class="pri-col" style="background:' + pc.bg + ';color:' + pc.c + '">' + _escHtml(p) + '</th>';
   });
   html += '</tr></thead><tbody>';
@@ -9454,9 +9507,9 @@ async function renderPriEpicMatrix(){
     html += '<tr>';
     html += '<td class="pri-status-cell" style="color:' + sc.c + '"><div style="display:flex;align-items:center;gap:6px"><span class="badge" style="background:' + sc.bg + ';color:' + sc.c + '">' + _escHtml(rowStatus) + '</span><span style="font-size:10px;color:#9EA0A4">' + rowEpics.length + '</span></div></td>';
     PRI_LIST.forEach(pri => {
+      // Epics with no priority default to Medium (Jira treats them as such)
       const inCell = rowEpics.filter(e => {
-        const ep = e.priority || '';
-        if (pri === 'No priority') return !ep || !['Highest','High','Medium','Low'].includes(ep);
+        const ep = e.priority || 'Medium';
         return ep === pri;
       });
       const priParam = pri.replace(/'/g, "\\'");
@@ -9469,21 +9522,26 @@ async function renderPriEpicMatrix(){
         html += '<div class="pri-emc-empty">drop here</div>';
       } else {
         inCell.forEach(epic => {
-          const isDone = normStatus(epic.status) === 'Done';
-          const isAct = !isDone && normStatus(epic.status) === 'In Progress';
-          const cls = 'pri-emc' + (isDone ? ' is-done' : '') + (isAct ? ' is-active' : '');
+          // v181: use the unified card-state palette + add card-on-card drop
+          // handlers so dropping an epic ONTO another epic in the same cell
+          // reorders within that cell (previously a same-cell drop no-op'd).
           const taskCount = (priIssues || []).filter(t => t.parent_key === epic.key).length;
-          html += '<div class="' + cls + '" draggable="true"'
+          const stateCls = cardStateClass(epic, false);
+          const safeKey = epic.key.replace(/'/g, "\\'");
+          html += '<div class="pri-emc ' + stateCls + '" draggable="true"'
                + ' data-key="' + _escHtml(epic.key) + '"'
-               + ' ondragstart="priEpicMatrixDragStart(event,\'' + epic.key.replace(/'/g,"\\'") + '\')"'
+               + ' ondragstart="priEpicMatrixDragStart(event,\'' + safeKey + '\')"'
                + ' ondragend="priEpicMatrixDragEnd(event)"'
-               + ' onclick="openPane(\'' + epic.key.replace(/'/g,"\\'") + '\')"'
-               + ' title="Drag to a different cell to change priority/status. Click to open ' + _escHtml(epic.key) + '.">'
+               + ' ondragover="priEpicMatrixCardDragOver(event,\'' + safeKey + '\')"'
+               + ' ondragleave="priEpicMatrixCardDragLeave(event)"'
+               + ' ondrop="priEpicMatrixCardDrop(event,\'' + safeKey + '\',\'' + statParam + '\',\'' + priParam + '\')"'
+               + ' onclick="openPane(\'' + safeKey + '\')"'
+               + ' title="Drag to a different cell to change priority/status. Drag onto another epic in the same cell to reorder. Click to open ' + _escHtml(epic.key) + '.">'
                + '<div style="display:flex;align-items:center;gap:5px">'
                + '<a href="' + BASE() + epic.key + '" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;font-family:monospace;color:#257AA5;font-weight:700;text-decoration:none">' + _escHtml(epic.key) + '</a>'
                + '<span style="font-size:10px;color:#9EA0A4;margin-left:auto">' + taskCount + ' task' + (taskCount===1?'':'s') + '</span>'
                + '</div>'
-               + '<div style="font-size:11px;font-weight:600;color:' + (isDone?'#2D7A2D':'#292E37') + ';' + (isDone?'text-decoration:line-through;':'') + 'line-height:1.3">' + _escHtml(epic.summary || '') + '</div>'
+               + '<div class="pri-emc-sum" style="font-size:11px;font-weight:600;line-height:1.3">' + _escHtml(epic.summary || '') + '</div>'
                + '<div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">'
                + ava(epic.assignee, 18)
                + '</div>'
@@ -9522,6 +9580,61 @@ function priEpicMatrixDragOver(e){
 function priEpicMatrixDragLeave(e){
   if (!e.currentTarget.contains(e.relatedTarget)) e.currentTarget.classList.remove('drag-over');
 }
+// v181: drop directly onto another epic card in the matrix. If the source and
+// target are in the SAME cell (same status + priority) it's an intra-cell
+// reorder — update the saved epic order and re-render. If they're in a
+// different cell, the parent cell's ondrop will fire and the status/priority
+// update happens there (we let the event bubble for that case).
+function priEpicMatrixCardDragOver(e, targetKey){
+  if (!window._priMatrixDragKey || window._priMatrixDragKey === targetKey) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  e.stopPropagation();
+  const card = e.currentTarget;
+  const rect = card.getBoundingClientRect();
+  const before = e.clientY < rect.top + rect.height/2;
+  document.querySelectorAll('#pri-epic-matrix .pri-emc').forEach(c => c.classList.remove('drag-over-epic-t','drag-over-epic-b'));
+  card.classList.add(before ? 'drag-over-epic-t' : 'drag-over-epic-b');
+}
+function priEpicMatrixCardDragLeave(e){
+  if (!e.currentTarget.contains(e.relatedTarget)){
+    e.currentTarget.classList.remove('drag-over-epic-t','drag-over-epic-b');
+  }
+}
+async function priEpicMatrixCardDrop(e, targetKey, cellStatus, cellPriority){
+  const dragKey = window._priMatrixDragKey;
+  if (!dragKey || dragKey === targetKey) return;
+  const dragEpic = (priEpics || []).find(x => x.key === dragKey);
+  const targetEpic = (priEpics || []).find(x => x.key === targetKey);
+  if (!dragEpic || !targetEpic) return;
+  const dragStatus = normStatus(dragEpic.status);
+  const dragPri = dragEpic.priority || 'Medium';
+  const targetStatus = normStatus(targetEpic.status);
+  const targetPri = targetEpic.priority || 'Medium';
+  const sameCell = (dragStatus === targetStatus) && (dragPri === targetPri);
+  if (!sameCell){
+    // Different cell — let the cell's ondrop handle the status/priority change.
+    // We don't preventDefault here so the event bubbles up to the cell.
+    return;
+  }
+  // Intra-cell reorder: place dragKey before/after targetKey in the saved order.
+  e.preventDefault();
+  e.stopPropagation();
+  window._priMatrixDragKey = null;
+  document.querySelectorAll('#pri-epic-matrix .pri-emc').forEach(c => c.classList.remove('drag-over-epic-t','drag-over-epic-b'));
+  const card = e.currentTarget;
+  const rect = card.getBoundingClientRect();
+  const before = e.clientY < rect.top + rect.height/2;
+  // Build current DOM order of all epic cards in the matrix and reorder.
+  const allCards = Array.from(document.querySelectorAll('#pri-epic-matrix .pri-emc[data-key]'));
+  let keys = allCards.map(c => c.getAttribute('data-key'));
+  keys = keys.filter(k => k !== dragKey);
+  const tIdx = keys.indexOf(targetKey);
+  if (tIdx === -1) return;
+  keys.splice(before ? tIdx : tIdx + 1, 0, dragKey);
+  setPriEpicOrder(keys);
+  renderPriEpicMatrix();
+}
 async function priEpicMatrixDrop(e, newStatus, newPriority){
   e.preventDefault();
   const dragKey = window._priMatrixDragKey;
@@ -9531,14 +9644,14 @@ async function priEpicMatrixDrop(e, newStatus, newPriority){
   const epic = (priEpics || []).find(x => x.key === dragKey);
   if (!epic) return;
   const oldStatus = normStatus(epic.status);
-  const oldPri = epic.priority || '';
-  const targetPri = (newPriority === 'No priority') ? '' : newPriority;
+  const oldPri = epic.priority || 'Medium';
+  const targetPri = newPriority; // v181: no more "No priority" column
   const statusChanged = oldStatus !== newStatus;
   const priChanged = oldPri !== targetPri;
-  if (!statusChanged && !priChanged) return;
+  if (!statusChanged && !priChanged) return; // Same-cell drops onto empty space — no-op; intra-cell reorder is handled by priEpicMatrixCardDrop below
   // Optimistic local update
   if (statusChanged){ locStat[dragKey] = newStatus; epic.status = newStatus; }
-  if (priChanged){ locPri[dragKey] = targetPri || 'Medium'; epic.priority = targetPri || 'Medium'; }
+  if (priChanged){ locPri[dragKey] = targetPri; epic.priority = targetPri; }
   saveAll();
   renderPriEpicMatrix();
   // Push to Jira
@@ -9599,12 +9712,11 @@ function priCardHtmlH(t, rank) {
   const pc = PC[t.priority] || PC.Medium;
   const isUnassigned = t.assignee === 'Unassigned';
   const isDone = normStatus(t.status) === 'Done';
-  const isActiveTask = !isDone && normStatus(t.status) === 'In Progress';
-  const cardExtra = isDone ? ';opacity:0.75;background:#F0FAEC' : (isActiveTask ? ';background:#EAF6E5' : '');
-  const sumStyle = isDone
-    ? 'font-size:11px;font-weight:600;color:#2D7A2D;line-height:1.25;margin-bottom:4px;max-height:42px;overflow:hidden;text-decoration:line-through'
-    : 'font-size:11px;font-weight:600;color:#292E37;line-height:1.25;margin-bottom:4px;max-height:42px;overflow:hidden';
-  return `<div class="pri-card pri-card-h ${isUnassigned?'unassigned-card':''} ${isDone?'is-done':''} ${isActiveTask?'is-active':''}"
+  // v181: unified palette
+  const isUserActive = activeFlags[t.assignee] === t.key;
+  const stateCls = cardStateClass(t, isUserActive);
+  const sumStyle = 'font-size:11px;font-weight:600;line-height:1.25;margin-bottom:4px;max-height:42px;overflow:hidden';
+  return `<div class="pri-card pri-card-h ${stateCls} ${isUnassigned?'unassigned-card':''} ${isDone?'is-done':''}"
     draggable="true"
     data-key="${t.key}"
     data-epic="${t.parent_key||'__none__'}"
@@ -9614,13 +9726,13 @@ function priCardHtmlH(t, rank) {
     ondragover="priCardDragOverH(event)"
     ondragleave="priCardDragLeaveH(event)"
     ondrop="priCardDropElH(event,this)"
-    style="width:180px;min-width:180px;flex-shrink:0;margin:0 4px 0 0${cardExtra}">
+    style="width:180px;min-width:180px;flex-shrink:0;margin:0 4px 0 0">
     <div style="display:flex;align-items:center;gap:3px;margin-bottom:2px">
       <span class="pri-rank-num" style="font-size:9px">#${rank}</span>
       <a href="${BASE()}${t.key}" target="_blank" onclick="event.stopPropagation()" class="card-key" style="font-size:10px">${t.key}</a>
       <div style="margin-left:auto">${ava(t.assignee, 18)}</div>
     </div>
-    <div style="${sumStyle}">${t.summary}</div>
+    <div data-card-summary style="${sumStyle}">${t.summary}</div>
     <div style="display:flex;align-items:center;gap:3px;flex-wrap:wrap">
       <span class="badge" style="background:${sc.bg};color:${sc.c};font-size:9px;padding:1px 5px">${t.status}</span>
       <span class="badge" style="background:${pc.bg};color:${pc.c};font-size:9px;padding:1px 5px"><span class="pri-dot" style="background:${pc.d}"></span>${t.priority}</span>
@@ -9651,18 +9763,6 @@ function priCardDropElH(e, el) {
   const targetEpic = el.getAttribute('data-epic');
   if(priDragKey === targetKey) return;
 
-  // In horizontal mode: only allow reorder WITHIN the same epic
-  if(priDragEpic !== targetEpic) {
-    appLogMsg('info','prioritise','Cross-epic drag blocked in horizontal mode (drag within an epic\'s row only)');
-    const toast = document.createElement('div');
-    toast.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#E08000;color:#fff;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;z-index:9999';
-    toast.textContent = 'Drag tasks within the same Epic row only';
-    document.body.appendChild(toast);
-    setTimeout(()=>toast.remove(),2000);
-    priDragKey = null; priDragEpic = null;
-    return;
-  }
-
   const rect = el.getBoundingClientRect();
   const before = e.clientX < rect.left + rect.width/2;
 
@@ -9672,6 +9772,24 @@ function priCardDropElH(e, el) {
   if(taskIdx === -1 || targetIdx === -1) return;
 
   const [moved] = activeArr.splice(taskIdx, 1);
+
+  // v181: support cross-epic drag in horizontal mode too — was previously
+  // blocked. Reparents to the target's epic + pushes the change to Jira via
+  // the shared priReparentInJira helper (toasts errors, reverts on failure).
+  if (targetEpic && targetEpic !== '__none__' && targetEpic !== priDragEpic){
+    const sourceEpic = priDragEpic;
+    const newEpicKey = targetEpic;
+    moved.parent_key = newEpicKey;
+    const tgtEpicObj = priEpics.find(x=>x.key===newEpicKey) || (window._myEpics||[]).find(x=>x.key===newEpicKey);
+    moved.parent_summary = tgtEpicObj?.summary || moved.parent_summary || '';
+    priReparentInJira(priDragKey, newEpicKey, sourceEpic).then(ok => {
+      if (!ok){
+        moved.parent_key = sourceEpic === '__none__' ? null : sourceEpic;
+        renderPriBoardHorizontal();
+      }
+    });
+  }
+
   const newTargetIdx = activeArr.findIndex(t => t.key === targetKey);
   activeArr.splice(before ? newTargetIdx : newTargetIdx+1, 0, moved);
 
@@ -9714,6 +9832,8 @@ function renderPriBoardHorizontal() {
   } else if(!getShowDone('prioritise')) {
     tasks = tasks.filter(i => normStatus(i.status) !== 'Done');
   }
+  // v181: also honour Show Cancelled
+  if(!showCancelled) tasks = tasks.filter(i => !isCancelledStatus(i.status));
   if(unassignedOnly) tasks = tasks.filter(i => i.assignee === 'Unassigned');
 
   // Group tasks by parent epic
@@ -9731,6 +9851,7 @@ function renderPriBoardHorizontal() {
   const showDonePriH = getShowDone('prioritise');
   let epics = [...priEpics].map(gm).filter(e => ['Epic','Milestone'].includes(e.type));
   if(!showDonePriH) epics = epics.filter(e => normStatus(e.status) !== 'Done');
+  if(!showCancelled) epics = epics.filter(e => !isCancelledStatus(e.status)); // v181
   if(unassignedOnly) epics = epics.filter(e => e.assignee === 'Unassigned' || (byEpic[e.key]||[]).length > 0);
   // v177: apply user-saved order (within each band the push order is preserved)
   epics = applyPriEpicOrder(epics);
