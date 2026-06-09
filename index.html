@@ -265,6 +265,13 @@ button,select,textarea,input{font-family:inherit}
 /* v140: visual when dragging an epic over a different priority band */
 .pri-band-droppable.drag-over-band{outline:3px dashed #2E99CE;outline-offset:-3px;background:#E0F0F8}
 .pri-epic-card-h.dragging{opacity:.4}
+/* v177: visual cues while dragging epics around — vertical cols + horizontal cards.
+   outline renders on top of child backgrounds, so it's reliable as a drop indicator. */
+.pri-epic-col.dragging{opacity:.4}
+.pri-epic-col.drag-over-epic-l{outline:3px solid #2E99CE;outline-offset:-1px;background:linear-gradient(90deg,rgba(46,153,206,0.10),transparent 30%)}
+.pri-epic-col.drag-over-epic-r{outline:3px solid #2E99CE;outline-offset:-1px;background:linear-gradient(270deg,rgba(46,153,206,0.10),transparent 30%)}
+.pri-epic-card-h.drag-over-epic-t{outline:3px solid #2E99CE;outline-offset:-1px;background:linear-gradient(180deg,rgba(46,153,206,0.15),transparent 50%) !important}
+.pri-epic-card-h.drag-over-epic-b{outline:3px solid #2E99CE;outline-offset:-1px;background:linear-gradient(0deg,rgba(46,153,206,0.15),transparent 50%) !important}
 
 /* ══ MEETING INTAKE ══ */
 #page-meetings{flex-direction:column;flex:1;min-height:0;overflow:hidden}
@@ -745,7 +752,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v176c</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v177</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -8816,6 +8823,8 @@ function renderPriBoard() {
   let epics = [...priEpics].map(gm).filter(e => ['Epic','Milestone'].includes(e.type));
   if(!showDonePri) epics = epics.filter(e => normStatus(e.status) !== 'Done');
   if (unassignedOnly) epics = epics.filter(e => e.assignee === 'Unassigned' || (byEpic[e.key]||[]).length > 0);
+  // v177: apply the user's saved column order for this project (drag-reorder)
+  epics = applyPriEpicOrder(epics);
 
   const board = document.getElementById('pri-board');
   board.innerHTML = '';
@@ -8830,6 +8839,10 @@ function renderPriBoard() {
     const col = document.createElement('div');
     col.className = 'pri-epic-col';
     col.dataset.epicKey = epic.key;
+    // v177: drop target for column reorder. Highlights are added by priColDragOver.
+    col.addEventListener('dragover', priColDragOver);
+    col.addEventListener('dragleave', priColDragLeave);
+    col.addEventListener('drop', priColDrop);
 
     const statusCfg = SC[epic.status] || SC.Backlog;
     // Mark Epic as "done" if its own status is Done OR all its tasks are Done (and it has tasks)
@@ -8840,8 +8853,15 @@ function renderPriBoard() {
       <!-- v97: header is fully clickable. Clicking anywhere on the header (other
            than the inner anchors / + button which stopPropagation) opens the
            Epic/Milestone in the detail card so the user can assign Legend +
-           Initiative parents via the v89 parent picker if they're missing. -->
-      <div class="pri-epic-hdr" onclick="openPane('${epic.key}')" title="Open ${epic.key} to edit hierarchy / parent" style="cursor:pointer;${epicIsDone ? 'background:#F0FAEC' : ''}">
+           Initiative parents via the v89 parent picker if they're missing.
+           v177: ⋮⋮ drag handle in the top-right reorders columns horizontally. -->
+      <div class="pri-epic-hdr" onclick="openPane('${epic.key}')" title="Open ${epic.key} to edit hierarchy / parent" style="cursor:pointer;position:relative;${epicIsDone ? 'background:#F0FAEC' : ''}">
+        <span class="pri-col-drag-handle" draggable="true"
+          ondragstart="priColDragStart(event,'${epic.key}')"
+          ondragend="priColDragEnd(event)"
+          onclick="event.stopPropagation()"
+          title="Drag to reorder this Epic column"
+          style="position:absolute;top:6px;right:6px;width:20px;height:20px;display:flex;align-items:center;justify-content:center;cursor:grab;color:#9EA0A4;font-size:14px;line-height:1;border-radius:4px;background:rgba(255,255,255,.7);user-select:none;z-index:3" onmouseover="this.style.background='#E4E6E8';this.style.color='#5D7987'" onmouseout="this.style.background='rgba(255,255,255,.7)';this.style.color='#9EA0A4'">⋮⋮</span>
         <div style="display:flex;align-items:center;gap:5px;margin-bottom:3px;flex-wrap:wrap">
           ${legend ? `<a href="${BASE()}${legend.key}" target="_blank" onclick="event.stopPropagation()"
             style="font-size:9px;font-weight:700;color:#9A4500;background:#FFF0E6;padding:1px 6px;border-radius:3px;text-decoration:none;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block"
@@ -8980,7 +9000,157 @@ function priEpicDragStart(e, epicKey){
 function priEpicDragEnd(e){
   setTimeout(() => { window._priDragEpicKey = null; }, 100);
   e.currentTarget.classList.remove('dragging');
-  document.querySelectorAll('.drag-over-band').forEach(el => el.classList.remove('drag-over-band'));
+  document.querySelectorAll('.drag-over-band, .drag-over-epic-l, .drag-over-epic-r, .drag-over-epic-t, .drag-over-epic-b').forEach(el => el.classList.remove('drag-over-band','drag-over-epic-l','drag-over-epic-r','drag-over-epic-t','drag-over-epic-b'));
+}
+
+// v177: epic reorder — vertical (column) and horizontal (in-band) views.
+// Persisted to localStorage under loopup-pri-epic-order keyed by project.
+function _priEpicOrderMap(){
+  try { return JSON.parse(localStorage.getItem('loopup-pri-epic-order') || '{}'); }
+  catch { return {}; }
+}
+function _savePriEpicOrderMap(m){
+  try { localStorage.setItem('loopup-pri-epic-order', JSON.stringify(m)); } catch(e){}
+}
+function applyPriEpicOrder(epics){
+  // Reorder an Epic array to match the user's saved order for the current
+  // project. New epics (not yet in the saved order) are appended at the end
+  // so they're still visible, just at the bottom.
+  const projKey = document.getElementById('pri-proj')?.value;
+  if (!projKey || !Array.isArray(epics)) return epics;
+  const order = _priEpicOrderMap()[projKey];
+  if (!Array.isArray(order) || !order.length) return epics;
+  const byKey = new Map(epics.map(e => [e.key, e]));
+  const out = [];
+  for (const k of order){
+    if (byKey.has(k)){ out.push(byKey.get(k)); byKey.delete(k); }
+  }
+  for (const e of epics){ if (byKey.has(e.key)) out.push(e); }
+  return out;
+}
+function setPriEpicOrder(epicKeys){
+  const projKey = document.getElementById('pri-proj')?.value;
+  if (!projKey) return;
+  const m = _priEpicOrderMap();
+  m[projKey] = epicKeys;
+  _savePriEpicOrderMap(m);
+}
+
+// ─── VERTICAL VIEW reorder (drag columns left/right) ───────────────────────
+function priColDragStart(e, epicKey){
+  // Handle is inside the column header; the column itself is what we treat
+  // as the drag source for highlighting and DOM lookups.
+  window._priDragEpicKey = epicKey;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', 'epic|' + epicKey);
+  e.stopPropagation();
+  const col = e.currentTarget.closest('.pri-epic-col');
+  if (col) setTimeout(() => col.classList.add('dragging'), 0);
+}
+function priColDragEnd(e){
+  setTimeout(() => { window._priDragEpicKey = null; }, 100);
+  const col = e.currentTarget.closest('.pri-epic-col');
+  if (col) col.classList.remove('dragging');
+  document.querySelectorAll('.drag-over-epic-l, .drag-over-epic-r').forEach(el => el.classList.remove('drag-over-epic-l','drag-over-epic-r'));
+}
+function priColDragOver(e){
+  if (!window._priDragEpicKey) return;
+  const col = e.currentTarget;
+  if (col.dataset.epicKey === window._priDragEpicKey) return;
+  e.preventDefault();
+  e.stopPropagation();
+  e.dataTransfer.dropEffect = 'move';
+  const rect = col.getBoundingClientRect();
+  const before = e.clientX < rect.left + rect.width/2;
+  document.querySelectorAll('.drag-over-epic-l, .drag-over-epic-r').forEach(el => el.classList.remove('drag-over-epic-l','drag-over-epic-r'));
+  col.classList.add(before ? 'drag-over-epic-l' : 'drag-over-epic-r');
+}
+function priColDragLeave(e){
+  // Only clear when leaving the column entirely
+  if (!e.currentTarget.contains(e.relatedTarget)){
+    e.currentTarget.classList.remove('drag-over-epic-l','drag-over-epic-r');
+  }
+}
+function priColDrop(e){
+  const col = e.currentTarget;
+  const targetKey = col.dataset.epicKey;
+  const dragKey = window._priDragEpicKey;
+  window._priDragEpicKey = null;
+  document.querySelectorAll('.drag-over-epic-l, .drag-over-epic-r').forEach(el => el.classList.remove('drag-over-epic-l','drag-over-epic-r'));
+  if (!dragKey || !targetKey || dragKey === targetKey) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const rect = col.getBoundingClientRect();
+  const before = e.clientX < rect.left + rect.width/2;
+  // Read current order from the DOM (filter excludes the Unassigned column
+  // which has no data-epic-key).
+  const cols = Array.from(document.querySelectorAll('#pri-board .pri-epic-col[data-epic-key]'));
+  let keys = cols.map(c => c.dataset.epicKey).filter(k => k);
+  keys = keys.filter(k => k !== dragKey);
+  const targetIdx = keys.indexOf(targetKey);
+  if (targetIdx === -1) return;
+  keys.splice(before ? targetIdx : targetIdx + 1, 0, dragKey);
+  setPriEpicOrder(keys);
+  renderPriBoard();
+}
+
+// ─── HORIZONTAL VIEW reorder (drag epic cards within a band) ────────────────
+// Drop on another epic CARD: insert before/after that epic in the saved order.
+// If priorities differ between source and target, also change the dragged
+// epic's priority to match the target's band (so it visually lands there).
+function priEpicCardDragOver(e, targetEpicKey){
+  if (!window._priDragEpicKey || window._priDragEpicKey === targetEpicKey) return;
+  e.preventDefault();
+  e.stopPropagation(); // outrank the band-level dragover
+  e.dataTransfer.dropEffect = 'move';
+  const card = e.currentTarget;
+  const rect = card.getBoundingClientRect();
+  const before = e.clientY < rect.top + rect.height/2;
+  document.querySelectorAll('.drag-over-epic-t, .drag-over-epic-b').forEach(el => el.classList.remove('drag-over-epic-t','drag-over-epic-b'));
+  card.classList.add(before ? 'drag-over-epic-t' : 'drag-over-epic-b');
+}
+function priEpicCardDragLeave(e){
+  if (!e.currentTarget.contains(e.relatedTarget)){
+    e.currentTarget.classList.remove('drag-over-epic-t','drag-over-epic-b');
+  }
+}
+async function priEpicCardDrop(e, targetEpicKey){
+  e.preventDefault();
+  e.stopPropagation(); // beat the band drop
+  const dragKey = window._priDragEpicKey;
+  window._priDragEpicKey = null;
+  document.querySelectorAll('.drag-over-epic-t, .drag-over-epic-b, .drag-over-band').forEach(el => el.classList.remove('drag-over-epic-t','drag-over-epic-b','drag-over-band'));
+  if (!dragKey || !targetEpicKey || dragKey === targetEpicKey) return;
+  const card = e.currentTarget;
+  const rect = card.getBoundingClientRect();
+  const before = e.clientY < rect.top + rect.height/2;
+  // Pull current visual epic order from the DOM (which is band-grouped).
+  const cards = Array.from(document.querySelectorAll('#pri-board .pri-epic-card-h[data-epic-key]'));
+  let keys = cards.map(c => c.dataset.epicKey);
+  keys = keys.filter(k => k !== dragKey);
+  const targetIdx = keys.indexOf(targetEpicKey);
+  if (targetIdx === -1) return;
+  keys.splice(before ? targetIdx : targetIdx + 1, 0, dragKey);
+  setPriEpicOrder(keys);
+  // Cross-band drop: also align priority so the dragged epic actually
+  // appears in the target's band rather than snapping back home.
+  const dragEpic = priEpics.find(x => x.key === dragKey);
+  const targetEpic = priEpics.find(x => x.key === targetEpicKey);
+  if (dragEpic && targetEpic && dragEpic.priority !== targetEpic.priority){
+    const newPri = targetEpic.priority || 'Medium';
+    locPri[dragKey] = newPri;
+    dragEpic.priority = newPri;
+    saveAll();
+    renderPriBoardHorizontal();
+    try {
+      await updatePriority(dragKey, newPri);
+      appLogMsg('info','prioritise','Moved ' + dragKey + ' to ' + newPri + ' band (via reorder)');
+    } catch(err){
+      appLogMsg('warn','prioritise','Failed to update priority for ' + dragKey + ': ' + (err.message || err));
+    }
+  } else {
+    renderPriBoardHorizontal();
+  }
 }
 function priBandDragOver(e, bandName){
   if (!window._priDragEpicKey) return;
@@ -9027,6 +9197,10 @@ function priDragLeave(e) {
 }
 
 function priCardDragOver(e) {
+  // v177: if an Epic is being dragged, let the column-level handler take it.
+  // Without this bail-out the task card's stopPropagation eats the dragover
+  // and the column never knows the cursor is over it.
+  if (window._priDragEpicKey) return;
   e.preventDefault();
   e.stopPropagation();
   const card = e.currentTarget;
@@ -9036,6 +9210,7 @@ function priCardDragOver(e) {
 }
 
 function priCardDragLeave(e) {
+  if (window._priDragEpicKey) return;
   e.currentTarget.classList.remove('drag-over-top','drag-over-bottom');
 }
 
@@ -9075,6 +9250,7 @@ function togglePriBand(band) {
 
 // Horizontal card drag handler — detects LEFT vs RIGHT of target
 function priCardDragOverH(e) {
+  if (window._priDragEpicKey) return; // v177: defer to epic-card handlers
   e.preventDefault();
   e.stopPropagation();
   const card = e.currentTarget;
@@ -9084,6 +9260,7 @@ function priCardDragOverH(e) {
 }
 
 function priCardDragLeaveH(e) {
+  if (window._priDragEpicKey) return;
   e.currentTarget.classList.remove('drag-over-left','drag-over-right');
 }
 
@@ -9227,6 +9404,8 @@ function renderPriBoardHorizontal() {
   let epics = [...priEpics].map(gm).filter(e => ['Epic','Milestone'].includes(e.type));
   if(!showDonePriH) epics = epics.filter(e => normStatus(e.status) !== 'Done');
   if(unassignedOnly) epics = epics.filter(e => e.assignee === 'Unassigned' || (byEpic[e.key]||[]).length > 0);
+  // v177: apply user-saved order (within each band the push order is preserved)
+  epics = applyPriEpicOrder(epics);
 
   // Group epics by their PRIORITY (Epic's priority determines band)
   const PRI_BANDS = ['Highest','High','Medium','Low','No priority'];
@@ -9296,7 +9475,13 @@ function renderPriBoardHorizontal() {
       // user click any blank part of the card to open the detail panel and
       // edit the hierarchy. Missing Legend/Initiative show "+ Set …" pills.
       const epicCardHtml = `
-        <div class="pri-epic-card-h" draggable="true" ondragstart="priEpicDragStart(event,'${epic.key}')" ondragend="priEpicDragEnd(event)" onclick="openPane('${epic.key}')" title="Drag to move to a different priority band, or click to open ${epic.key}" style="width:280px;min-width:280px;flex-shrink:0;background:${epicCardBg};border:1px solid #C8E6F7;border-left:3px solid ${epicCardBorder};border-radius:8px;padding:8px 10px;margin-right:10px;display:flex;flex-direction:column;gap:4px;position:sticky;left:0;z-index:2;box-shadow:2px 0 6px -2px rgba(0,0,0,0.12);cursor:grab${epicOpacity}">
+        <div class="pri-epic-card-h" data-epic-key="${epic.key}" draggable="true"
+          ondragstart="priEpicDragStart(event,'${epic.key}')" ondragend="priEpicDragEnd(event)"
+          ondragover="priEpicCardDragOver(event,'${epic.key}')"
+          ondragleave="priEpicCardDragLeave(event)"
+          ondrop="priEpicCardDrop(event,'${epic.key}')"
+          onclick="openPane('${epic.key}')"
+          title="Drag onto another epic to reorder. Drag to a different priority band header to change priority. Click to open ${epic.key}." style="width:280px;min-width:280px;flex-shrink:0;background:${epicCardBg};border:1px solid #C8E6F7;border-left:3px solid ${epicCardBorder};border-radius:8px;padding:8px 10px;margin-right:10px;display:flex;flex-direction:column;gap:4px;position:sticky;left:0;z-index:2;box-shadow:2px 0 6px -2px rgba(0,0,0,0.12);cursor:grab${epicOpacity}">
           <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
             ${legend ? `<a href="${BASE()}${legend.key}" target="_blank" onclick="event.stopPropagation()"
               style="font-size:9px;font-weight:700;color:#9A4500;background:#FFF0E6;padding:1px 5px;border-radius:3px;text-decoration:none;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block"
