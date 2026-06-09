@@ -738,7 +738,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v172</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v173</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -1926,11 +1926,17 @@ function buildADFFromTextarea(textareaId) {
 
 
 
-function parseIssue(i){const f=i.fields;return{key:i.key,summary:f.summary||"",type:f.issuetype?.name||"Task",status:f.status?.name||"Backlog",assignee:f.assignee?.displayName||"Unassigned",assigneeEmail:f.assignee?.emailAddress||"",priority:f.priority?.name||"Medium",updated:(f.updated||"").slice(0,10),updatedRaw:f.updated||"",parent_key:f.parent?.key||null,parent_summary:f.parent?.fields?.summary||"",parent_type:f.parent?.fields?.issuetype?.name||"",description:extractText(f.description),descriptionHtml: f.description ? extractRichText(f.description, {maxLen: 4000}) : '',project:f.project?.key||i.key.split("-")[0],projectName:f.project?.name||"",subtasks:(f.subtasks||[]).map(s=>({key:s.key,summary:s.fields?.summary||"",status:s.fields?.status?.name||"",type:s.fields?.issuetype?.name||"Sub-task"})),subtaskCount:(f.subtasks||[]).length,epicLink:f.customfield_10014||null,commentCount:(f.comment?.total||0),attachmentCount:Array.isArray(f.attachment)?f.attachment.length:0,labels:Array.isArray(f.labels)?f.labels.slice():[]};}
+function parseIssue(i){const f=i.fields;
+// v173: extract issue links into a flat array {key, summary, status, type, direction}.
+// direction = 'outward' means THIS issue → linked (e.g. this blocks linked);
+// 'inward' means linked → THIS issue (e.g. this is blocked by linked).
+const links=[];if(Array.isArray(f.issuelinks)){for(const l of f.issuelinks){const t=l.type||{};if(l.outwardIssue){const o=l.outwardIssue;links.push({key:o.key,summary:o.fields?.summary||"",status:o.fields?.status?.name||"",type:t.name||"Link",direction:"outward",label:t.outward||"links to"});}if(l.inwardIssue){const inI=l.inwardIssue;links.push({key:inI.key,summary:inI.fields?.summary||"",status:inI.fields?.status?.name||"",type:t.name||"Link",direction:"inward",label:t.inward||"linked from"});}}}
+return{key:i.key,summary:f.summary||"",type:f.issuetype?.name||"Task",status:f.status?.name||"Backlog",assignee:f.assignee?.displayName||"Unassigned",assigneeEmail:f.assignee?.emailAddress||"",priority:f.priority?.name||"Medium",updated:(f.updated||"").slice(0,10),updatedRaw:f.updated||"",parent_key:f.parent?.key||null,parent_summary:f.parent?.fields?.summary||"",parent_type:f.parent?.fields?.issuetype?.name||"",description:extractText(f.description),descriptionHtml: f.description ? extractRichText(f.description, {maxLen: 4000}) : '',project:f.project?.key||i.key.split("-")[0],projectName:f.project?.name||"",subtasks:(f.subtasks||[]).map(s=>({key:s.key,summary:s.fields?.summary||"",status:s.fields?.status?.name||"",type:s.fields?.issuetype?.name||"Sub-task"})),subtaskCount:(f.subtasks||[]).length,epicLink:f.customfield_10014||null,commentCount:(f.comment?.total||0),attachmentCount:Array.isArray(f.attachment)?f.attachment.length:0,links:links,linkCount:links.length,labels:Array.isArray(f.labels)?f.labels.slice():[]};}
 
 // v168: shared icon row for card views. Renders small inline badges for
-// comments / attachments / sub-tasks so context is consistent everywhere
-// a card appears (My Tasks, Epic Focus, Team swim lanes, Prioritise).
+// comments / attachments / sub-tasks / dependencies so context is consistent
+// everywhere a card appears (My Tasks, Epic Focus, Team, Prioritise).
+// v173: added 🔗 dependencies icon — count of linked issues (blocks, depends on, etc.)
 function issueIconRow(issue, size){
   if (!issue) return '';
   const fs = (size === 'large') ? 11 : 10;
@@ -1938,9 +1944,11 @@ function issueIconRow(issue, size){
   const cc = issue.commentCount || 0;
   const ac = issue.attachmentCount || 0;
   const sc = issue.subtaskCount || (Array.isArray(issue.subtasks) ? issue.subtasks.length : 0);
+  const lc = issue.linkCount || (Array.isArray(issue.links) ? issue.links.length : 0);
   if (cc) parts.push('<span title="' + cc + ' comment' + (cc===1?'':'s') + '" style="font-size:' + fs + 'px;color:#9EA0A4;display:inline-flex;align-items:center;gap:1px">💬' + cc + '</span>');
   if (ac) parts.push('<span title="' + ac + ' attachment' + (ac===1?'':'s') + '" style="font-size:' + fs + 'px;color:#9EA0A4;display:inline-flex;align-items:center;gap:1px">📎' + ac + '</span>');
   if (sc) parts.push('<span title="' + sc + ' sub-task' + (sc===1?'':'s') + '" style="font-size:' + fs + 'px;color:#9EA0A4;display:inline-flex;align-items:center;gap:1px">⊟' + sc + '</span>');
+  if (lc) parts.push('<span title="' + lc + ' dependenc' + (lc===1?'y':'ies') + '" style="font-size:' + fs + 'px;color:#E08000;display:inline-flex;align-items:center;gap:1px;font-weight:700">🔗' + lc + '</span>');
   return parts.length ? parts.join(' ') : '';
 }
 
@@ -1967,7 +1975,8 @@ async function fetchAllTeamIssues(){
   // labels populated. Without this, the detail pane shows 'No labels yet' for
   // any issue that's already in the cache, even when Jira has labels on it.
   // v168: also fetch attachment so card-level icons (📎) work for every issue.
-  const fields="summary,status,assignee,priority,issuetype,updated,parent,description,project,subtasks,customfield_10014,comment,labels,attachment";
+  // v173: also fetch issuelinks for the dependencies feature.
+  const fields="summary,status,assignee,priority,issuetype,updated,parent,description,project,subtasks,customfield_10014,comment,labels,attachment,issuelinks";
   const projScope = getActiveProjectsJQL();
   let jql='statusCategory != Done ORDER BY updated DESC';
   if(currentProjFilter) jql='project='+currentProjFilter+' AND '+jql;
@@ -3566,9 +3575,16 @@ function exportEpicFocusToExcel(){
     const url = 'https://loopup.atlassian.net/browse/' + i.key;
     const labels = Array.isArray(i.labels) ? i.labels.join(', ') : '';
     const safe = s => (s == null ? '' : String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const descRaw = (i.description || '').toString();
+    const descCell = safe(descRaw).replace(/\r\n|\r|\n/g, '<br>');
+    // v173: dependencies cell — readable list like "blocks: MKT-100; is blocked by: MKT-99"
+    const depCell = Array.isArray(i.links) && i.links.length
+      ? i.links.map(l => safe((l.label || l.type) + ': ' + l.key + (l.summary ? ' — ' + l.summary : ''))).join('<br>')
+      : '';
     return '<tr>'
       + '<td><a href="' + safe(url) + '">' + safe(i.key) + '</a></td>'
       + '<td>' + safe(i.summary || '') + '</td>'
+      + '<td style="mso-number-format:\'\\@\';vertical-align:top;white-space:normal">' + descCell + '</td>'
       + '<td>' + safe(i.type || '') + '</td>'
       + '<td>' + safe(i.status || '') + '</td>'
       + '<td>' + safe(i.priority || '') + '</td>'
@@ -3577,6 +3593,7 @@ function exportEpicFocusToExcel(){
       + '<td>' + (i.commentCount || 0) + '</td>'
       + '<td>' + (i.attachmentCount || 0) + '</td>'
       + '<td>' + (i.subtaskCount || (Array.isArray(i.subtasks) ? i.subtasks.length : 0)) + '</td>'
+      + '<td style="vertical-align:top;white-space:normal">' + depCell + '</td>'
       + '<td>' + safe(i.updated || '') + '</td>'
       + '<td>' + safe(i.project || '') + '</td>'
       + '</tr>';
@@ -3586,11 +3603,11 @@ function exportEpicFocusToExcel(){
   const html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">'
     + '<head><meta charset="utf-8"><title>' + headerLabel + '</title></head><body>'
     + '<table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:11px">'
-    + '<tr style="background:#125462;color:#fff;font-weight:bold"><th colspan="12" style="text-align:left;padding:6px 8px">' + headerLabel + '</th></tr>'
+    + '<tr style="background:#125462;color:#fff;font-weight:bold"><th colspan="14" style="text-align:left;padding:6px 8px">' + headerLabel + '</th></tr>'
     + '<tr style="background:#E0F0F8;font-weight:bold">'
-    +   '<th>Key</th><th>Summary</th><th>Type</th><th>Status</th><th>Priority</th>'
+    +   '<th>Key</th><th>Summary</th><th style="min-width:200px">Description</th><th>Type</th><th>Status</th><th>Priority</th>'
     +   '<th>Assignee</th><th>Labels</th><th>Comments</th><th>Attachments</th>'
-    +   '<th>Sub-tasks</th><th>Last updated</th><th>Project</th>'
+    +   '<th>Sub-tasks</th><th style="min-width:160px">Dependencies</th><th>Last updated</th><th>Project</th>'
     + '</tr>'
     + rowsHtml
     + '</table></body></html>';
@@ -4081,7 +4098,7 @@ function openPane(key){
     document.getElementById("pane-hdr").innerHTML = `<div style="padding:14px;color:#fff;font-size:13px">${spinHtml(14,'#fff')} Loading ${key}…</div>`;
     document.getElementById("pane-body").innerHTML = '';
     document.getElementById("pane-tabs").innerHTML = '';
-    jiraGet('/rest/api/3/issue/'+key+'?fields=summary,status,assignee,priority,issuetype,updated,parent,description,project,subtasks,customfield_10014,comment,labels').then(d=>{
+    jiraGet('/rest/api/3/issue/'+key+'?fields=summary,status,assignee,priority,issuetype,updated,parent,description,project,subtasks,customfield_10014,comment,labels,attachment,issuelinks').then(d=>{
       const parsed = parseIssue(d);
       openIssue = parsed; paneTab = 'main';
       renderPaneHdr(parsed); renderPaneTabs(); renderPaneMain();
@@ -4609,6 +4626,25 @@ async function renderPaneMain(){
         ${i.descriptionHtml?`<div class="desc-box">${i.descriptionHtml}</div>`:(i.description?`<div class="desc-box">${_autoLinkify(_escHtml(i.description))}</div>`:`<div style="font-size:13px;color:#9EA0A4;font-style:italic">No description.</div>`)}
       </div>
     </div>
+    <!-- v173: Dependencies — issues linked to this one (blocks, is blocked by, etc.) -->
+    ${(Array.isArray(i.links) && i.links.length) ? `<div class="pane-section">
+      <div class="pane-section-title">Dependencies <span style="font-size:11px;color:#9EA0A4;font-weight:600">(${i.links.length})</span></div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        ${i.links.map(l => {
+          const dirIcon = l.direction === 'outward' ? '→' : '←';
+          const dirColor = (l.label && /block/i.test(l.label)) ? '#D6202B' : (l.label && /depend/i.test(l.label)) ? '#E08000' : '#5D7987';
+          const statusCol = l.status || '';
+          const sc = SC[statusCol] || (statusCol ? { c:'#5D7987', bg:'#EEF1F3' } : { c:'#5D7987', bg:'#EEF1F3' });
+          return `<div onclick="openPane('${l.key.replace(/'/g,"\\'")}')" style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:#F7F8F9;border:1px solid #EEF1F3;border-radius:6px;cursor:pointer;font-size:12px">
+            <span style="font-size:11px;color:${dirColor};font-weight:700;min-width:80px" title="Link type">${dirIcon} ${_escHtml(l.label || l.type)}</span>
+            <span style="font-weight:700;color:#257AA5;font-family:monospace">${l.key}</span>
+            <span style="flex:1;color:#292E37;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_escHtml(l.summary||'')}</span>
+            ${statusCol ? `<span class="badge" style="background:${sc.bg};color:${sc.c};font-size:10px">${_escHtml(statusCol)}</span>` : ''}
+            <a href="${BASE()}${l.key}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;color:#9EA0A4;text-decoration:none" title="Open in Jira">↗</a>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>` : ''}
     <!-- v92: Attachments section. We lazy-load the attachment field rather
          than including it in the bulk fetch, because attachments aren't on
          every issue and the metadata can be chatty (URLs, author objects).
