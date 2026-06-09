@@ -738,7 +738,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v173</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v174</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -910,6 +910,11 @@ button,select,textarea,input{font-family:inherit}
       <div style="display:flex;align-items:center;gap:6px">
         <span style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em">Filter by</span>
         <select id="epicfocus-user-sel" onchange="onEpicFocusUserChange()" style="padding:4px 8px;border:1px solid #E4E6E8;border-radius:6px;font-size:12px;font-weight:600;color:#125462;background:#fff"></select>
+      </div>
+      <!-- v174: project filter, to the left of the epic search -->
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em">Project</span>
+        <select id="epicfocus-proj-sel" onchange="onEpicFocusProjChange()" style="padding:4px 8px;border:1px solid #E4E6E8;border-radius:6px;font-size:12px;font-weight:600;color:#125462;background:#fff"></select>
       </div>
       <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:280px;position:relative">
         <span style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em">Epic</span>
@@ -1204,12 +1209,14 @@ let epicFocusKey = '';
 let epicFocusUserFilter = '';   // '' = all users; otherwise an assignee name
 // v172: dropdown view mode for Epic Focus (replaces global toggles on this view)
 let epicFocusView = 'priority'; // 'priority' | 'team' | 'compact'
+// v174: project filter on Epic Focus. '' = all projects.
+let epicFocusProjectFilter = '';
 let showDoneByView = {mytasks:true, myepics:true, team:true, prioritise:true, manager:true};
 // v156: cancelled is a separate axis from done — hidden by default.
 let showCancelled = false;
 
 /* ══ PERSISTENCE ══ */
-function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,groupProjectAssignment,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed,doneDays,commentReadState,priViewMode,priBandCollapsed,showDone,showDoneByView,showCancelled,epicFocusKey,epicFocusUserFilter,epicFocusView,sharedTeams:[...sharedTeams],priProjKey}));}catch{}}
+function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,groupProjectAssignment,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed,doneDays,commentReadState,priViewMode,priBandCollapsed,showDone,showDoneByView,showCancelled,epicFocusKey,epicFocusUserFilter,epicFocusView,epicFocusProjectFilter,sharedTeams:[...sharedTeams],priProjKey}));}catch{}}
 function loadAll(){try{const d=JSON.parse(localStorage.getItem(STOR)||"{}");if(d.cfg)cfg=d.cfg;if(d.locStat)locStat=d.locStat;if(d.locPri)locPri=d.locPri;if(d.currentIam)currentIam=d.currentIam;if(d.currentProjFilter)currentProjFilter=d.currentProjFilter;
 if(d.currentProjectGroup)currentProjectGroup=d.currentProjectGroup;if(d.currentGroup)currentGroup=d.currentGroup;if(d.teamMembers)teamMembers=d.teamMembers;if(d.adminUsers)adminUsers=d.adminUsers;if(d.groups)groups=d.groups;
 if(d.groupProjectAssignment)groupProjectAssignment=d.groupProjectAssignment;if(d.excludedProjects)excludedProjects=d.excludedProjects;if(d.currentView)currentView=d.currentView;if(d.currentLevel)currentLevel=d.currentLevel;if(d.rowCollapsed)rowCollapsed={...rowCollapsed,...d.rowCollapsed};if(d.swimCollapsed)swimCollapsed={...swimCollapsed,...d.swimCollapsed};
@@ -1234,6 +1241,7 @@ if(typeof d.showCancelled === 'boolean') showCancelled = d.showCancelled;
 if(typeof d.epicFocusKey === 'string') epicFocusKey = d.epicFocusKey;
 if(typeof d.epicFocusUserFilter === 'string') epicFocusUserFilter = d.epicFocusUserFilter;
 if(typeof d.epicFocusView === 'string') epicFocusView = d.epicFocusView;
+if(typeof d.epicFocusProjectFilter === 'string') epicFocusProjectFilter = d.epicFocusProjectFilter;
 if(Array.isArray(d.sharedTeams)) sharedTeams = new Set(d.sharedTeams);
 if(typeof d.priProjKey === 'string') priProjKey = d.priProjKey;
 }catch{}}
@@ -3261,7 +3269,12 @@ function _isEpicLevelType(t){ return t === 'Epic' || t === 'Milestone'; }
 function _epicFocusAvailableEpics(){
   // Epics & Milestones in the loaded set. Optional user filter keeps only
   // epics that have at least one child task assigned to the given user.
-  const epics = (allIssues || []).filter(i => _isEpicLevelType(i.type));
+  // v174: also respects the project filter dropdown.
+  let epics = (allIssues || []).filter(i => _isEpicLevelType(i.type));
+  // Project filter: keep only epics in the chosen project (if any)
+  if (epicFocusProjectFilter){
+    epics = epics.filter(e => (e.project || '') === epicFocusProjectFilter);
+  }
   if (!epicFocusUserFilter) return epics;
   const ok = new Set();
   for (const i of allIssues){
@@ -3270,6 +3283,43 @@ function _epicFocusAvailableEpics(){
     }
   }
   return epics.filter(e => ok.has(e.key));
+}
+
+// v174: populate the project filter dropdown.
+//   Order: "All projects" → user's projects (where they have assigned issues)
+//   → separator → all other projects (alphabetical). Same pattern used in
+//   the Create modal so users see familiar projects first.
+function populateEpicFocusProjSel(){
+  const sel = document.getElementById('epicfocus-proj-sel');
+  if (!sel) return;
+  const me = currentIam || '';
+  const myProjs = new Set();
+  if (me){
+    for (const i of (allIssues || [])){
+      if (i.assignee === me && i.project) myProjs.add(i.project);
+    }
+  }
+  const all = (typeof allProjects !== 'undefined' && Array.isArray(allProjects)) ? allProjects : [];
+  const myList = all.filter(p => myProjs.has(p.key)).sort((a,b) => a.key.localeCompare(b.key));
+  const otherList = all.filter(p => !myProjs.has(p.key)).sort((a,b) => a.key.localeCompare(b.key));
+  const opt = (p) => '<option value="' + _escHtml(p.key) + '"' + (p.key === epicFocusProjectFilter ? ' selected' : '') + '>' + _escHtml(p.key) + ' — ' + _escHtml(p.name || '') + '</option>';
+  let html = '<option value=""' + (epicFocusProjectFilter ? '' : ' selected') + '>All projects</option>';
+  if (myList.length){
+    html += '<optgroup label="Your projects">' + myList.map(opt).join('') + '</optgroup>';
+  }
+  if (otherList.length){
+    html += '<optgroup label="All projects">' + otherList.map(opt).join('') + '</optgroup>';
+  }
+  sel.innerHTML = html;
+}
+function onEpicFocusProjChange(){
+  const sel = document.getElementById('epicfocus-proj-sel');
+  epicFocusProjectFilter = sel ? sel.value : '';
+  saveAll();
+  // Refresh the dropdown if it's open
+  const inp = document.getElementById('epicfocus-search');
+  if (inp) onEpicFocusSearch(inp.value || '');
+  renderEpicFocus();
 }
 
 function populateEpicFocusUserSel(){
@@ -3365,6 +3415,7 @@ function setEpicFocusView(mode){
 
 function renderEpicFocus(){
   populateEpicFocusUserSel();
+  populateEpicFocusProjSel(); // v174
   const table = document.getElementById('epicfocus-table');
   if (!table) return;
 
