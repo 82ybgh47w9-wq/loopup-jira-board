@@ -280,12 +280,10 @@ button,select,textarea,input{font-family:inherit}
 .card-state-done .card-summary,
 .card-state-done [data-card-summary],
 .card-state-done .pri-emc-sum{text-decoration:line-through;color:#2D7A2D}
-.card-state-active{background:#5E8E38}
-.card-state-active .card-summary,
-.card-state-active [data-card-summary],
-.card-state-active .pri-emc-sum{color:#fff}
-.card-state-active .card-keyrow a,
-.card-state-active [data-card-summary] a{color:#E5F5DD !important}
+/* v181b: Active = light green background with a dark green border (matches the
+   Team-page is-active treatment). Was dark-green-fill before — too heavy and
+   unreadable. The border is the differentiator vs In Progress (same bg). */
+.card-state-active{background:#F0FBF0;border:2px solid #5E8E38 !important}
 .card-state-epic{background:#F0E4FA}
 .card-state-epic.card-state-done{background:#E5F5DD}
 /* Epic column header (vertical Projects view) follows the same palette */
@@ -2541,7 +2539,7 @@ function cardHtml(issue,showActiveBtn=false,compact=false,draggable=false){
   const stateCls = cardStateClass(issue, isActive);
   const par=issue.parent_key?`<span style="font-size:10px;color:#C9CACC">↑</span>${klink(issue.parent_key)}${issue.parent_summary?`<span style="font-size:10px;color:#C9CACC"> ${issue.parent_summary.slice(0,20)}${issue.parent_summary.length>20?"…":""}</span>`:""}`:""
   const dragAttr=draggable?`draggable="true" ondragstart="onDragStart(event,'${issue.key}')" ondragend="onDragEnd(event)"`:"";
-  const activeBtnHtml=showActiveBtn?`<button onclick="event.stopPropagation();(async()=>{await toggleActive('${issue.assignee.replace(/'/g,"\\'")}','${issue.key}');renderMain()})()" style="font-size:10px;padding:3px 9px;border-radius:12px;border:none;cursor:pointer;font-weight:700;margin-left:4px;${isActive?'background:#fff;color:#5E8E38;border:1px solid #fff':'background:#EEF1F3;color:#5D7987;border:1px solid #C9CACC'}">${isActive?"● Active":"Make Active"}</button>`:""
+  const activeBtnHtml=showActiveBtn?`<button onclick="event.stopPropagation();(async()=>{await toggleActive('${issue.assignee.replace(/'/g,"\\'")}','${issue.key}');renderMain()})()" style="font-size:10px;padding:3px 9px;border-radius:12px;border:none;cursor:pointer;font-weight:700;margin-left:4px;${isActive?'background:#5E8E38;color:#fff':'background:#EEF1F3;color:#5D7987;border:1px solid #C9CACC'}">${isActive?"● Active":"Make Active"}</button>`:""
   return`<div class="card ${stateCls} ${isActive?"is-active":""} ${isDone?"is-done":""}" style="border-left:3px solid ${lc}" onclick="openPane('${issue.key}')" ${dragAttr}>
     <div class="card-keyrow">${klink(issue.key)}${par}${activeBtnHtml}</div>
     <div class="card-summary">${issue.summary}</div>
