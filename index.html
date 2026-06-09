@@ -716,7 +716,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v167</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v168</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -881,8 +881,9 @@ button,select,textarea,input{font-family:inherit}
     <div class="matrix-wrap"><table class="matrix-table" id="matrix-table"></table></div>
   </div>
   <!-- v167: Epic Focus page — pick a single epic and see all its child tasks
-       in the same matrix layout as My Tasks. -->
-  <div id="page-epicfocus" style="display:none;flex-direction:column">
+       in the same matrix layout as My Tasks. v168: flex + min-height:0 so
+       the matrix-wrap inside can scroll vertically. -->
+  <div id="page-epicfocus" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden">
     <div style="display:flex;align-items:center;gap:10px;padding:8px 15px;background:#F7F8F9;border-bottom:1px solid #E4E6E8;flex-wrap:wrap">
       <div style="display:flex;align-items:center;gap:6px">
         <span style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em">Filter by</span>
@@ -1889,7 +1890,23 @@ function buildADFFromTextarea(textareaId) {
 
 
 
-function parseIssue(i){const f=i.fields;return{key:i.key,summary:f.summary||"",type:f.issuetype?.name||"Task",status:f.status?.name||"Backlog",assignee:f.assignee?.displayName||"Unassigned",assigneeEmail:f.assignee?.emailAddress||"",priority:f.priority?.name||"Medium",updated:(f.updated||"").slice(0,10),updatedRaw:f.updated||"",parent_key:f.parent?.key||null,parent_summary:f.parent?.fields?.summary||"",parent_type:f.parent?.fields?.issuetype?.name||"",description:extractText(f.description),descriptionHtml: f.description ? extractRichText(f.description, {maxLen: 4000}) : '',project:f.project?.key||i.key.split("-")[0],projectName:f.project?.name||"",subtasks:(f.subtasks||[]).map(s=>({key:s.key,summary:s.fields?.summary||"",status:s.fields?.status?.name||"",type:s.fields?.issuetype?.name||"Sub-task"})),epicLink:f.customfield_10014||null,commentCount:(f.comment?.total||0),labels:Array.isArray(f.labels)?f.labels.slice():[]};}
+function parseIssue(i){const f=i.fields;return{key:i.key,summary:f.summary||"",type:f.issuetype?.name||"Task",status:f.status?.name||"Backlog",assignee:f.assignee?.displayName||"Unassigned",assigneeEmail:f.assignee?.emailAddress||"",priority:f.priority?.name||"Medium",updated:(f.updated||"").slice(0,10),updatedRaw:f.updated||"",parent_key:f.parent?.key||null,parent_summary:f.parent?.fields?.summary||"",parent_type:f.parent?.fields?.issuetype?.name||"",description:extractText(f.description),descriptionHtml: f.description ? extractRichText(f.description, {maxLen: 4000}) : '',project:f.project?.key||i.key.split("-")[0],projectName:f.project?.name||"",subtasks:(f.subtasks||[]).map(s=>({key:s.key,summary:s.fields?.summary||"",status:s.fields?.status?.name||"",type:s.fields?.issuetype?.name||"Sub-task"})),subtaskCount:(f.subtasks||[]).length,epicLink:f.customfield_10014||null,commentCount:(f.comment?.total||0),attachmentCount:Array.isArray(f.attachment)?f.attachment.length:0,labels:Array.isArray(f.labels)?f.labels.slice():[]};}
+
+// v168: shared icon row for card views. Renders small inline badges for
+// comments / attachments / sub-tasks so context is consistent everywhere
+// a card appears (My Tasks, Epic Focus, Team swim lanes, Prioritise).
+function issueIconRow(issue, size){
+  if (!issue) return '';
+  const fs = (size === 'large') ? 11 : 10;
+  const parts = [];
+  const cc = issue.commentCount || 0;
+  const ac = issue.attachmentCount || 0;
+  const sc = issue.subtaskCount || (Array.isArray(issue.subtasks) ? issue.subtasks.length : 0);
+  if (cc) parts.push('<span title="' + cc + ' comment' + (cc===1?'':'s') + '" style="font-size:' + fs + 'px;color:#9EA0A4;display:inline-flex;align-items:center;gap:1px">💬' + cc + '</span>');
+  if (ac) parts.push('<span title="' + ac + ' attachment' + (ac===1?'':'s') + '" style="font-size:' + fs + 'px;color:#9EA0A4;display:inline-flex;align-items:center;gap:1px">📎' + ac + '</span>');
+  if (sc) parts.push('<span title="' + sc + ' sub-task' + (sc===1?'':'s') + '" style="font-size:' + fs + 'px;color:#9EA0A4;display:inline-flex;align-items:center;gap:1px">⊟' + sc + '</span>');
+  return parts.length ? parts.join(' ') : '';
+}
 
 // v143: format a Jira-supplied ISO timestamp in the user's local timezone.
 // Used by the detail pane's "Last updated" line.
@@ -1913,7 +1930,8 @@ async function fetchAllTeamIssues(){
   // v123: include 'labels' so issues in the local cache (allIssues) have their
   // labels populated. Without this, the detail pane shows 'No labels yet' for
   // any issue that's already in the cache, even when Jira has labels on it.
-  const fields="summary,status,assignee,priority,issuetype,updated,parent,description,project,subtasks,customfield_10014,comment,labels";
+  // v168: also fetch attachment so card-level icons (📎) work for every issue.
+  const fields="summary,status,assignee,priority,issuetype,updated,parent,description,project,subtasks,customfield_10014,comment,labels,attachment";
   const projScope = getActiveProjectsJQL();
   let jql='statusCategory != Done ORDER BY updated DESC';
   if(currentProjFilter) jql='project='+currentProjFilter+' AND '+jql;
@@ -2313,7 +2331,7 @@ function cardHtml(issue,showActiveBtn=false,compact=false,draggable=false){
   return`<div class="card ${isActive?"is-active":""} ${isDone?"is-done":""}" style="border-left:3px solid ${lc}${doneCardExt}" onclick="openPane('${issue.key}')" ${dragAttr}>
     <div class="card-keyrow">${klink(issue.key)}${par}${activeBtnHtml}</div>
     <div class="card-summary" style="${doneSumExt}">${issue.summary}</div>
-    <div class="card-meta">${tbadge(issue.type)}${pbadge(issue.priority)}${!compact?ava(issue.assignee,20):""}${issue.commentCount?`<span style="font-size:10px;color:#9EA0A4;display:inline-flex;align-items:center;gap:2px;margin-left:4px" title="${issue.commentCount} comments">💬${issue.commentCount}</span>`:""}</div>
+    <div class="card-meta">${tbadge(issue.type)}${pbadge(issue.priority)}${!compact?ava(issue.assignee,20):""}<span style="display:inline-flex;align-items:center;gap:6px;margin-left:auto">${issueIconRow(issue)}</span></div>
   </div>`;
 }
 
@@ -3051,9 +3069,12 @@ function renderMyTasks(){
           </div></td>`;
         });
       } else {
+        // v168: respect the Compact toggle here too, so My Tasks matches Epic Focus
+        const compact = document.getElementById('compact-toggle')?.checked === true;
         const sorted=rowIssues.sort((a,b)=>(PRI_ORD[a.priority]||99)-(PRI_ORD[b.priority]||99));
+        const renderer = compact ? cardHtmlCompact : (i)=>cardHtml(i,showActive,true,true);
         html+=`<td class="matrix-cell" colspan="1"><div class="matrix-cell-inner lane-drop-zone" ondragover="onDragOver(event,'${rowStatus}')" ondragleave="onDragLeave(event)" ondrop="onDrop(event,'${rowStatus}')">
-          ${sorted.length?sorted.map(i=>cardHtml(i,showActive,true,true)).join(""):'<div style="font-size:11px;color:#E4E6E8;padding:4px">—</div>'}
+          ${sorted.length?sorted.map(renderer).join(""):'<div style="font-size:11px;color:#E4E6E8;padding:4px">—</div>'}
         </div></td>`;
       }
       html+=`</tr>`;
@@ -3289,7 +3310,7 @@ function cardHtmlCompact(issue){
     <span class="badge" style="background:${pc.bg};color:${pc.c};font-size:10px;flex-shrink:0"><span class="pri-dot" style="background:${pc.d}"></span>${issue.priority||'Medium'}</span>
     ${issue.assignee && issue.assignee !== 'Unassigned' ? `<span style="font-size:11px;color:#5D7987;flex-shrink:0;display:inline-flex;align-items:center;gap:4px">${ava(issue.assignee, 18)} ${_escHtml(issue.assignee)}</span>` : '<span style="font-size:11px;color:#C9CACC;font-style:italic;flex-shrink:0">Unassigned</span>'}
     ${updated ? `<span style="font-size:10px;color:#9EA0A4;flex-shrink:0" title="Last updated">${updated}</span>` : ''}
-    ${cc ? `<span style="font-size:10px;color:#9EA0A4;flex-shrink:0" title="${cc} comments">💬${cc}</span>` : ''}
+    <span style="display:inline-flex;align-items:center;gap:6px;flex-shrink:0">${issueIconRow(issue)}</span>
   </div>`;
 }
 
@@ -3448,8 +3469,9 @@ function swimCard(issue, isActiveRow=false, isDone=false){
     <div class="card-summary" style="${isDone?"text-decoration:line-through;color:#2D7A2D":""}">${issue.summary}</div>
     <div class="card-meta">
       ${tbadge(issue.type)}${pbadge(issue.priority)}
+      <span style="display:inline-flex;align-items:center;gap:6px;margin-left:auto">${issueIconRow(issue)}</span>
       <button onclick="event.stopPropagation();(async()=>{await toggleActive('${issue.assignee.replace(/'/g,"\'")}','${issue.key}');renderMain()})()"
-        style="font-size:10px;padding:3px 9px;border-radius:12px;border:none;cursor:pointer;font-weight:700;margin-left:auto;
+        style="font-size:10px;padding:3px 9px;border-radius:12px;border:none;cursor:pointer;font-weight:700;
         ${isActive?"background:#5E8E38;color:#fff":"background:#EEF1F3;color:#5D7987;border:1px solid #C9CACC"}">
         ${isActive?"● Active":"Make Active"}
       </button>
@@ -7803,7 +7825,7 @@ function priCardHtml(t, rank) {
       <span class="badge" style="background:${sc.bg};color:${sc.c}">${t.status}</span>
       <span class="badge" style="background:${pc.bg};color:${pc.c}"><span class="pri-dot" style="background:${pc.d}"></span>${t.priority}</span>
       ${isUnassigned ? '<span class="badge" style="background:#FFF0CC;color:#9A4500">Unassigned</span>' : ''}
-      ${t.commentCount?`<span style="font-size:10px;color:#9EA0A4;display:inline-flex;align-items:center;gap:2px;margin-left:auto">💬${t.commentCount}</span>`:''}
+      <span style="display:inline-flex;align-items:center;gap:6px;margin-left:auto">${issueIconRow(t)}</span>
     </div>
   </div>`;
 }
@@ -8519,7 +8541,7 @@ function priCardHtmlH(t, rank) {
     <div style="display:flex;align-items:center;gap:3px;flex-wrap:wrap">
       <span class="badge" style="background:${sc.bg};color:${sc.c};font-size:9px;padding:1px 5px">${t.status}</span>
       <span class="badge" style="background:${pc.bg};color:${pc.c};font-size:9px;padding:1px 5px"><span class="pri-dot" style="background:${pc.d}"></span>${t.priority}</span>
-      ${t.commentCount?`<span style="font-size:9px;color:#9EA0A4;margin-left:auto">💬${t.commentCount}</span>`:''}
+      <span style="display:inline-flex;align-items:center;gap:4px;margin-left:auto">${issueIconRow(t)}</span>
     </div>
   </div>`;
 }
