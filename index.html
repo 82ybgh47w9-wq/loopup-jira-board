@@ -738,7 +738,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v171</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v172</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -922,6 +922,17 @@ button,select,textarea,input{font-family:inherit}
         <div id="epicfocus-results" style="display:none;position:absolute;top:100%;left:60px;right:0;background:#fff;border:1px solid #C9CACC;border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:340px;overflow-y:auto;z-index:50"></div>
         <span id="epicfocus-selected" style="font-size:11px;font-weight:700;color:#125462"></span>
       </div>
+      <!-- v172: view-mode dropdown (Priority / Team / Compact) replaces the two checkboxes for this view -->
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em">View</span>
+        <select id="epicfocus-view-sel" onchange="setEpicFocusView(this.value)" style="padding:4px 8px;border:1px solid #E4E6E8;border-radius:6px;font-size:12px;font-weight:600;color:#125462;background:#fff">
+          <option value="priority">Priority columns</option>
+          <option value="team">Team columns</option>
+          <option value="compact">Compact list</option>
+        </select>
+      </div>
+      <!-- v172: Excel export, only shown in Compact mode -->
+      <button id="epicfocus-export-btn" onclick="exportEpicFocusToExcel()" style="display:none;font-size:11px;padding:5px 12px;border-radius:6px;border:1px solid #5E8E38;background:#fff;color:#3B6D11;cursor:pointer;font-weight:700">📊 Export to Excel</button>
       <button id="epicfocus-create-btn" onclick="epicFocusCreateTask()" class="primary-btn" style="font-size:11px;padding:5px 14px" disabled>+ Create task in epic</button>
     </div>
     <div class="matrix-wrap"><table class="matrix-table" id="epicfocus-table"></table></div>
@@ -1191,12 +1202,14 @@ let showDone = true;
 // v167: Epic Focus state — persisted so reload returns to the same epic.
 let epicFocusKey = '';
 let epicFocusUserFilter = '';   // '' = all users; otherwise an assignee name
+// v172: dropdown view mode for Epic Focus (replaces global toggles on this view)
+let epicFocusView = 'priority'; // 'priority' | 'team' | 'compact'
 let showDoneByView = {mytasks:true, myepics:true, team:true, prioritise:true, manager:true};
 // v156: cancelled is a separate axis from done — hidden by default.
 let showCancelled = false;
 
 /* ══ PERSISTENCE ══ */
-function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,groupProjectAssignment,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed,doneDays,commentReadState,priViewMode,priBandCollapsed,showDone,showDoneByView,showCancelled,epicFocusKey,epicFocusUserFilter,sharedTeams:[...sharedTeams],priProjKey}));}catch{}}
+function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,groupProjectAssignment,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed,doneDays,commentReadState,priViewMode,priBandCollapsed,showDone,showDoneByView,showCancelled,epicFocusKey,epicFocusUserFilter,epicFocusView,sharedTeams:[...sharedTeams],priProjKey}));}catch{}}
 function loadAll(){try{const d=JSON.parse(localStorage.getItem(STOR)||"{}");if(d.cfg)cfg=d.cfg;if(d.locStat)locStat=d.locStat;if(d.locPri)locPri=d.locPri;if(d.currentIam)currentIam=d.currentIam;if(d.currentProjFilter)currentProjFilter=d.currentProjFilter;
 if(d.currentProjectGroup)currentProjectGroup=d.currentProjectGroup;if(d.currentGroup)currentGroup=d.currentGroup;if(d.teamMembers)teamMembers=d.teamMembers;if(d.adminUsers)adminUsers=d.adminUsers;if(d.groups)groups=d.groups;
 if(d.groupProjectAssignment)groupProjectAssignment=d.groupProjectAssignment;if(d.excludedProjects)excludedProjects=d.excludedProjects;if(d.currentView)currentView=d.currentView;if(d.currentLevel)currentLevel=d.currentLevel;if(d.rowCollapsed)rowCollapsed={...rowCollapsed,...d.rowCollapsed};if(d.swimCollapsed)swimCollapsed={...swimCollapsed,...d.swimCollapsed};
@@ -1220,6 +1233,7 @@ if(typeof d.showCancelled === 'boolean') showCancelled = d.showCancelled;
 // v167: Epic Focus selection persistence
 if(typeof d.epicFocusKey === 'string') epicFocusKey = d.epicFocusKey;
 if(typeof d.epicFocusUserFilter === 'string') epicFocusUserFilter = d.epicFocusUserFilter;
+if(typeof d.epicFocusView === 'string') epicFocusView = d.epicFocusView;
 if(Array.isArray(d.sharedTeams)) sharedTeams = new Set(d.sharedTeams);
 if(typeof d.priProjKey === 'string') priProjKey = d.priProjKey;
 }catch{}}
@@ -3087,17 +3101,15 @@ function setView(v){
     sd.style.display = hideOnViews.includes(v) ? 'none' : 'flex';
     if(!hideOnViews.includes(v)) syncGlobalShowDoneCheckbox();
   }
-  // v167: matrix + compact toggles only appear on My Tasks and Epic Focus
-  // (the two views that drive the matrix layout). Compact only enables when
-  // the matrix is OFF.
+  // v172: matrix + compact toggles only on My Tasks (Epic Focus has its own
+  // dropdown). Compact only enables when the matrix is OFF.
   const matWrap = document.getElementById('matrix-toggle-wrap');
   const cmpWrap = document.getElementById('compact-toggle-wrap');
-  const matrixViews = ['mytasks','epicfocus'];
-  if (matWrap) matWrap.style.display = matrixViews.includes(v) ? 'flex' : 'none';
+  if (matWrap) matWrap.style.display = (v === 'mytasks') ? 'flex' : 'none';
   if (cmpWrap){
     const mat = document.getElementById('matrix-toggle');
     const matrixOn = mat ? mat.checked !== false : true;
-    cmpWrap.style.display = (matrixViews.includes(v) && !matrixOn) ? 'flex' : 'none';
+    cmpWrap.style.display = (v === 'mytasks' && !matrixOn) ? 'flex' : 'none';
   }
   // Shared filter bar Project/Priority/Status: 
   //   - hidden on Activity (no concept of project/status/priority for comments)
@@ -3335,6 +3347,13 @@ function epicFocusCreateTask(){
   }
 }
 
+// v172: change the active view mode. Drives renderEpicFocus dispatch.
+function setEpicFocusView(mode){
+  epicFocusView = (mode === 'team' || mode === 'compact') ? mode : 'priority';
+  saveAll();
+  renderEpicFocus();
+}
+
 function renderEpicFocus(){
   populateEpicFocusUserSel();
   const table = document.getElementById('epicfocus-table');
@@ -3343,6 +3362,12 @@ function renderEpicFocus(){
   const createBtn = document.getElementById('epicfocus-create-btn');
   const selEl = document.getElementById('epicfocus-selected');
   if (selEl) selEl.textContent = '';
+  // Sync the view dropdown
+  const viewSel = document.getElementById('epicfocus-view-sel');
+  if (viewSel) viewSel.value = epicFocusView;
+  // Show Excel export only in Compact mode
+  const expBtn = document.getElementById('epicfocus-export-btn');
+  if (expBtn) expBtn.style.display = (epicFocusView === 'compact') ? 'inline-block' : 'none';
 
   if (!epicFocusKey){
     table.innerHTML = '<thead><tr><th></th></tr></thead><tbody><tr><td>' +
@@ -3377,8 +3402,13 @@ function renderEpicFocus(){
   if (!showDone) issues = issues.filter(i => normStatus(i.status) !== 'Done');
   if (!showCancelled) issues = issues.filter(i => !isCancelledStatus(i.status));
 
-  const useMatrix = document.getElementById('matrix-toggle')?.checked !== false;
-  const compact = !useMatrix && document.getElementById('compact-toggle')?.checked === true;
+  // v172: route to the right renderer based on the dropdown.
+  if (epicFocusView === 'team'){
+    renderEpicFocusTeam(issues);
+    return;
+  }
+  const useMatrix = (epicFocusView === 'priority');
+  const compact = (epicFocusView === 'compact');
 
   const ns = i => normStatus(i.status);
   const showActive = !!currentIam;
@@ -3427,6 +3457,161 @@ function renderEpicFocus(){
 // is off and Compact is on. Shows summary + priority + assignee + updated +
 // comment count in a single horizontal row, much shorter than the regular
 // card. Drag-and-drop works the same way as the standard card.
+// v172: Team mode for Epic Focus — assignees as columns, statuses as rows,
+// cells filled with cards. Same shape as the Team view (renderManager) but
+// scoped to the epic's children only.
+function renderEpicFocusTeam(issues){
+  const table = document.getElementById('epicfocus-table');
+  if (!table) return;
+  // Discover unique assignees from the epic's children. Sort: current
+  // user first (if among them), then alphabetical.
+  const seen = new Set();
+  const people = [];
+  for (const i of issues){
+    const name = i.assignee || 'Unassigned';
+    if (seen.has(name)) continue;
+    seen.add(name);
+    people.push(name);
+  }
+  people.sort((a, b) => {
+    if (a === 'Unassigned') return 1;
+    if (b === 'Unassigned') return -1;
+    if (a === currentIam) return -1;
+    if (b === currentIam) return 1;
+    return a.localeCompare(b);
+  });
+  if (!people.length){
+    table.innerHTML = '<thead><tr><th></th></tr></thead><tbody><tr><td>' +
+      '<div style="padding:30px;text-align:center;color:#9EA0A4;font-size:13px">No tasks in this epic yet.</div></td></tr></tbody>';
+    return;
+  }
+  const ns = i => normStatus(i.status);
+  const showActive = !!currentIam;
+  // Build column headers — person names with avatar
+  let head = '<thead><tr><th style="min-width:110px;text-align:left;position:sticky;left:0;z-index:3;background:#fff">Status</th>';
+  for (const p of people){
+    const isMe = (p === currentIam);
+    head += '<th style="min-width:220px;width:220px;padding:8px 10px;background:#fff;text-align:left">'
+      + '<div style="display:flex;align-items:center;gap:7px">'
+      + ((p === 'Unassigned') ? '<span style="width:22px;height:22px;border-radius:50%;background:#EEF1F3;display:inline-flex;align-items:center;justify-content:center;font-size:11px;color:#9EA0A4">?</span>' : ava(p, 22))
+      + '<div style="overflow:hidden">'
+      + '<div style="font-size:11px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + _escHtml(p) + (isMe ? ' <span style="font-size:9px;font-weight:700;background:#5E8E38;color:#fff;padding:1px 5px;border-radius:6px;margin-left:3px">you</span>' : '') + '</div>'
+      + '<div style="font-size:10px;color:#9EA0A4">' + issues.filter(i => (i.assignee || 'Unassigned') === p).length + ' tasks</div>'
+      + '</div></div></th>';
+  }
+  head += '</tr></thead>';
+  // Status rows
+  let body = '<tbody>';
+  STATUS_ROWS.forEach(rowStatus => {
+    const rowIssues = issues.filter(i => ns(i) === rowStatus);
+    const collapsed = rowCollapsed[rowStatus];
+    const sc = SC[rowStatus] || SC.Backlog;
+    body += `<tr class="row-hdr" onclick="toggleRowCollapse('${rowStatus}')"><td colspan="${people.length + 1}" style="position:sticky;left:0;background:#F7F8F9">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:13px;color:#9EA0A4;transition:.15s;display:inline-block;transform:${collapsed?'none':'rotate(90deg)'}">›</span>
+        <span style="color:${sc.c};font-weight:700">${rowStatus}</span>
+        <span class="badge" style="background:${sc.bg};color:${sc.c}">${rowIssues.length}</span>
+        ${rowStatus==='Done'?'<span style="font-size:10px;color:#9EA0A4">(last '+doneDays+' days)</span>':''}
+      </div>
+    </td></tr>`;
+    if (!collapsed){
+      body += '<tr>';
+      body += '<td class="matrix-cell" style="width:110px;position:sticky;left:0;background:#fff"></td>';
+      for (const p of people){
+        const cellItems = rowIssues.filter(i => (i.assignee || 'Unassigned') === p)
+          .sort((a, b) => (PRI_ORD[a.priority]||99) - (PRI_ORD[b.priority]||99));
+        const safePerson = p.replace(/'/g, "\\'");
+        body += `<td class="matrix-cell" ondragover="onDragOver(event,'${rowStatus}')" ondragleave="onDragLeave(event)" ondrop="onDropTeamLane(event,'${rowStatus}','${safePerson}')">
+          <div class="matrix-cell-inner lane-drop-zone">
+            ${cellItems.length ? cellItems.map(i => cardHtml(i, showActive, true, true)).join('') : '<div style="font-size:11px;color:#E4E6E8;padding:4px">—</div>'}
+          </div></td>`;
+      }
+      body += '</tr>';
+    }
+  });
+  body += '</tbody>';
+  table.innerHTML = head + body;
+}
+
+// v172: Export the current Epic Focus tasks (compact view) to Excel. Uses
+// the HTML-table-with-.xls-extension trick so Excel opens it directly and
+// preserves the hyperlinks to each Jira issue. No external dependencies.
+function exportEpicFocusToExcel(){
+  if (!epicFocusKey){ alert('Pick an epic first.'); return; }
+  const epic = (allIssues || []).find(i => i.key === epicFocusKey);
+  // Reconstruct the same issue list the compact view uses.
+  let issues = (allIssues || []).filter(i => i.parent_key === epicFocusKey);
+  const hierTypes = ['Epic','Milestone','Initiative','Legend'];
+  issues = issues.filter(i => !hierTypes.includes(i.type));
+  if (!showDone) issues = issues.filter(i => normStatus(i.status) !== 'Done');
+  if (!showCancelled) issues = issues.filter(i => !isCancelledStatus(i.status));
+  // Group by status, preserve manual order within each status (matches the
+  // compact view's render order).
+  const scope = localOrderScope();
+  const grouped = {};
+  for (const i of issues){
+    const s = normStatus(i.status);
+    (grouped[s] = grouped[s] || []).push(i);
+  }
+  const ordered = [];
+  for (const s of STATUS_ROWS){
+    const sortedRow = applyLocalOrder(
+      (grouped[s] || []).slice().sort((a,b) => (PRI_ORD[a.priority]||99) - (PRI_ORD[b.priority]||99)),
+      scope, s
+    );
+    ordered.push(...sortedRow);
+  }
+  // Build the HTML table. Hyperlinks render as clickable cells in Excel.
+  const rowsHtml = ordered.map(i => {
+    const url = 'https://loopup.atlassian.net/browse/' + i.key;
+    const labels = Array.isArray(i.labels) ? i.labels.join(', ') : '';
+    const safe = s => (s == null ? '' : String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return '<tr>'
+      + '<td><a href="' + safe(url) + '">' + safe(i.key) + '</a></td>'
+      + '<td>' + safe(i.summary || '') + '</td>'
+      + '<td>' + safe(i.type || '') + '</td>'
+      + '<td>' + safe(i.status || '') + '</td>'
+      + '<td>' + safe(i.priority || '') + '</td>'
+      + '<td>' + safe(i.assignee || '') + '</td>'
+      + '<td>' + safe(labels) + '</td>'
+      + '<td>' + (i.commentCount || 0) + '</td>'
+      + '<td>' + (i.attachmentCount || 0) + '</td>'
+      + '<td>' + (i.subtaskCount || (Array.isArray(i.subtasks) ? i.subtasks.length : 0)) + '</td>'
+      + '<td>' + safe(i.updated || '') + '</td>'
+      + '<td>' + safe(i.project || '') + '</td>'
+      + '</tr>';
+  }).join('');
+  const epicTitle = epic ? (epic.summary || '') : '';
+  const headerLabel = epicFocusKey + (epicTitle ? ' — ' + epicTitle : '');
+  const html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">'
+    + '<head><meta charset="utf-8"><title>' + headerLabel + '</title></head><body>'
+    + '<table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:11px">'
+    + '<tr style="background:#125462;color:#fff;font-weight:bold"><th colspan="12" style="text-align:left;padding:6px 8px">' + headerLabel + '</th></tr>'
+    + '<tr style="background:#E0F0F8;font-weight:bold">'
+    +   '<th>Key</th><th>Summary</th><th>Type</th><th>Status</th><th>Priority</th>'
+    +   '<th>Assignee</th><th>Labels</th><th>Comments</th><th>Attachments</th>'
+    +   '<th>Sub-tasks</th><th>Last updated</th><th>Project</th>'
+    + '</tr>'
+    + rowsHtml
+    + '</table></body></html>';
+  // Trigger download
+  try {
+    const blob = new Blob([html], { type: 'application/vnd.ms-excel' });
+    const safeName = (epicFocusKey + '_' + (epicTitle || 'tasks')).replace(/[^a-z0-9_\-]+/gi, '_').slice(0, 80);
+    const date = new Date().toISOString().slice(0, 10);
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'EpicFocus_' + safeName + '_' + date + '.xls';
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(() => { document.body.removeChild(link); URL.revokeObjectURL(link.href); }, 200);
+    appLogMsg('info','epicfocus','Exported ' + ordered.length + ' tasks for ' + epicFocusKey);
+  } catch(e){
+    appLogMsg('warn','epicfocus','Export failed: ' + (e.message || e));
+    alert('Export failed: ' + (e.message || e));
+  }
+}
+
 // v169: compact card with fixed-width columns. Field order: Key · Title ·
 // Icons (comments/attachments/subtasks) · Labels · Priority · Assignee ·
 // Updated date. Widths defined in CSS (.card.compact .cc-*) so cards line
