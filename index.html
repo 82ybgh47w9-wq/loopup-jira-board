@@ -40,9 +40,16 @@ button,select,textarea,input{font-family:inherit}
 
 /* Controls */
 #controls{display:flex;align-items:flex-end;gap:8px;padding:7px 15px;background:#fff;border-bottom:1px solid #E4E6E8;flex-shrink:0;flex-wrap:wrap}
-.seg{display:flex;background:#EEF1F3;border-radius:7px;padding:2px;gap:1px}
-.seg button{padding:4px 11px;font-size:12px;font-weight:700;cursor:pointer;border:none;background:transparent;color:#9EA0A4;border-radius:5px}
-.seg button.active{background:#fff;color:#125462;box-shadow:0 1px 3px rgba(0,0,0,.09)}
+.seg{display:flex;background:transparent;padding:0;gap:2px;border-bottom:2px solid #C9CACC;margin-bottom:-1px}
+.seg button{padding:7px 16px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid transparent;border-bottom:none;background:#EEF1F3;color:#5D7987;border-radius:6px 6px 0 0;position:relative;top:1px;transition:.12s}
+.seg button:hover:not(.active){background:#E4E6E8;color:#292E37}
+.seg button.active{background:#fff;color:#125462;border-color:#C9CACC;border-bottom:2px solid #fff;z-index:1}
+.seg.pri-view-seg button{position:static}
+.seg.pri-view-seg button.active{border-bottom:none}
+/* v175: bring back the small "segmented control" style for the inner Prioritise toggle */
+#pri-view-toggle.seg{border-bottom:none;margin-bottom:0;background:#EEF1F3;border-radius:7px;padding:2px}
+#pri-view-toggle.seg button{position:static;border-radius:5px;background:transparent;border:none;padding:4px 11px}
+#pri-view-toggle.seg button.active{box-shadow:0 1px 3px rgba(0,0,0,.09);border:none;background:#125462;color:#fff}
 .ctrl-select{font-size:12px;padding:4px 8px;border:1px solid #C9CACC;border-radius:6px;background:#fff;color:#292E37;cursor:pointer}
 .mention-dropdown {
   position: fixed;
@@ -738,7 +745,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v174</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v175</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -858,16 +865,19 @@ button,select,textarea,input{font-family:inherit}
 
 <!-- VIEW TABS BAR (row 3) — pick what to see AFTER setting filters -->
 <div id="controls" style="display:flex;align-items:center;gap:8px;padding:6px 15px;background:#F7F8F9;border-bottom:1px solid #E4E6E8;flex-shrink:0;flex-wrap:wrap">
+  <!-- v175: tab reorder + rename. Team first, then narrowing scope:
+       Team → Projects (was Prioritise) → Epics (was Epic Focus) → My Epics
+       → My Tasks → Labels → Comments → Done → Meeting / Task Generator.
+       The internal setView keys stay the same so links / persistence don't break. -->
   <div class="seg" id="view-seg">
-    <button class="active" onclick="setView('mytasks')">My Tasks</button>
-    <button onclick="setView('myepics')">My Epics</button>
-    <button onclick="setView('done')">Done</button>
-    <button onclick="setView('prioritise')">Prioritise</button>
-    <!-- v167: focus on a single Epic — same layout as My Tasks but scoped to one parent -->
-    <button onclick="setView('epicfocus')">Epic Focus</button>
     <button onclick="setView('manager')" id="btn-manager">Team</button>
-    <button onclick="setView('activity')">Comments</button>
+    <button onclick="setView('prioritise')">Projects</button>
+    <button onclick="setView('epicfocus')">Epics</button>
+    <button onclick="setView('myepics')">My Epics</button>
+    <button class="active" onclick="setView('mytasks')">My Tasks</button>
     <button onclick="setView('labels')">Labels</button>
+    <button onclick="setView('activity')">Comments</button>
+    <button onclick="setView('done')">Done</button>
     <!-- v155: tab label matches the in-section title now that the feature handles more than
          meetings; also enabled for everyone by default (gate removed below). -->
     <button onclick="setView('meetings')" id="btn-meetings" style="display:none">Meeting / Task Generator</button>
@@ -3107,9 +3117,13 @@ function setView(v){
   // when there are zero teams. The previous view-based hide rule had no
   // functional reason and made the control feel inconsistent.
   populateGroupSelector();
-  // Unassigned filter: Prioritise and My Epics
+  // v175: Unassigned filter is now ONLY shown on My Epics (where it filters
+  // epic ownership). Prioritise has its own per-tab "Unassigned only"
+  // checkbox below the tabs that actually drives the prioritise render —
+  // showing both was confusing and the global one wasn't wired into
+  // renderPriBoard, so it appeared broken.
   const ua=document.getElementById("unassigned-filter-wrap");
-  if(ua) ua.style.display=(v==="myepics"||isPri)?"flex":"none";
+  if(ua) ua.style.display=(v==="myepics")?"flex":"none";
   // Global "Show Done" checkbox in the shared filter bar: visible on most views.
   // Hidden on Done (always shows Done items) and Comments (different semantics).
   const sd = document.getElementById("show-done-wrap");
