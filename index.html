@@ -745,7 +745,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v175</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v176</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -994,7 +994,20 @@ button,select,textarea,input{font-family:inherit}
   </div>
   <div id="page-prioritise" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden">
     <div id="pri-controls" style="display:flex;align-items:center;gap:8px;padding:8px 15px;background:#fff;border-bottom:1px solid #E4E6E8;flex-shrink:0;flex-wrap:wrap">
-      <select class="proj-select" id="pri-proj" onchange="priProjKey=this.value;saveAll();loadPriBoard(true)" style="max-width:200px"><option value="">— select project —</option></select>
+      <!-- v176: searchable project picker (replaces the basic select). Hidden
+           input id=pri-proj keeps the existing readers happy (~6 sites that
+           do document.getElementById('pri-proj').value). -->
+      <div style="position:relative;display:inline-block;min-width:240px">
+        <input type="hidden" id="pri-proj">
+        <input id="pri-proj-search" class="proj-select"
+          placeholder="Search projects by name or key…"
+          autocomplete="off"
+          oninput="priProjSearch(this.value)"
+          onfocus="priProjSearch(this.value)"
+          onblur="setTimeout(priProjCloseDropdown, 180)"
+          style="width:240px;padding:4px 10px;border:1px solid #C9CACC;border-radius:6px;font-size:12px;background:#fff">
+        <div id="pri-proj-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #C9CACC;border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:340px;overflow-y:auto;z-index:60;margin-top:2px"></div>
+      </div>
       <div id="pri-status-filter-wrap" style="display:flex;gap:3px;flex-wrap:wrap">
         <button class="pri-stat-btn active" data-status="" onclick="togglePriStatus(this)" style="padding:3px 10px;border-radius:12px;font-size:10px;font-weight:700;cursor:pointer;border:1px solid #125462;background:#125462;color:#fff">All</button>
         <button class="pri-stat-btn" data-status="In Progress" onclick="togglePriStatus(this)" style="padding:3px 10px;border-radius:12px;font-size:10px;font-weight:700;cursor:pointer;border:1px solid #E4E6E8;background:#fff;color:#73777C">In Progress</button>
@@ -8524,25 +8537,96 @@ function renderMyEpicsBoard() {
 }
 
 async function populatePriProjects() {
-  const sel = document.getElementById('pri-proj');
-  if (!sel) return;
-  // v92: capture the user's current Prioritise project BEFORE wiping innerHTML
-  // and restore it afterwards. Otherwise every renderMain pass (which happens
-  // after every side-panel edit) reset the dropdown to "— select project —".
-  const previousValue = sel.value || priProjKey || '';
-  const userProjects = [...new Set(allIssues.filter(i=>i.assignee===currentIam).map(i=>i.project))];
-  const otherProjects = allProjects.filter(p=>!excludedProjects.includes(p.key)&&!userProjects.includes(p.key));
-  sel.innerHTML = '<option value="">— select project —</option>' +
-    (userProjects.length ? '<optgroup label="Your projects">' +
-      userProjects.map(k=>{const p=allProjects.find(x=>x.key===k); return `<option value="${k}">${k}${p?' — '+p.name:''}</option>`;}).join('') +
-      '</optgroup>' : '') +
-    '<optgroup label="All projects">' +
-      otherProjects.map(p=>`<option value="${p.key}">${p.key} — ${p.name}</option>`).join('') +
-    '</optgroup>';
-  // Restoration priority: explicit Prioritise pick > saved priProjKey > top-bar filter.
-  if (previousValue) sel.value = previousValue;
-  else if (priProjKey) sel.value = priProjKey;
-  else if (currentProjFilter) sel.value = currentProjFilter;
+  // v176: now backed by a hidden input rather than a <select>. The visible
+  // search input shows the selected project's label ("MKT — Marketing").
+  const hidden = document.getElementById('pri-proj');
+  const search = document.getElementById('pri-proj-search');
+  if (!hidden) return;
+  // Restoration priority: existing hidden value > saved priProjKey > top-bar filter.
+  const chosen = hidden.value || priProjKey || currentProjFilter || '';
+  if (chosen) hidden.value = chosen;
+  if (search){
+    if (chosen){
+      const p = allProjects.find(x => x.key === chosen);
+      search.value = chosen + (p && p.name ? ' — ' + p.name : '');
+    } else {
+      search.value = '';
+    }
+  }
+}
+
+// v176: Searchable project picker. Filters by ANY word in the project key
+// or name (e.g. typing "mar" finds Marketing; typing "ops" finds Com Ops;
+// typing "tse" finds TSE). User's own projects (where they have issues
+// assigned) appear at the top as a separate group.
+function priProjSearch(query){
+  const dd = document.getElementById('pri-proj-results');
+  if (!dd) return;
+  const q = (query || '').trim().toLowerCase();
+  const me = currentIam || '';
+  const myKeys = new Set();
+  if (me){ for (const i of (allIssues || [])) if (i.assignee === me && i.project) myKeys.add(i.project); }
+  const tokens = q.split(/\s+/).filter(t => t.length > 0);
+  const matches = (k, name) => {
+    if (!tokens.length) return true;
+    const hay = (k + ' ' + (name || '')).toLowerCase();
+    return tokens.every(t => hay.includes(t));
+  };
+  const scoreOf = (k, name) => {
+    if (!q) return 1;
+    const ks = k.toLowerCase(); const ns = (name||'').toLowerCase();
+    let s = 0;
+    if (ks === q) s += 500;
+    else if (ks.startsWith(q)) s += 200;
+    else if (ks.includes(q)) s += 80;
+    for (const t of tokens){ if (t.length >= 2 && ns.includes(t)) s += 10; }
+    return s;
+  };
+  const visible = (typeof allProjects !== 'undefined' && Array.isArray(allProjects)) ? allProjects : [];
+  const filtered = visible
+    .filter(p => !excludedProjects.includes(p.key))
+    .filter(p => matches(p.key, p.name))
+    .map(p => ({ p, score: scoreOf(p.key, p.name) }))
+    .sort((a, b) => b.score - a.score || a.p.key.localeCompare(b.p.key));
+  if (!filtered.length){
+    dd.innerHTML = '<div style="padding:8px 12px;font-size:12px;color:#9EA0A4;font-style:italic">No matching projects.</div>';
+    dd.style.display = 'block';
+    return;
+  }
+  const myList = filtered.filter(x => myKeys.has(x.p.key));
+  const otherList = filtered.filter(x => !myKeys.has(x.p.key));
+  const renderRow = (entry) => {
+    const p = entry.p;
+    return `<div onmousedown="priProjPick('${p.key.replace(/'/g,"\\'")}')" style="padding:7px 12px;cursor:pointer;border-bottom:1px solid #F4F4F5;font-size:12px;display:flex;align-items:center;gap:8px"
+      onmouseover="this.style.background='#F7F8F9'" onmouseout="this.style.background='transparent'">
+      <span style="font-weight:700;color:#257AA5;font-family:monospace;min-width:60px">${_escHtml(p.key)}</span>
+      <span style="color:#292E37;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_escHtml(p.name || '')}</span>
+    </div>`;
+  };
+  const hdr = (label) => `<div style="font-size:10px;color:#9EA0A4;padding:6px 10px 2px;text-transform:uppercase;letter-spacing:.04em;font-weight:700">${label}</div>`;
+  let html = '';
+  if (myList.length){ html += hdr('Your projects'); html += myList.map(renderRow).join(''); }
+  if (otherList.length){ html += hdr(myList.length ? 'All projects' : 'Projects'); html += otherList.map(renderRow).join(''); }
+  dd.innerHTML = html;
+  dd.style.display = 'block';
+}
+function priProjPick(key){
+  const hidden = document.getElementById('pri-proj');
+  const search = document.getElementById('pri-proj-search');
+  const dd = document.getElementById('pri-proj-results');
+  if (hidden) hidden.value = key;
+  priProjKey = key;
+  if (search){
+    const p = (typeof allProjects !== 'undefined') ? allProjects.find(x => x.key === key) : null;
+    search.value = key + (p && p.name ? ' — ' + p.name : '');
+  }
+  if (dd) dd.style.display = 'none';
+  saveAll();
+  try { loadPriBoard(true); } catch(e){ appLogMsg('warn','pri','loadPriBoard failed: ' + (e.message || e)); }
+}
+function priProjCloseDropdown(){
+  const dd = document.getElementById('pri-proj-results');
+  if (dd) dd.style.display = 'none';
 }
 
 async function loadPriBoard(force) {
