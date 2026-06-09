@@ -407,6 +407,20 @@ button,select,textarea,input{font-family:inherit}
 .lbl-board{flex:1;overflow-y:auto;padding:10px 15px}
 .lbl-empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;color:#9EA0A4;text-align:center;font-size:13px}
 .lbl-empty-state svg{margin-bottom:12px;opacity:.5}
+/* v169: compact card columns — fixed widths so fields line up vertically
+   across rows in My Tasks (compact) and Epic Focus (compact). */
+.card.compact{display:flex;align-items:center;gap:8px;padding:6px 10px;margin-bottom:4px;background:#fff;border-radius:6px;cursor:pointer}
+.card.compact .cc-key{width:90px;font-size:11px;font-weight:700;color:#257AA5;font-family:monospace;flex-shrink:0}
+.card.compact .cc-title{flex:1;min-width:0;font-size:12px;color:#292E37;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card.compact .cc-icons{width:90px;flex-shrink:0;display:inline-flex;align-items:center;gap:6px;font-size:10px;color:#9EA0A4}
+.card.compact .cc-labels{width:140px;flex-shrink:0;overflow:hidden;display:flex;align-items:center;gap:3px;white-space:nowrap}
+.card.compact .cc-labels .cc-lbl{display:inline-block;font-size:10px;color:#125462;background:#E0F0F8;border:1px solid #C8E6F7;border-radius:8px;padding:1px 6px;max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.4}
+.card.compact .cc-pri{width:90px;flex-shrink:0;display:flex;justify-content:flex-start}
+.card.compact .cc-assignee{width:160px;flex-shrink:0;display:flex;align-items:center;gap:6px;font-size:11px;color:#5D7987;overflow:hidden;white-space:nowrap}
+.card.compact .cc-assignee .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card.compact .cc-date{width:85px;flex-shrink:0;font-size:10px;color:#9EA0A4;text-align:right}
+.card.compact.is-done{opacity:.85;background:#F0FAEC}
+.card.compact.is-done .cc-title{text-decoration:line-through;color:#2D7A2D}
 .lbl-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid #E4E6E8;background:#fff;border-radius:8px;margin-bottom:6px;cursor:grab;transition:.12s}
 .lbl-row:hover{border-color:#C9CACC;box-shadow:0 1px 3px rgba(0,0,0,.06)}
 .lbl-row.dragging{opacity:.4;cursor:grabbing}
@@ -716,7 +730,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v168</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v169</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -3294,23 +3308,36 @@ function renderEpicFocus(){
 // is off and Compact is on. Shows summary + priority + assignee + updated +
 // comment count in a single horizontal row, much shorter than the regular
 // card. Drag-and-drop works the same way as the standard card.
+// v169: compact card with fixed-width columns. Field order: Key · Title ·
+// Icons (comments/attachments/subtasks) · Labels · Priority · Assignee ·
+// Updated date. Widths defined in CSS (.card.compact .cc-*) so cards line
+// up vertically across rows regardless of content length.
 function cardHtmlCompact(issue){
   const isActive = activeFlags[issue.assignee] === issue.key;
   const isDone = normStatus(issue.status) === 'Done';
   const lc = isDone ? '#2D7A2D' : (TC[issue.type]||TC.Task).c;
   const pc = PC[issue.priority] || PC.Medium;
   const updated = issue.updated || '';
-  const cc = issue.commentCount || 0;
-  const sumStyle = isDone ? 'text-decoration:line-through;color:#2D7A2D' : 'color:#292E37';
+  const labels = Array.isArray(issue.labels) ? issue.labels : [];
+  // Show up to 2 labels inline; if more, append "+N" chip.
+  const visLabels = labels.slice(0, 2);
+  const extraLabels = labels.length - visLabels.length;
+  const labelsHtml = labels.length
+    ? visLabels.map(l => `<span class="cc-lbl" title="${_escHtml(l)}">${_escHtml(l)}</span>`).join('') + (extraLabels > 0 ? `<span class="cc-lbl" title="${labels.slice(2).join(', ').replace(/"/g,'&quot;')}">+${extraLabels}</span>` : '')
+    : '';
+  const assigneeHtml = (issue.assignee && issue.assignee !== 'Unassigned')
+    ? `${ava(issue.assignee, 18)}<span class="nm">${_escHtml(issue.assignee)}</span>`
+    : '<span style="color:#C9CACC;font-style:italic">Unassigned</span>';
   return `<div class="card compact ${isActive?'is-active':''} ${isDone?'is-done':''}"
-    style="border-left:3px solid ${lc};display:flex;align-items:center;gap:8px;padding:6px 10px;margin-bottom:4px;background:#fff;border-radius:6px;${isDone?'opacity:.8;background:#F0FAEC':''}"
+    style="border-left:3px solid ${lc}"
     onclick="openPane('${issue.key}')" draggable="true" ondragstart="onDragStart(event,'${issue.key}')" ondragend="onDragEnd(event)">
-    <span style="font-size:11px;font-weight:700;color:#257AA5;font-family:monospace;min-width:80px;flex-shrink:0">${issue.key}</span>
-    <span style="flex:1;font-size:12px;${sumStyle};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${issue.summary||''}</span>
-    <span class="badge" style="background:${pc.bg};color:${pc.c};font-size:10px;flex-shrink:0"><span class="pri-dot" style="background:${pc.d}"></span>${issue.priority||'Medium'}</span>
-    ${issue.assignee && issue.assignee !== 'Unassigned' ? `<span style="font-size:11px;color:#5D7987;flex-shrink:0;display:inline-flex;align-items:center;gap:4px">${ava(issue.assignee, 18)} ${_escHtml(issue.assignee)}</span>` : '<span style="font-size:11px;color:#C9CACC;font-style:italic;flex-shrink:0">Unassigned</span>'}
-    ${updated ? `<span style="font-size:10px;color:#9EA0A4;flex-shrink:0" title="Last updated">${updated}</span>` : ''}
-    <span style="display:inline-flex;align-items:center;gap:6px;flex-shrink:0">${issueIconRow(issue)}</span>
+    <span class="cc-key">${issue.key}</span>
+    <span class="cc-title" title="${_escHtml(issue.summary||'')}">${issue.summary||''}</span>
+    <span class="cc-icons">${issueIconRow(issue)}</span>
+    <span class="cc-labels">${labelsHtml}</span>
+    <span class="cc-pri"><span class="badge" style="background:${pc.bg};color:${pc.c};font-size:10px"><span class="pri-dot" style="background:${pc.d}"></span>${issue.priority||'Medium'}</span></span>
+    <span class="cc-assignee">${assigneeHtml}</span>
+    <span class="cc-date" title="Last updated">${updated}</span>
   </div>`;
 }
 
