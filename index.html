@@ -1,9 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <meta http-equiv="Pragma" content="no-cache" />
-  <meta http-equiv="Expires" content="0" />
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>LoopUp Jira Board</title>
@@ -612,12 +609,16 @@ button,select,textarea,input{font-family:inherit}
         <div style="font-size:17px;font-weight:700;margin-bottom:6px">🔗 Connect to Jira</div>
         <div style="font-size:12px;color:#9EA0A4;margin-bottom:12px">Credentials saved only in your browser.</div>
         <label class="setup-label">Jira site URL</label>
-        <input class="setup-input" id="cfg-url" type="text" placeholder="https://your-site.atlassian.net" style="height:36px">
+        <input class="setup-input" id="cfg-url" type="text" placeholder="https://your-site.atlassian.net" oninput="updateConnectBtn()" style="height:36px">
         <label class="setup-label">Your Atlassian email</label>
-        <input class="setup-input" id="cfg-email" type="email" placeholder="you@company.com" style="height:36px">
+        <input class="setup-input" id="cfg-email" type="email" placeholder="you@company.com" oninput="updateConnectBtn()" style="height:36px">
         <label class="setup-label">API Token</label>
-        <input class="setup-input" id="cfg-token" type="password" placeholder="Paste your Jira API token" style="height:36px">
-        <button class="primary-btn" onclick="saveConfig()" style="margin-top:12px;width:100%;padding:10px">Connect →</button>
+        <input class="setup-input" id="cfg-token" type="password" placeholder="Paste your Jira API token" oninput="updateConnectBtn()" style="height:36px">
+        <!-- v180: button starts disabled (greyed) until all three fields have content,
+             because the placeholder text on the URL field looks like real data and users
+             were missing that the field was actually empty. -->
+        <button id="cfg-connect-btn" class="primary-btn" onclick="saveConfig()" disabled style="margin-top:12px;width:100%;padding:10px;opacity:0.5;cursor:not-allowed">Connect →</button>
+        <div id="cfg-connect-hint" style="font-size:11px;color:#9EA0A4;margin-top:6px;text-align:center">Fill in all three fields to continue</div>
       </div>
       <!-- Right: getting started guide -->
       <div style="flex:1;min-width:0;background:#F7F8F9;border-radius:10px;padding:16px;font-size:12px;line-height:1.6;color:#292E37">
@@ -780,7 +781,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v179 ✓</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v180</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -1344,8 +1345,51 @@ function showSetup(){
   document.getElementById("cfg-email").value=cfg.email||"";
   document.getElementById("cfg-token").value=""; // Never pre-fill token for security
   document.getElementById("setup-overlay").style.display="flex";
+  // v180: evaluate the Connect button state once the modal is visible — the
+  // pre-filled URL + email mean only the API token field is empty, so the
+  // hint message should be specific from the start.
+  try { updateConnectBtn(); } catch(e){}
+  // Focus the field that's still empty so the user can start typing immediately
+  setTimeout(() => {
+    const tokenEl = document.getElementById('cfg-token');
+    const urlEl = document.getElementById('cfg-url');
+    if (urlEl && !urlEl.value.trim()) urlEl.focus();
+    else if (tokenEl && !tokenEl.value.trim()) tokenEl.focus();
+  }, 50);
 }
 function saveConfig(){const url=(document.getElementById("cfg-url").value||"").trim().replace(/\/$/,"");const email=(document.getElementById("cfg-email").value||"").trim();const token=(document.getElementById("cfg-token").value||"").trim();if(!url||!email||!token){alert("Please fill in all fields.");return;}cfg={url,email,token};saveAll();document.getElementById("setup-overlay").style.display="none";init();}
+
+// v180: enable/disable Connect based on whether all three credential fields
+// have content. Called on every input event on the fields and once when the
+// setup modal first opens so the pre-filled email/URL set the initial state.
+function updateConnectBtn(){
+  const url = (document.getElementById('cfg-url')?.value || '').trim();
+  const email = (document.getElementById('cfg-email')?.value || '').trim();
+  const token = (document.getElementById('cfg-token')?.value || '').trim();
+  const btn = document.getElementById('cfg-connect-btn');
+  const hint = document.getElementById('cfg-connect-hint');
+  if (!btn) return;
+  const ready = !!(url && email && token);
+  btn.disabled = !ready;
+  btn.style.opacity = ready ? '1' : '0.5';
+  btn.style.cursor = ready ? 'pointer' : 'not-allowed';
+  if (hint){
+    if (ready){ hint.style.display = 'none'; }
+    else {
+      hint.style.display = 'block';
+      const missing = [];
+      if (!url) missing.push('Jira site URL');
+      if (!email) missing.push('email');
+      if (!token) missing.push('API token');
+      hint.textContent = 'Fill in ' + missing.join(', ') + ' to continue';
+    }
+  }
+  // Red-tint borders on empty required fields so it's obvious which one is missing
+  ['cfg-url','cfg-email','cfg-token'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.borderColor = ((el.value||'').trim() ? '' : '#E08000');
+  });
+}
 
 /* ══ JIRA API ══ */
 /* ══ LOGGING ══════════════════════════════════════════════════════ */
@@ -3731,10 +3775,7 @@ function exportEpicFocusToExcel(){
   const epicTitle = epic ? (epic.summary || '') : '';
   const headerLabel = epicFocusKey + (epicTitle ? ' — ' + epicTitle : '');
   const html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">'
-    + '<head>
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <meta http-equiv="Pragma" content="no-cache" />
-  <meta http-equiv="Expires" content="0" /><meta charset="utf-8"><title>' + headerLabel + '</title></head><body>'
+    + '<head><meta charset="utf-8"><title>' + headerLabel + '</title></head><body>'
     + '<table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:11px">'
     + '<tr style="background:#125462;color:#fff;font-weight:bold"><th colspan="14" style="text-align:left;padding:6px 8px">' + headerLabel + '</th></tr>'
     + '<tr style="background:#E0F0F8;font-weight:bold">'
@@ -4679,28 +4720,43 @@ async function renderPaneMain(){
           <span style="font-size:11px;color:#E08000;font-weight:700">+ Set ${topExpectedParents.join(' / ')}</span>
         </div>`
       : '';
-    // v99: every editable hierarchy row gets a small grey pencil icon that
-    // opens the parent picker for THAT row's parent. Replaces the wordy
-    // "change" / "change parent" text links. The icon is tucked to the
-    // far right of the row so it doesn't interrupt the summary.
-    const pencilIcon = (nodeKey) => ` <a href="#" onclick="event.preventDefault();event.stopPropagation();openParentPicker('${nodeKey}')" title="Change parent" style="color:#9EA0A4;text-decoration:none;margin-left:auto;padding:2px 6px;border-radius:4px;font-size:13px;line-height:1;cursor:pointer;display:inline-flex;align-items:center" onmouseover="this.style.color='#2E99CE';this.style.background='#E0F0F8'" onmouseout="this.style.color='#9EA0A4';this.style.background='transparent'">✎</a>`;
+    // v180: the pencil on each row now edits THAT level — i.e. picks a new
+    // node of the same type. Mechanically that means it re-parents the row
+    // BELOW (chain[idx+1]) to a different chain[idx]. Previously the pencil
+    // changed the row's own parent, which was confusing — clicking the
+    // pencil on the Milestone row used to change the Initiative above it.
+    // chain is ordered top→bottom: [Legend, Initiative, Milestone, Task].
+    const pencilIcon = (childKey, levelTypeName) => ` <a href="#" onclick="event.preventDefault();event.stopPropagation();openParentPicker('${childKey}')" title="Change ${levelTypeName||'level'}" style="color:#9EA0A4;text-decoration:none;margin-left:auto;padding:2px 6px;border-radius:4px;font-size:13px;line-height:1;cursor:pointer;display:inline-flex;align-items:center" onmouseover="this.style.color='#2E99CE';this.style.background='#E0F0F8'" onmouseout="this.style.color='#9EA0A4';this.style.background='transparent'">✎</a>`;
     const chainRows=chain.map((node,idx)=>{
       const isCurrent=node.key===i.key;
-      const nodeExpected = expectedParentTypesFor(node.type);
-      const canChangeParent = nodeExpected.length > 0; // anything except Legend
+      // Pencil only makes sense if there is a row BELOW this one in the chain
+      // whose expected-parent-types includes this node's type. In practice
+      // that's true for every level except the bottom (current issue) row.
+      let pencil = '';
+      if (idx < chain.length - 1){
+        const childOfThisLevel = chain[idx + 1];
+        const childExpected = expectedParentTypesFor(childOfThisLevel.type);
+        if (childExpected.length > 0 && (childExpected.includes(node.type) || childExpected.includes('Epic')||childExpected.includes('Milestone'))){
+          // The picker is filtered by the child's expected parent types, so it
+          // will naturally only show nodes of node.type (or a sibling type like
+          // Epic ↔ Milestone). When picked, Jira re-parents chain[idx+1] → newly
+          // chosen node, and the chain above re-renders from the new ancestor.
+          pencil = pencilIcon(childOfThisLevel.key, node.type);
+        }
+      }
       if(isCurrent){
         return`<div class="hierarchy-row" style="background:#F0F9FF;border-radius:6px;padding:5px 8px;border-left:3px solid #2E99CE;display:flex;align-items:center">
           <span class="hierarchy-label" style="font-weight:700;color:#125462">${node.type}</span>
           <span class="hierarchy-key"><a href="${BASE()}${node.key}" target="_blank" style="color:#125462;font-family:monospace;font-size:13px;font-weight:700">${node.key}</a></span>
           <span class="hierarchy-val" style="font-size:13px;font-weight:700;color:#292E37;flex:1">${node.summary}</span>
-          ${canChangeParent ? pencilIcon(node.key) : ''}
+          ${pencil}
         </div>`;
       }
       return `<div class="hierarchy-row" style="display:flex;align-items:center">
         <span class="hierarchy-label">${node.type}</span>
         <span class="hierarchy-key"><a href="${BASE()}${node.key}" target="_blank" style="color:#257AA5;font-family:monospace;font-size:10px">${node.key}</a></span>
         <span class="hierarchy-val" style="flex:1">${tbadge(node.type||"")} <span style="font-size:12px">${node.summary||""}</span></span>
-        ${canChangeParent ? pencilIcon(node.key) : ''}
+        ${pencil}
       </div>`;
     }).join("");
 
@@ -10566,10 +10622,7 @@ function msInit(){
   if (msalReady) return msalReady;
   msalReady = (async () => {
     // v125: wait up to 5s for the MSAL global to appear — the fallback CDN
-    // loader (in the <head>
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <meta http-equiv="Pragma" content="no-cache" />
-  <meta http-equiv="Expires" content="0" />) may still be fetching when sign-in is clicked.
+    // loader (in the <head>) may still be fetching when sign-in is clicked.
     for (let i = 0; i < 50; i++){
       if (typeof msal !== 'undefined' && msal.PublicClientApplication) break;
       await new Promise(r => setTimeout(r, 100));
