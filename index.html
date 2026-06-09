@@ -263,6 +263,29 @@ button,select,textarea,input{font-family:inherit}
 .pri-drop-zone.drag-over{background:#E0F0F8;border:2px dashed #2E99CE}
 /* v178: when an epic body is empty, show a friendlier dashed target so users know they can drop a task to reparent it */
 .pri-drop-zone.drag-over .pri-epty-hint{border-color:#2E99CE;color:#125462;background:#F3F9FC}
+/* v179: active (In Progress) task cards get a soft green tint so they pop visually next to Backlog / Selected.
+   Done already uses #F0FAEC + line-through; In Progress now uses a slightly more saturated mint. */
+.pri-card.is-active{background:#EAF6E5}
+.pri-card.is-active.is-done{background:#F0FAEC} /* Done wins if both somehow apply */
+/* v179: epic cards (both vertical column header and horizontal sticky card) get a subtle blue-grey tint
+   so they're visually distinct from white task cards. */
+.pri-epic-col .pri-epic-hdr{background:#F2F6FA !important}
+.pri-epic-col.epic-done .pri-epic-hdr{background:#F0FAEC !important}
+.pri-epic-card-h{background:#F2F6FA !important}
+.pri-epic-card-h.epic-done{background:#F0FAEC !important}
+/* v179: Epics-Only matrix view styling */
+#pri-epic-matrix{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}
+#pri-epic-matrix th{position:sticky;top:0;background:#F7F8F9;padding:8px 10px;font-weight:700;color:#5D7987;text-align:left;border-bottom:2px solid #C9CACC;font-size:11px;text-transform:uppercase;letter-spacing:.04em;z-index:2}
+#pri-epic-matrix th.pri-col{text-align:center}
+#pri-epic-matrix td.pri-status-cell{position:sticky;left:0;background:#F7F8F9;font-weight:700;padding:8px 10px;color:#125462;border-right:2px solid #C9CACC;vertical-align:top;z-index:1;min-width:120px}
+#pri-epic-matrix td.pri-epic-cell{padding:6px;vertical-align:top;border-right:1px solid #E4E6E8;border-bottom:1px solid #E4E6E8;min-width:200px;background:#fff}
+#pri-epic-matrix td.pri-epic-cell.drag-over{background:#E0F0F8;outline:2px dashed #2E99CE;outline-offset:-2px}
+#pri-epic-matrix td.pri-epic-cell .pri-emc{background:#F2F6FA;border:1px solid #C8E6F7;border-left:3px solid #2E99CE;border-radius:6px;padding:6px 8px;margin-bottom:5px;cursor:grab;display:flex;flex-direction:column;gap:3px;font-size:11px}
+#pri-epic-matrix td.pri-epic-cell .pri-emc.dragging{opacity:.4}
+#pri-epic-matrix td.pri-epic-cell .pri-emc:hover{box-shadow:0 2px 6px rgba(0,0,0,.10)}
+#pri-epic-matrix td.pri-epic-cell .pri-emc.is-done{background:#F0FAEC;border-left-color:#2D7A2D;opacity:.85}
+#pri-epic-matrix td.pri-epic-cell .pri-emc.is-active{background:#EAF6E5;border-left-color:#5E8E38}
+#pri-epic-matrix td.pri-epic-cell .pri-emc-empty{font-size:11px;color:#C9CACC;font-style:italic;text-align:center;padding:14px 6px}
 .pri-rank-num{font-size:9px;font-weight:700;color:#C9CACC;margin-right:4px;min-width:16px}
 /* v140: visual when dragging an epic over a different priority band */
 .pri-band-droppable.drag-over-band{outline:3px dashed #2E99CE;outline-offset:-3px;background:#E0F0F8}
@@ -754,7 +777,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v178</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v179</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -1030,6 +1053,15 @@ button,select,textarea,input{font-family:inherit}
       <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer">
         <input type="checkbox" id="pri-unassigned-only" onchange="renderPriBoard()"> Unassigned only
       </label>
+      <!-- v179: Mode selector. "Epics + Tasks" runs the existing renderers (vertical/horizontal
+           below). "Epics Only" hides the V/H toggle and renders a priority × status matrix
+           where you drag epics directly into the right cell to set both at once. -->
+      <select id="pri-layout-mode" onchange="setPriLayoutMode(this.value)"
+        title="Switch between viewing tasks under their epics vs. organising epics into a priority/status matrix"
+        style="padding:4px 8px;border:1px solid #C9CACC;border-radius:6px;font-size:11px;font-weight:700;color:#125462;background:#fff;cursor:pointer">
+        <option value="tasks">Epics + Tasks</option>
+        <option value="epicsonly">Epics Only (Matrix)</option>
+      </select>
       <div id="pri-view-toggle" style="display:inline-flex;border:1px solid #C9CACC;border-radius:6px;overflow:hidden;font-size:11px;font-weight:700">
         <button data-mode="vertical" onclick="setPriViewMode('vertical')"
           style="padding:4px 10px;border:none;background:#125462;color:#fff;cursor:pointer;white-space:nowrap"
@@ -1234,6 +1266,9 @@ let priEpics = [];
 let priDragKey = null;
 let priDragEpic = null;
 let priViewMode = 'vertical'; // 'vertical' (default, original) or 'horizontal' (transposed)
+// v179: top-level Projects-tab layout. 'tasks' shows the Epic+Tasks board (vertical or
+// horizontal as before). 'epicsonly' shows a priority × status matrix of just the epics.
+let priLayoutMode = 'tasks';
 let priBandCollapsed = {Highest:false, High:false, Medium:false, Low:false, 'No priority':true};
 // v105: Show Done is now a SINGLE GLOBAL flag, defaulting ON. Was per-view (object
 // keyed by view) which felt fiddly — flipping it on My Tasks didn't carry over to
@@ -1252,13 +1287,14 @@ let showDoneByView = {mytasks:true, myepics:true, team:true, prioritise:true, ma
 let showCancelled = false;
 
 /* ══ PERSISTENCE ══ */
-function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,groupProjectAssignment,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed,doneDays,commentReadState,priViewMode,priBandCollapsed,showDone,showDoneByView,showCancelled,epicFocusKey,epicFocusUserFilter,epicFocusView,epicFocusProjectFilter,sharedTeams:[...sharedTeams],priProjKey}));}catch{}}
+function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,groupProjectAssignment,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed,doneDays,commentReadState,priViewMode,priLayoutMode,priBandCollapsed,showDone,showDoneByView,showCancelled,epicFocusKey,epicFocusUserFilter,epicFocusView,epicFocusProjectFilter,sharedTeams:[...sharedTeams],priProjKey}));}catch{}}
 function loadAll(){try{const d=JSON.parse(localStorage.getItem(STOR)||"{}");if(d.cfg)cfg=d.cfg;if(d.locStat)locStat=d.locStat;if(d.locPri)locPri=d.locPri;if(d.currentIam)currentIam=d.currentIam;if(d.currentProjFilter)currentProjFilter=d.currentProjFilter;
 if(d.currentProjectGroup)currentProjectGroup=d.currentProjectGroup;if(d.currentGroup)currentGroup=d.currentGroup;if(d.teamMembers)teamMembers=d.teamMembers;if(d.adminUsers)adminUsers=d.adminUsers;if(d.groups)groups=d.groups;
 if(d.groupProjectAssignment)groupProjectAssignment=d.groupProjectAssignment;if(d.excludedProjects)excludedProjects=d.excludedProjects;if(d.currentView)currentView=d.currentView;if(d.currentLevel)currentLevel=d.currentLevel;if(d.rowCollapsed)rowCollapsed={...rowCollapsed,...d.rowCollapsed};if(d.swimCollapsed)swimCollapsed={...swimCollapsed,...d.swimCollapsed};
 if(d.doneDays)doneDays=d.doneDays;
 if(d.commentReadState)commentReadState=d.commentReadState;
 if(d.priViewMode)priViewMode=d.priViewMode;
+if(d.priLayoutMode)priLayoutMode=d.priLayoutMode;
 if(d.priBandCollapsed)priBandCollapsed={...priBandCollapsed,...d.priBandCollapsed};
 // v105: hydrate the single global flag. If the saved settings still carry the
 // legacy per-view object (from v104 and earlier), migrate by OR-ing all values
@@ -8272,9 +8308,11 @@ function priCardHtml(t, rank) {
   const pc = PC[t.priority] || PC.Medium;
   const isUnassigned = t.assignee === 'Unassigned';
   const isDone = normStatus(t.status) === 'Done';
-  const cardExtra = isDone ? ';opacity:0.75;background:#F0FAEC' : '';
+  // v179: mark "In Progress" tasks active so CSS shades them light green
+  const isActiveTask = !isDone && normStatus(t.status) === 'In Progress';
+  const cardExtra = isDone ? ';opacity:0.75;background:#F0FAEC' : (isActiveTask ? ';background:#EAF6E5' : '');
   const sumStyle = isDone ? 'font-size:12px;font-weight:600;color:#2D7A2D;line-height:1.3;margin-bottom:5px;text-decoration:line-through' : 'font-size:12px;font-weight:600;color:#292E37;line-height:1.3;margin-bottom:5px';
-  return `<div class="pri-card ${isUnassigned?'unassigned-card':''} ${isDone?'is-done':''}"
+  return `<div class="pri-card ${isUnassigned?'unassigned-card':''} ${isDone?'is-done':''} ${isActiveTask?'is-active':''}"
     draggable="true"
     data-key="${t.key}"
     data-epic="${t.parent_key||'__none__'}"
@@ -8731,6 +8769,7 @@ function priProjClear(){
 async function loadPriBoard(force) {
   const projKey = document.getElementById('pri-proj').value;
   syncPriViewToggleVisuals();
+  syncPriLayoutModeVisuals(); // v179: restore Mode dropdown + V/H visibility from saved state
   syncPerViewShowDoneCheckboxes();
   if (!projKey) {
     const board = document.getElementById('pri-board');
@@ -8808,6 +8847,9 @@ async function loadPriBoard(force) {
 }
 
 function renderPriBoard() {
+  // v179: top-level layout dispatch. If the user picked "Epics Only" the
+  // priority × status matrix takes over.
+  if (priLayoutMode === 'epicsonly') return renderPriEpicMatrix();
   // Branch on view mode: vertical (default) or horizontal (transposed)
   if(priViewMode === 'horizontal') return renderPriBoardHorizontal();
 
@@ -9283,6 +9325,171 @@ function setPriViewMode(mode) {
   renderPriBoard();
 }
 
+// v179: top-level Projects layout switcher. 'tasks' = Epic + Tasks (existing
+// V/H board). 'epicsonly' = priority × status matrix of just the epics.
+function setPriLayoutMode(mode){
+  if (mode !== 'tasks' && mode !== 'epicsonly') return;
+  if (priLayoutMode === mode){ syncPriLayoutModeVisuals(); return; }
+  priLayoutMode = mode;
+  saveAll();
+  syncPriLayoutModeVisuals();
+  appLogMsg('info','prioritise','Switched Projects layout to ' + priLayoutMode);
+  renderPriBoard();
+}
+function syncPriLayoutModeVisuals(){
+  const sel = document.getElementById('pri-layout-mode');
+  if (sel && sel.value !== priLayoutMode) sel.value = priLayoutMode;
+  // Hide the Vertical/Horizontal sub-toggle when in Epics Only mode (it doesn't apply)
+  const vhWrap = document.getElementById('pri-view-toggle');
+  if (vhWrap) vhWrap.style.display = (priLayoutMode === 'epicsonly') ? 'none' : 'inline-flex';
+}
+
+// v179: Epics-only matrix renderer. Rows = status (Backlog → In Progress → Done),
+// columns = priority (Highest → Low + No priority). Each cell shows the epics
+// whose (status, priority) matches. Drag an epic to a different cell to update
+// status and/or priority in one go (Jira pushed via transitionIssue + updatePriority).
+async function renderPriEpicMatrix(){
+  const boardEl = document.getElementById('pri-board');
+  if (!boardEl) return;
+  // Reset any horizontal-mode layout overrides
+  boardEl.style.flexDirection = 'column';
+  boardEl.style.overflowX = 'auto';
+  boardEl.style.overflowY = 'auto';
+  boardEl.style.overflow = 'auto';
+
+  // No project picked → empty state
+  const projKey = document.getElementById('pri-proj')?.value;
+  if (!projKey){
+    boardEl.innerHTML = emptyStateMessage('◎','No project selected','Pick a project above to load the prioritisation board.');
+    return;
+  }
+
+  const showDoneME = getShowDone('prioritise');
+  const unassignedOnly = document.getElementById('pri-unassigned-only')?.checked || false;
+  // Filter the epic list the same way as the other views
+  let epics = [...(priEpics||[])].map(gm).filter(e => ['Epic','Milestone'].includes(e.type));
+  if (!showDoneME) epics = epics.filter(e => normStatus(e.status) !== 'Done');
+  if (unassignedOnly) epics = epics.filter(e => e.assignee === 'Unassigned');
+  // Apply user-saved order so cells inherit the same ordering
+  epics = applyPriEpicOrder(epics);
+
+  // Build header row
+  const PRI_LIST = ['Highest','High','Medium','Low','No priority'];
+  const ROWS = ['In Progress','Selected','Backlog','Done'];
+
+  let html = '<table id="pri-epic-matrix" cellspacing="0" cellpadding="0">';
+  html += '<thead><tr><th style="width:120px;position:sticky;left:0;z-index:3">Status \\ Priority</th>';
+  PRI_LIST.forEach(p => {
+    const pc = p === 'No priority' ? {bg:'#F4F4F5',c:'#73777C'} : (PC[p] || PC.Medium);
+    html += '<th class="pri-col" style="background:' + pc.bg + ';color:' + pc.c + '">' + _escHtml(p) + '</th>';
+  });
+  html += '</tr></thead><tbody>';
+
+  ROWS.forEach(rowStatus => {
+    if (!showDoneME && rowStatus === 'Done') return; // skip Done row when show-done is off
+    const rowEpics = epics.filter(e => normStatus(e.status) === rowStatus);
+    const sc = SC[rowStatus] || SC.Backlog;
+    html += '<tr>';
+    html += '<td class="pri-status-cell" style="color:' + sc.c + '"><div style="display:flex;align-items:center;gap:6px"><span class="badge" style="background:' + sc.bg + ';color:' + sc.c + '">' + _escHtml(rowStatus) + '</span><span style="font-size:10px;color:#9EA0A4">' + rowEpics.length + '</span></div></td>';
+    PRI_LIST.forEach(pri => {
+      const inCell = rowEpics.filter(e => {
+        const ep = e.priority || '';
+        if (pri === 'No priority') return !ep || !['Highest','High','Medium','Low'].includes(ep);
+        return ep === pri;
+      });
+      const priParam = pri.replace(/'/g, "\\'");
+      const statParam = rowStatus.replace(/'/g, "\\'");
+      html += '<td class="pri-epic-cell" data-status="' + _escHtml(rowStatus) + '" data-priority="' + _escHtml(pri) + '"';
+      html += ' ondragover="priEpicMatrixDragOver(event)"';
+      html += ' ondragleave="priEpicMatrixDragLeave(event)"';
+      html += ' ondrop="priEpicMatrixDrop(event,\'' + statParam + '\',\'' + priParam + '\')">';
+      if (inCell.length === 0){
+        html += '<div class="pri-emc-empty">drop here</div>';
+      } else {
+        inCell.forEach(epic => {
+          const isDone = normStatus(epic.status) === 'Done';
+          const isAct = !isDone && normStatus(epic.status) === 'In Progress';
+          const cls = 'pri-emc' + (isDone ? ' is-done' : '') + (isAct ? ' is-active' : '');
+          const taskCount = (priIssues || []).filter(t => t.parent_key === epic.key).length;
+          html += '<div class="' + cls + '" draggable="true"'
+               + ' data-key="' + _escHtml(epic.key) + '"'
+               + ' ondragstart="priEpicMatrixDragStart(event,\'' + epic.key.replace(/'/g,"\\'") + '\')"'
+               + ' ondragend="priEpicMatrixDragEnd(event)"'
+               + ' onclick="openPane(\'' + epic.key.replace(/'/g,"\\'") + '\')"'
+               + ' title="Drag to a different cell to change priority/status. Click to open ' + _escHtml(epic.key) + '.">'
+               + '<div style="display:flex;align-items:center;gap:5px">'
+               + '<a href="' + BASE() + epic.key + '" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;font-family:monospace;color:#257AA5;font-weight:700;text-decoration:none">' + _escHtml(epic.key) + '</a>'
+               + '<span style="font-size:10px;color:#9EA0A4;margin-left:auto">' + taskCount + ' task' + (taskCount===1?'':'s') + '</span>'
+               + '</div>'
+               + '<div style="font-size:11px;font-weight:600;color:' + (isDone?'#2D7A2D':'#292E37') + ';' + (isDone?'text-decoration:line-through;':'') + 'line-height:1.3">' + _escHtml(epic.summary || '') + '</div>'
+               + '<div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">'
+               + ava(epic.assignee, 18)
+               + '</div>'
+               + '</div>';
+        });
+      }
+      html += '</td>';
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+
+  boardEl.innerHTML = html;
+}
+
+// Matrix drag handlers — separate from the task-card and epic-row reorder
+// handlers so they can't collide. Uses window._priMatrixDragKey to scope.
+function priEpicMatrixDragStart(e, epicKey){
+  window._priMatrixDragKey = epicKey;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', 'epicmatrix|' + epicKey);
+  setTimeout(() => e.currentTarget.classList.add('dragging'), 0);
+}
+function priEpicMatrixDragEnd(e){
+  setTimeout(() => { window._priMatrixDragKey = null; }, 100);
+  e.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('#pri-epic-matrix td.pri-epic-cell').forEach(c => c.classList.remove('drag-over'));
+}
+function priEpicMatrixDragOver(e){
+  if (!window._priMatrixDragKey) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  document.querySelectorAll('#pri-epic-matrix td.pri-epic-cell').forEach(c => c.classList.remove('drag-over'));
+  e.currentTarget.classList.add('drag-over');
+}
+function priEpicMatrixDragLeave(e){
+  if (!e.currentTarget.contains(e.relatedTarget)) e.currentTarget.classList.remove('drag-over');
+}
+async function priEpicMatrixDrop(e, newStatus, newPriority){
+  e.preventDefault();
+  const dragKey = window._priMatrixDragKey;
+  window._priMatrixDragKey = null;
+  document.querySelectorAll('#pri-epic-matrix td.pri-epic-cell').forEach(c => c.classList.remove('drag-over'));
+  if (!dragKey) return;
+  const epic = (priEpics || []).find(x => x.key === dragKey);
+  if (!epic) return;
+  const oldStatus = normStatus(epic.status);
+  const oldPri = epic.priority || '';
+  const targetPri = (newPriority === 'No priority') ? '' : newPriority;
+  const statusChanged = oldStatus !== newStatus;
+  const priChanged = oldPri !== targetPri;
+  if (!statusChanged && !priChanged) return;
+  // Optimistic local update
+  if (statusChanged){ locStat[dragKey] = newStatus; epic.status = newStatus; }
+  if (priChanged){ locPri[dragKey] = targetPri || 'Medium'; epic.priority = targetPri || 'Medium'; }
+  saveAll();
+  renderPriEpicMatrix();
+  // Push to Jira
+  try {
+    if (statusChanged) await transitionIssue(dragKey, newStatus);
+    if (priChanged) await updatePriority(dragKey, targetPri || 'Medium');
+    appLogMsg('info','prioritise','Epic ' + dragKey + ' → ' + newStatus + ' / ' + (targetPri || 'Medium'));
+  } catch(err){
+    appLogMsg('warn','prioritise','Failed to update ' + dragKey + ': ' + (err.message || err));
+    priToast('✗ Couldn\'t update ' + dragKey + ': ' + (err.message || err), 'err');
+  }
+}
+
 function syncPriViewToggleVisuals() {
   // Update the segmented toggle's active state visually
   const wrap = document.getElementById('pri-view-toggle');
@@ -9322,6 +9529,7 @@ function priCardDragLeaveH(e) {
 }
 
 // Horizontal task card HTML — narrower, optimised for left-to-right flow
+// v179 marker — priCardHtmlH also marks In Progress as is-active for green tint
 function priCardHtmlH(t, rank) {
   // v98: same gm() override as priCardHtml — see comment there.
   t = gm(t);
@@ -9329,11 +9537,12 @@ function priCardHtmlH(t, rank) {
   const pc = PC[t.priority] || PC.Medium;
   const isUnassigned = t.assignee === 'Unassigned';
   const isDone = normStatus(t.status) === 'Done';
-  const cardExtra = isDone ? ';opacity:0.75;background:#F0FAEC' : '';
+  const isActiveTask = !isDone && normStatus(t.status) === 'In Progress';
+  const cardExtra = isDone ? ';opacity:0.75;background:#F0FAEC' : (isActiveTask ? ';background:#EAF6E5' : '');
   const sumStyle = isDone
     ? 'font-size:11px;font-weight:600;color:#2D7A2D;line-height:1.25;margin-bottom:4px;max-height:42px;overflow:hidden;text-decoration:line-through'
     : 'font-size:11px;font-weight:600;color:#292E37;line-height:1.25;margin-bottom:4px;max-height:42px;overflow:hidden';
-  return `<div class="pri-card pri-card-h ${isUnassigned?'unassigned-card':''} ${isDone?'is-done':''}"
+  return `<div class="pri-card pri-card-h ${isUnassigned?'unassigned-card':''} ${isDone?'is-done':''} ${isActiveTask?'is-active':''}"
     draggable="true"
     data-key="${t.key}"
     data-epic="${t.parent_key||'__none__'}"
