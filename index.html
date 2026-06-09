@@ -797,7 +797,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v181</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v182</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -1289,6 +1289,10 @@ let priViewMode = 'vertical'; // 'vertical' (default, original) or 'horizontal' 
 // v179: top-level Projects-tab layout. 'tasks' shows the Epic+Tasks board (vertical or
 // horizontal as before). 'epicsonly' shows a priority × status matrix of just the epics.
 let priLayoutMode = 'tasks';
+// v182: collapse state for the Epics-Only matrix's status rows.
+// Keyed by status name (e.g. {'Done': true}). Reuse a separate object from
+// the My Tasks rowCollapsed so users can collapse Done independently here.
+let priMatrixRowCollapsed = {};
 let priBandCollapsed = {Highest:false, High:false, Medium:false, Low:false, 'No priority':true};
 // v105: Show Done is now a SINGLE GLOBAL flag, defaulting ON. Was per-view (object
 // keyed by view) which felt fiddly — flipping it on My Tasks didn't carry over to
@@ -1307,7 +1311,7 @@ let showDoneByView = {mytasks:true, myepics:true, team:true, prioritise:true, ma
 let showCancelled = false;
 
 /* ══ PERSISTENCE ══ */
-function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,groupProjectAssignment,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed,doneDays,commentReadState,priViewMode,priLayoutMode,priBandCollapsed,showDone,showDoneByView,showCancelled,epicFocusKey,epicFocusUserFilter,epicFocusView,epicFocusProjectFilter,sharedTeams:[...sharedTeams],priProjKey}));}catch{}}
+function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,groupProjectAssignment,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed,doneDays,commentReadState,priViewMode,priLayoutMode,priMatrixRowCollapsed,priBandCollapsed,showDone,showDoneByView,showCancelled,epicFocusKey,epicFocusUserFilter,epicFocusView,epicFocusProjectFilter,sharedTeams:[...sharedTeams],priProjKey}));}catch{}}
 function loadAll(){try{const d=JSON.parse(localStorage.getItem(STOR)||"{}");if(d.cfg)cfg=d.cfg;if(d.locStat)locStat=d.locStat;if(d.locPri)locPri=d.locPri;if(d.currentIam)currentIam=d.currentIam;if(d.currentProjFilter)currentProjFilter=d.currentProjFilter;
 if(d.currentProjectGroup)currentProjectGroup=d.currentProjectGroup;if(d.currentGroup)currentGroup=d.currentGroup;if(d.teamMembers)teamMembers=d.teamMembers;if(d.adminUsers)adminUsers=d.adminUsers;if(d.groups)groups=d.groups;
 if(d.groupProjectAssignment)groupProjectAssignment=d.groupProjectAssignment;if(d.excludedProjects)excludedProjects=d.excludedProjects;if(d.currentView)currentView=d.currentView;if(d.currentLevel)currentLevel=d.currentLevel;if(d.rowCollapsed)rowCollapsed={...rowCollapsed,...d.rowCollapsed};if(d.swimCollapsed)swimCollapsed={...swimCollapsed,...d.swimCollapsed};
@@ -1315,6 +1319,7 @@ if(d.doneDays)doneDays=d.doneDays;
 if(d.commentReadState)commentReadState=d.commentReadState;
 if(d.priViewMode)priViewMode=d.priViewMode;
 if(d.priLayoutMode)priLayoutMode=d.priLayoutMode;
+if(d.priMatrixRowCollapsed && typeof d.priMatrixRowCollapsed === 'object') priMatrixRowCollapsed = d.priMatrixRowCollapsed;
 if(d.priBandCollapsed)priBandCollapsed={...priBandCollapsed,...d.priBandCollapsed};
 // v105: hydrate the single global flag. If the saved settings still carry the
 // legacy per-view object (from v104 and earlier), migrate by OR-ing all values
@@ -9491,7 +9496,9 @@ async function renderPriEpicMatrix(){
   const ROWS = ['In Progress','Selected','Backlog','Done'];
 
   let html = '<table id="pri-epic-matrix" cellspacing="0" cellpadding="0">';
-  html += '<thead><tr><th style="width:120px;position:sticky;left:0;z-index:3">Status \\ Priority</th>';
+  // v182: dropped the "Status \ Priority" first column — the collapsible status
+  // header row below makes it redundant and reclaims width for the priority cells.
+  html += '<thead><tr>';
   PRI_LIST.forEach(p => {
     const pc = PC[p] || PC.Medium;
     html += '<th class="pri-col" style="background:' + pc.bg + ';color:' + pc.c + '">' + _escHtml(p) + '</th>';
@@ -9502,8 +9509,19 @@ async function renderPriEpicMatrix(){
     if (!showDoneME && rowStatus === 'Done') return; // skip Done row when show-done is off
     const rowEpics = epics.filter(e => normStatus(e.status) === rowStatus);
     const sc = SC[rowStatus] || SC.Backlog;
+    const collapsed = !!priMatrixRowCollapsed[rowStatus];
+    const statParamHdr = rowStatus.replace(/'/g, "\\'");
+    // v182: clickable status header that spans every priority column — mirrors
+    // the My Tasks matrix UX. Chevron rotates, status badge + epic count.
+    html += '<tr class="pri-matrix-row-hdr" onclick="togglePriMatrixRow(\'' + statParamHdr + '\')">';
+    html += '<td colspan="' + PRI_LIST.length + '" style="background:#F7F8F9;padding:8px 14px;cursor:pointer;border-bottom:1px solid #E4E6E8;border-top:1px solid #E4E6E8">';
+    html += '<div style="display:flex;align-items:center;gap:10px">';
+    html += '<span style="font-size:14px;color:#9EA0A4;transition:.15s;display:inline-block;transform:' + (collapsed?'none':'rotate(90deg)') + '">›</span>';
+    html += '<span class="badge" style="background:' + sc.bg + ';color:' + sc.c + ';font-size:12px;padding:3px 10px;font-weight:700">' + _escHtml(rowStatus) + '</span>';
+    html += '<span style="font-size:11px;color:#5D7987;font-weight:600">' + rowEpics.length + ' epic' + (rowEpics.length===1?'':'s') + '</span>';
+    html += '</div></td></tr>';
+    if (collapsed) return; // skip rendering the data row when collapsed
     html += '<tr>';
-    html += '<td class="pri-status-cell" style="color:' + sc.c + '"><div style="display:flex;align-items:center;gap:6px"><span class="badge" style="background:' + sc.bg + ';color:' + sc.c + '">' + _escHtml(rowStatus) + '</span><span style="font-size:10px;color:#9EA0A4">' + rowEpics.length + '</span></div></td>';
     PRI_LIST.forEach(pri => {
       // Epics with no priority default to Medium (Jira treats them as such)
       const inCell = rowEpics.filter(e => {
@@ -9553,6 +9571,13 @@ async function renderPriEpicMatrix(){
   html += '</tbody></table>';
 
   boardEl.innerHTML = html;
+}
+
+// v182: toggle a status row in the Epics-Only matrix (collapsible).
+function togglePriMatrixRow(status){
+  priMatrixRowCollapsed[status] = !priMatrixRowCollapsed[status];
+  saveAll();
+  renderPriEpicMatrix();
 }
 
 // Matrix drag handlers — separate from the task-card and epic-row reorder
