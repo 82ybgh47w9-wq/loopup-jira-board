@@ -980,16 +980,23 @@ button,select,textarea,input{font-family:inherit}
         <span style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em">Project</span>
         <select id="epicfocus-proj-sel" onchange="onEpicFocusProjChange()" style="padding:4px 8px;border:1px solid #E4E6E8;border-radius:6px;font-size:12px;font-weight:600;color:#125462;background:#fff"></select>
       </div>
-      <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:280px;position:relative">
+      <!-- v183: Epic picker upgraded to mirror the Projects-tab combo
+           (hidden input + visible search + dropdown + × clear). Wider field,
+           "Your epics" group on top, restore "KEY — Summary" on pick. -->
+      <div style="display:flex;align-items:center;gap:6px;min-width:480px">
         <span style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em">Epic</span>
-        <input id="epicfocus-search" placeholder="Search Epics by key or name…"
-          oninput="onEpicFocusSearch(this.value)"
-          onfocus="onEpicFocusSearch(this.value)"
-          onblur="setTimeout(closeEpicFocusDropdown,200)"
-          autocomplete="off"
-          style="flex:1;padding:5px 10px;border:1px solid #E4E6E8;border-radius:6px;font-size:12px;background:#fff">
-        <div id="epicfocus-results" style="display:none;position:absolute;top:100%;left:60px;right:0;background:#fff;border:1px solid #C9CACC;border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:340px;overflow-y:auto;z-index:50"></div>
-        <span id="epicfocus-selected" style="font-size:11px;font-weight:700;color:#125462"></span>
+        <div style="position:relative;display:inline-block;width:460px;max-width:460px;flex-shrink:0">
+          <input type="hidden" id="epicfocus-key">
+          <input id="epicfocus-search" placeholder="Search Epics by key or name…"
+            oninput="onEpicFocusSearch(this.value)"
+            onfocus="epicFocusFocus(this)"
+            onblur="epicFocusBlur(this)"
+            autocomplete="off"
+            style="width:100%;box-sizing:border-box;padding:6px 32px 6px 10px;border:1px solid #C9CACC;border-radius:6px;font-size:12px;background:#fff;text-overflow:ellipsis;max-width:none">
+          <button id="epicfocus-clear" type="button" onmousedown="event.preventDefault();epicFocusClear()" title="Clear selection"
+            style="display:none;position:absolute;right:6px;top:50%;transform:translateY(-50%);align-items:center;justify-content:center;width:20px;height:20px;border:none;background:#E4E6E8;color:#73777C;border-radius:50%;font-size:14px;line-height:1;cursor:pointer;padding:0;font-weight:700">×</button>
+          <div id="epicfocus-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #C9CACC;border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:340px;overflow-y:auto;z-index:60;margin-top:2px"></div>
+        </div>
       </div>
       <!-- v172: view-mode dropdown (Priority / Team / Compact) replaces the two checkboxes for this view -->
       <div style="display:flex;align-items:center;gap:6px">
@@ -3537,13 +3544,28 @@ function onEpicFocusSearch(q){
     if (score > 0) scored.push({ e, score });
   }
   scored.sort((a,b) => b.score - a.score);
-  const top = scored.slice(0, 50);
+  const top = scored.slice(0, 80);
   if (!top.length){
     dd.innerHTML = '<div style="padding:8px 12px;font-size:12px;color:#9EA0A4;font-style:italic">No matching Epic / Milestone.</div>';
     dd.style.display = 'block';
     return;
   }
-  dd.innerHTML = top.map(({e}) => {
+  // v183: group results — "Your epics" (assigned to current user OR having
+  // tasks assigned to the user) appear first, then "All epics" below. Mirrors
+  // the Projects-tab picker's "Your projects" grouping.
+  const me = currentIam || '';
+  const myEpicsSet = new Set();
+  if (me){
+    for (const e of (allIssues||[])) {
+      if (e.assignee === me && ['Epic','Milestone'].includes(e.type)) myEpicsSet.add(e.key);
+    }
+    for (const t of (allIssues||[])){
+      if (t.assignee === me && t.parent_key) myEpicsSet.add(t.parent_key);
+    }
+  }
+  const myGroup = top.filter(x => myEpicsSet.has(x.e.key));
+  const otherGroup = top.filter(x => !myEpicsSet.has(x.e.key));
+  const renderRow = ({e}) => {
     const tc = (TC[e.type] || TC.Task);
     const childCount = allIssues.filter(i => i.parent_key === e.key).length;
     return `<div onmousedown="selectEpicFocus('${e.key.replace(/'/g,"\\'")}')" style="padding:7px 12px;cursor:pointer;border-bottom:1px solid #F4F4F5;font-size:12px;display:flex;align-items:center;gap:8px"
@@ -3553,7 +3575,12 @@ function onEpicFocusSearch(q){
       <span style="flex:1;color:#292E37;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_escHtml(e.summary||'')}</span>
       <span style="font-size:10px;color:#9EA0A4">${childCount} task${childCount===1?'':'s'}</span>
     </div>`;
-  }).join('');
+  };
+  const hdr = (label) => `<div style="font-size:10px;color:#9EA0A4;padding:6px 10px 2px;text-transform:uppercase;letter-spacing:.04em;font-weight:700">${label}</div>`;
+  let html = '';
+  if (myGroup.length){ html += hdr('Your epics'); html += myGroup.map(renderRow).join(''); }
+  if (otherGroup.length){ html += hdr(myGroup.length ? 'All epics' : 'Epics'); html += otherGroup.map(renderRow).join(''); }
+  dd.innerHTML = html;
   dd.style.display = 'block';
 }
 function closeEpicFocusDropdown(){
@@ -3564,8 +3591,46 @@ function selectEpicFocus(key){
   epicFocusKey = key;
   saveAll();
   closeEpicFocusDropdown();
+  // v183: restore "KEY — Summary" in the search input so the field shows
+  // what's currently selected (matches Projects-tab picker behaviour).
+  const epic = (allIssues || []).find(i => i.key === key);
   const inp = document.getElementById('epicfocus-search');
-  if (inp) inp.value = '';
+  const hidden = document.getElementById('epicfocus-key');
+  const clearBtn = document.getElementById('epicfocus-clear');
+  if (inp){
+    inp.value = key + (epic && epic.summary ? ' — ' + epic.summary : '');
+    inp.dataset.picked = '1';
+  }
+  if (hidden) hidden.value = key;
+  if (clearBtn) clearBtn.style.display = 'flex';
+  renderEpicFocus();
+}
+// v183: focus + blur + clear handlers — mirror priProjFocus / Blur / Clear.
+function epicFocusFocus(el){
+  if (!el) return;
+  el.dataset.prev = el.value || '';
+  el.dataset.picked = '';
+  el.value = '';
+  onEpicFocusSearch('');
+}
+function epicFocusBlur(el){
+  setTimeout(() => {
+    closeEpicFocusDropdown();
+    if (!el) return;
+    if (el.dataset.picked === '1'){ el.dataset.picked = ''; return; }
+    if (el.dataset.prev){ el.value = el.dataset.prev; }
+  }, 180);
+}
+function epicFocusClear(){
+  epicFocusKey = '';
+  const hidden = document.getElementById('epicfocus-key');
+  const inp = document.getElementById('epicfocus-search');
+  const clearBtn = document.getElementById('epicfocus-clear');
+  if (hidden) hidden.value = '';
+  if (inp){ inp.value = ''; inp.dataset.prev = ''; inp.dataset.picked = ''; }
+  if (clearBtn) clearBtn.style.display = 'none';
+  saveAll();
+  if (inp){ inp.focus(); onEpicFocusSearch(''); }
   renderEpicFocus();
 }
 function epicFocusCreateTask(){
@@ -3590,8 +3655,23 @@ function renderEpicFocus(){
   if (!table) return;
 
   const createBtn = document.getElementById('epicfocus-create-btn');
-  const selEl = document.getElementById('epicfocus-selected');
-  if (selEl) selEl.textContent = '';
+  // v183: the search input itself now carries the selected epic's "KEY — Summary"
+  // (replaces the old separate #epicfocus-selected span). Restore it from state.
+  const hidden = document.getElementById('epicfocus-key');
+  const inp = document.getElementById('epicfocus-search');
+  const clearBtn = document.getElementById('epicfocus-clear');
+  if (epicFocusKey){
+    const ep = (allIssues || []).find(i => i.key === epicFocusKey);
+    if (hidden) hidden.value = epicFocusKey;
+    if (inp && document.activeElement !== inp){
+      inp.value = epicFocusKey + (ep && ep.summary ? ' — ' + ep.summary : '');
+    }
+    if (clearBtn) clearBtn.style.display = 'flex';
+  } else {
+    if (hidden) hidden.value = '';
+    if (inp && document.activeElement !== inp) inp.value = '';
+    if (clearBtn) clearBtn.style.display = 'none';
+  }
   // Sync the view dropdown
   const viewSel = document.getElementById('epicfocus-view-sel');
   if (viewSel) viewSel.value = epicFocusView;
@@ -3619,8 +3699,8 @@ function renderEpicFocus(){
     return;
   }
 
-  // Header card: selected Epic with summary + child count.
-  if (selEl) selEl.textContent = epicFocusKey + ' — ' + (epic.summary || '');
+  // v183: the old #epicfocus-selected span was removed (selection now lives in
+  // the search input). Just enable the create button.
   if (createBtn) createBtn.disabled = false;
 
   // Children of this epic (Tasks/Stories/Bugs whose parent_key matches).
