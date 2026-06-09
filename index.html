@@ -1,6 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>LoopUp Jira Board</title>
@@ -777,7 +780,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v179</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v179 ✓</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -3728,7 +3731,10 @@ function exportEpicFocusToExcel(){
   const epicTitle = epic ? (epic.summary || '') : '';
   const headerLabel = epicFocusKey + (epicTitle ? ' — ' + epicTitle : '');
   const html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">'
-    + '<head><meta charset="utf-8"><title>' + headerLabel + '</title></head><body>'
+    + '<head>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" /><meta charset="utf-8"><title>' + headerLabel + '</title></head><body>'
     + '<table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:11px">'
     + '<tr style="background:#125462;color:#fff;font-weight:bold"><th colspan="14" style="text-align:left;padding:6px 8px">' + headerLabel + '</th></tr>'
     + '<tr style="background:#E0F0F8;font-weight:bold">'
@@ -10560,7 +10566,10 @@ function msInit(){
   if (msalReady) return msalReady;
   msalReady = (async () => {
     // v125: wait up to 5s for the MSAL global to appear — the fallback CDN
-    // loader (in the <head>) may still be fetching when sign-in is clicked.
+    // loader (in the <head>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />) may still be fetching when sign-in is clicked.
     for (let i = 0; i < 50; i++){
       if (typeof msal !== 'undefined' && msal.PublicClientApplication) break;
       await new Promise(r => setTimeout(r, 100));
