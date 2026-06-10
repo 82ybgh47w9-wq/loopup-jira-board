@@ -797,7 +797,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v183</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v184</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -4814,9 +4814,12 @@ async function createSubtaskInline(){
 
 async function renderPaneMain(){
   const i=openIssue;
+  // v184: clicking a hierarchy KEY opens the in-app detail card for that issue
+  // (was opening in Jira in a new tab). The card header already exposes
+  // "↗ Open in Jira" so the external link is still one click away.
   const hierRow=(label,key,summary,type)=>key?`<div class="hierarchy-row">
     <span class="hierarchy-label">${label}</span>
-    <span class="hierarchy-key"><a href="${BASE()}${key}" target="_blank" style="color:#257AA5;font-family:monospace;font-size:10px">${key}</a></span>
+    <span class="hierarchy-key"><a href="#" onclick="event.preventDefault();event.stopPropagation();openPane('${key}')" style="color:#257AA5;font-family:monospace;font-size:10px;cursor:pointer" title="Open ${key} in this app">${key}</a></span>
     <span class="hierarchy-val">${tbadge(type||"")} <span style="font-size:12px">${summary||""}</span></span>
   </div>`:"";
 
@@ -4875,17 +4878,20 @@ async function renderPaneMain(){
           pencil = pencilIcon(childOfThisLevel.key, node.type);
         }
       }
+      // v184: KEY links open in-app instead of bouncing to Jira. The current
+      // row's KEY isn't clickable as a "navigate to self" (we're already on
+      // it) — it stays as a normal Jira deep-link via the header's ↗ button.
       if(isCurrent){
         return`<div class="hierarchy-row" style="background:#F0F9FF;border-radius:6px;padding:5px 8px;border-left:3px solid #2E99CE;display:flex;align-items:center">
           <span class="hierarchy-label" style="font-weight:700;color:#125462">${node.type}</span>
-          <span class="hierarchy-key"><a href="${BASE()}${node.key}" target="_blank" style="color:#125462;font-family:monospace;font-size:13px;font-weight:700">${node.key}</a></span>
+          <span class="hierarchy-key"><span style="color:#125462;font-family:monospace;font-size:13px;font-weight:700">${node.key}</span></span>
           <span class="hierarchy-val" style="font-size:13px;font-weight:700;color:#292E37;flex:1">${node.summary}</span>
           ${pencil}
         </div>`;
       }
       return `<div class="hierarchy-row" style="display:flex;align-items:center">
         <span class="hierarchy-label">${node.type}</span>
-        <span class="hierarchy-key"><a href="${BASE()}${node.key}" target="_blank" style="color:#257AA5;font-family:monospace;font-size:10px">${node.key}</a></span>
+        <span class="hierarchy-key"><a href="#" onclick="event.preventDefault();event.stopPropagation();openPane('${node.key}')" style="color:#257AA5;font-family:monospace;font-size:10px;cursor:pointer" title="Open ${node.key} in this app">${node.key}</a></span>
         <span class="hierarchy-val" style="flex:1">${tbadge(node.type||"")} <span style="font-size:12px">${node.summary||""}</span></span>
         ${pencil}
       </div>`;
@@ -5238,6 +5244,35 @@ function _syncPriCachesFromOpenIssue(){
     status: openIssue.status,
     priority: openIssue.priority
   });
+  // v184: _syncIssueCaches only UPDATES existing entries — if the open issue
+  // is an Epic/Milestone in the currently-loaded Projects project but isn't
+  // in priEpics yet (because Jira's search index hadn't caught up at last
+  // fetch, or the previous status had it filtered out), inject it so the
+  // Projects > Epics-Only matrix shows it immediately instead of waiting
+  // for Jira to re-index.
+  try {
+    if (openIssue && ['Epic','Milestone'].includes(openIssue.type) &&
+        typeof priEpics !== 'undefined' && Array.isArray(priEpics) &&
+        typeof priProjKey === 'string' && priProjKey &&
+        openIssue.project === priProjKey){
+      const exists = priEpics.some(e => e && e.key === k);
+      if (!exists){
+        priEpics.push({...openIssue});
+        appLogMsg('info','pri-cache','Injected ' + k + ' into priEpics (was missing from snapshot)');
+      }
+    }
+    // Same idea for priIssues if the open issue is a child task in the current pri project
+    if (openIssue && !['Epic','Milestone','Initiative','Legend'].includes(openIssue.type) &&
+        typeof priIssues !== 'undefined' && Array.isArray(priIssues) &&
+        typeof priProjKey === 'string' && priProjKey &&
+        openIssue.project === priProjKey){
+      const exists = priIssues.some(t => t && t.key === k);
+      if (!exists){
+        priIssues.push({...openIssue});
+        appLogMsg('info','pri-cache','Injected ' + k + ' into priIssues (was missing from snapshot)');
+      }
+    }
+  } catch(e){ /* defensive — never break the pane render flow */ }
 }
 
 // v104: generic cache-sync. Propagates a partial field set onto every cached
