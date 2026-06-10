@@ -802,7 +802,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v187</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v188</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -5273,7 +5273,35 @@ function _setMicButtonRecording(){
   btn.style.borderColor = '#D6202B';
   btn.title = 'Click to stop dictation';
 }
-function toggleCommentDictation(){
+function _voiceMsg(text, kind){
+  const post = document.getElementById('post-msg');
+  if (!post) return;
+  post.textContent = '';
+  // Use innerHTML so we can include the link in the denied-state message
+  post.innerHTML = '';
+  const span = document.createElement('span');
+  span.textContent = text;
+  span.style.color = kind === 'err' ? '#D6202B' : (kind === 'warn' ? '#A04A00' : '#5D7987');
+  post.appendChild(span);
+}
+function _voiceMsgDenied(){
+  const post = document.getElementById('post-msg');
+  if (!post) return;
+  post.innerHTML = '<span style="color:#D6202B">Microphone is blocked for this site.</span> ' +
+    '<a href="#" onclick="event.preventDefault();_showMicPermissionHelp()" style="color:#2E99CE;text-decoration:underline">How do I re-enable it?</a>';
+}
+function _showMicPermissionHelp(){
+  alert(
+    'Re-enable the microphone for this site:\n\n' +
+    '1. Click the 🔒 (lock) icon at the left of the address bar\n' +
+    '2. Find "Microphone" in the site permissions\n' +
+    '3. Change it from "Block" to "Allow" (or "Ask")\n' +
+    '4. Reload this page and click the 🎤 Dictate button again\n\n' +
+    'In Chrome, you can also visit chrome://settings/content/microphone to manage permissions for every site at once.'
+  );
+}
+
+async function toggleCommentDictation(){
   const ta = document.getElementById('cmt-text');
   if (!ta) return;
   const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -5282,6 +5310,39 @@ function toggleCommentDictation(){
     try { _cmtRecog && _cmtRecog.stop(); } catch{}
     return; // onend will reset the UI
   }
+
+  // v188: explicitly request the microphone via getUserMedia FIRST. This gives
+  // us a clean, unambiguous permission flow:
+  //   - User Allows  → permission stored, recognition starts cleanly
+  //   - User Blocks  → catch a NotAllowedError immediately (instead of Chrome's
+  //                     misleading "network" error from webkitSpeechRecognition)
+  //   - Already blocked → permissions.query short-circuits with a clear message
+  // We immediately close the audio track since SpeechRecognition opens its own.
+  if (navigator.permissions && navigator.permissions.query){
+    try {
+      const st = await navigator.permissions.query({name:'microphone'});
+      if (st.state === 'denied'){ _voiceMsgDenied(); return; }
+    } catch(e){ /* not all browsers expose 'microphone' to permissions.query — ignore */ }
+  }
+  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia){
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Immediately stop the tracks — SpeechRecognition will request its own.
+      try { stream.getTracks().forEach(t => t.stop()); } catch{}
+    } catch(e){
+      const code = e && (e.name || e.message) || '';
+      if (/NotAllowed|Permission|Denied/i.test(code)){
+        _voiceMsgDenied();
+        appLogMsg('warn','voice','getUserMedia denied: ' + code);
+      } else if (/NotFound/i.test(code)){
+        _voiceMsg('No microphone detected. Plug one in and try again.', 'err');
+      } else {
+        _voiceMsg('Couldn\'t access the microphone: ' + code, 'err');
+      }
+      return;
+    }
+  }
+
   // Start a fresh recognition instance each session — Chrome misbehaves if reused.
   _cmtRecog = new Ctor();
   _cmtRecog.lang = (navigator.language || 'en-GB');
@@ -5306,14 +5367,23 @@ function toggleCommentDictation(){
   };
   _cmtRecog.onerror = (e) => {
     const code = e && e.error;
-    let msg = 'Dictation failed';
-    if (code === 'not-allowed' || code === 'service-not-allowed') msg = 'Microphone access denied. Allow it in your browser settings to use voice dictation.';
-    else if (code === 'no-speech') msg = 'No speech detected — try again.';
-    else if (code === 'network') msg = 'Network problem — voice recognition needs an internet connection.';
-    else if (code) msg = 'Dictation error: ' + code;
-    appLogMsg('warn','voice', msg);
-    const post = document.getElementById('post-msg');
-    if (post){ post.textContent = msg; post.style.color = '#D6202B'; setTimeout(() => { if (post) post.textContent = ''; }, 4000); }
+    appLogMsg('warn','voice','SpeechRecognition error: ' + code);
+    if (code === 'not-allowed' || code === 'service-not-allowed'){
+      _voiceMsgDenied();
+    } else if (code === 'no-speech'){
+      _voiceMsg('No speech detected — try speaking again.', 'warn');
+    } else if (code === 'network'){
+      // v188: Chrome's webkitSpeechRecognition returns 'network' for several
+      // unrelated conditions including mic-blocked, transient connection
+      // issues, and corporate-firewall blocks of Google's speech endpoint.
+      // We've already gated on getUserMedia above so if we land here it's
+      // almost certainly an actual network/firewall issue.
+      _voiceMsg('Voice recognition can\'t reach the speech service. Check your internet connection — corporate networks sometimes block Google\'s speech endpoint.', 'err');
+    } else if (code === 'audio-capture'){
+      _voiceMsg('Microphone capture failed. Is another app using the mic?', 'err');
+    } else if (code){
+      _voiceMsg('Dictation error: ' + code, 'err');
+    }
   };
   _cmtRecog.onend = () => {
     _cmtRecogActive = false;
