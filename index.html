@@ -802,7 +802,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v185</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v186</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -4601,6 +4601,16 @@ async function renderPaneDescendants(spec){
       return;
     }
   }
+  // v186: supplement with locally-known descendants from allIssues. Jira's
+  // /search/jql endpoint has a 5-15s indexing lag after a reparent / create,
+  // so freshly-moved children silently disappear from the Tasks tab until the
+  // index catches up. We re-run this merge on every render (not just on cache
+  // miss) so the moment allIssues sees the child via the next doFetch, it
+  // also appears under its new parent here.
+  items = _mergeLocalDescendants(items || [], i.key, spec.walk);
+  // Also push the merged result back into the cache so the tab count is
+  // accurate without re-fetching.
+  if (descendantsCache[i.key]){ descendantsCache[i.key][spec.tabKey] = items; renderPaneTabs(); }
   const list = items || [];
   const isDirectChildTab = spec.walk.length === 1;
   // v153: Surface a + Create button on every descendant tab — not just
@@ -4684,6 +4694,43 @@ async function fetchDescendants(rootKey, levelsToTraverse){
     }
   }
   return finalLevel;
+}
+
+// v186: walk the same hierarchy levels as fetchDescendants but driven by the
+// local allIssues cache. Used to supplement the Jira-side fetch with children
+// that allIssues knows about but Jira's search hasn't indexed yet — closes
+// the 5-15s lag where freshly-reparented tasks silently disappear from the
+// Tasks tab.
+function _mergeLocalDescendants(items, rootKey, levelsToTraverse){
+  if (typeof allIssues === 'undefined' || !Array.isArray(allIssues)) return items;
+  if (!Array.isArray(levelsToTraverse) || !levelsToTraverse.length) return items;
+  let currentParents = new Set([rootKey]);
+  let leaves = [];
+  for (let lvl = 0; lvl < levelsToTraverse.length; lvl++){
+    const types = new Set(levelsToTraverse[lvl] || []);
+    const matches = [];
+    for (const it of allIssues){
+      if (!it || !it.key || !it.parent_key) continue;
+      if (!currentParents.has(it.parent_key)) continue;
+      if (!types.has(it.type)) continue;
+      matches.push(it);
+    }
+    if (lvl === levelsToTraverse.length - 1){
+      leaves = matches;
+    } else {
+      currentParents = new Set(matches.map(x => x.key));
+      if (!currentParents.size) break;
+    }
+  }
+  const seen = new Set((items || []).map(x => x && x.key).filter(Boolean));
+  const result = (items || []).slice();
+  for (const it of leaves){
+    if (!seen.has(it.key)){
+      result.push(it);
+      seen.add(it.key);
+    }
+  }
+  return result;
 }
 
 function createDescendantFromPane(tabKey, parentKey){
