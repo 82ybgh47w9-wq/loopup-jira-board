@@ -272,20 +272,25 @@ button,select,textarea,input{font-family:inherit}
      > In Progress > Selected > Epic (Epic/Milestone type, no other state)
      > Default white.
 */
+/* v185: card backgrounds match the unified SC palette so a card's tint and
+   its status badge tell the same story. */
 .card-state-default{background:#fff}
-.card-state-inprogress{background:#EAF6E5}
-.card-state-onhold{background:#E3F0F8}
-.card-state-selected{background:#F1F4F7}
-.card-state-done{background:#E5F5DD;opacity:0.88}
+.card-state-inprogress{background:#FFEDD5}
+.card-state-onhold{background:#FCE6E8}
+.card-state-selected{background:#E0F0F8}
+.card-state-cancelled{background:#E4E6E8}
+.card-state-cancelled .card-summary,
+.card-state-cancelled [data-card-summary],
+.card-state-cancelled .pri-emc-sum{color:#5D6770;text-decoration:line-through}
+.card-state-done{background:#E8F5E0;opacity:0.88}
 .card-state-done .card-summary,
 .card-state-done [data-card-summary],
 .card-state-done .pri-emc-sum{text-decoration:line-through;color:#2D7A2D}
-/* v181b: Active = light green background with a dark green border (matches the
-   Team-page is-active treatment). Was dark-green-fill before — too heavy and
-   unreadable. The border is the differentiator vs In Progress (same bg). */
+/* v181b/v185: Active = LoopUp brand green border on light-green bg. This wins
+   over the status tint because Active is the "currently working on" signal. */
 .card-state-active{background:#F0FBF0;border:2px solid #5E8E38 !important}
 .card-state-epic{background:#F0E4FA}
-.card-state-epic.card-state-done{background:#E5F5DD}
+.card-state-epic.card-state-done{background:#E8F5E0}
 /* Epic column header (vertical Projects view) follows the same palette */
 .pri-epic-col .pri-epic-hdr{background:#F0E4FA !important}
 .pri-epic-col.epic-done .pri-epic-hdr{background:#E5F5DD !important}
@@ -797,7 +802,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v184</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v185</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -1208,7 +1213,29 @@ const DEFAULT_TEAM = [];
 const STATUS_ROWS = ["Done","In Progress","Selected","Backlog"];
 const PRI_COLS = ["Highest","High","Medium","Low"];
 const PRI_ORD = {Highest:0,High:1,Medium:2,Low:3};
-const SC = {"In Progress":{c:"#2E99CE",bg:"#E0F0F8"},"Selected":{c:"#5E8E38",bg:"#F1F7EC"},"Selected for Development":{c:"#5E8E38",bg:"#F1F7EC"},"Backlog":{c:"#9EA0A4",bg:"#EEF1F3"},"Done":{c:"#2D7A2D",bg:"#E8F5E0"}};
+// v185: unified status palette. The five action statuses each get a distinct
+// hue so badges, card tints, and detail-pane buttons read consistently across
+// every view. Backlog stays neutral slate (background "to triage" state).
+//   Done       — green text on light green
+//   In Progress— orange text on light orange
+//   On Hold    — red text on light red
+//   Selected   — blue text on light blue
+//   Cancelled  — grey text on light grey (also matches isCancelledStatus)
+const SC = {
+  "Backlog":                  {c:"#5D7987", bg:"#EEF1F3"},
+  "Selected":                 {c:"#185FA5", bg:"#E0F0F8"},
+  "Selected for Development": {c:"#185FA5", bg:"#E0F0F8"},
+  "In Progress":              {c:"#A04A00", bg:"#FFEDD5"},
+  "On Hold":                  {c:"#A32D2D", bg:"#FCE6E8"},
+  "Hold":                     {c:"#A32D2D", bg:"#FCE6E8"},
+  "Blocked":                  {c:"#A32D2D", bg:"#FCE6E8"},
+  "Waiting":                  {c:"#A32D2D", bg:"#FCE6E8"},
+  "Cancelled":                {c:"#5D6770", bg:"#E4E6E8"},
+  "Canceled":                 {c:"#5D6770", bg:"#E4E6E8"},
+  "Won't Do":                 {c:"#5D6770", bg:"#E4E6E8"},
+  "Abandoned":                {c:"#5D6770", bg:"#E4E6E8"},
+  "Done":                     {c:"#2D7A2D", bg:"#E8F5E0"}
+};
 const PC = {Highest:{bg:"#FCEBEB",c:"#A32D2D",d:"#D6202B"},High:{bg:"#FAEEDA",c:"#854F0B",d:"#E08000"},Medium:{bg:"#E0F0F8",c:"#185FA5",d:"#8FC7E4"},Low:{bg:"#EAF3DE",c:"#3B6D11",d:"#B3D599"}};
 // v100: Jira-standard type palette. Epic and Milestone share purple (same
 // hierarchy tier in LoopUp). Initiative is amber/yellow (lightbulb icon),
@@ -2377,21 +2404,25 @@ const spinHtml=(sz=16,col="#2E99CE")=>`<svg class="spinner" width="${sz}" height
 
 function normStatus(s){if(!s)return"Backlog";const l=s.toLowerCase();if(l.includes("progress"))return"In Progress";if(l.includes("select")||l.includes("development"))return"Selected";if(l.includes("done")||l.includes("complet")||l.includes("resolv")||l.includes("closed"))return"Done";return"Backlog";}
 
-// v181: pick a single card-state class for any issue based on its status and
-// (optionally) whether it's the LoopUp "currently active" task for its
-// assignee. Drives the unified card colour palette across all views.
+// v181/v185: pick a single card-state class for any issue based on its status
+// and (optionally) whether it's the LoopUp "currently active" task. Drives
+// the unified card colour palette across all views.
 function cardStateClass(issue, isActiveFlag){
   if (!issue) return 'card-state-default';
-  const ns = normStatus(issue.status);
+  const raw = issue.status || '';
+  const ns = normStatus(raw);
   const isEpic = ['Epic','Milestone'].includes(issue.type);
+  // Cancelled detected via raw status text (Jira's Cancelled / Won't Do /
+  // Abandoned all fall through normStatus to "Backlog" — we promote them
+  // here so they get the dedicated grey-on-grey palette + strikethrough).
+  if (/cancel|won.?t\s*do|abandon/i.test(raw)) return 'card-state-cancelled';
   // Done is terminal — wins over every other state (so a Done epic looks Done,
   // not Epic-purple).
   if (ns === 'Done') return 'card-state-done' + (isEpic ? ' card-state-epic' : '');
   // Active (the LoopUp "I'm working on this" flag) outranks status colour
   if (isActiveFlag) return 'card-state-active';
-  // On Hold is detected via the raw status text since normStatus collapses
-  // anything not Progress/Selected/Done into "Backlog".
-  if (/on\s*hold|blocked|pending|waiting/i.test(issue.status||'')) return 'card-state-onhold';
+  // On Hold detected via raw status text (normStatus collapses these to Backlog)
+  if (/on\s*hold|blocked|pending|waiting/i.test(raw)) return 'card-state-onhold';
   if (ns === 'In Progress') return 'card-state-inprogress';
   if (ns === 'Selected') return 'card-state-selected';
   if (isEpic) return 'card-state-epic';
