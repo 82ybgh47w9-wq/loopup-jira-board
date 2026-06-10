@@ -802,7 +802,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v188</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v189</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -5238,6 +5238,11 @@ function renderPaneCommentList(key){
 // Chrome / Edge / Safari support; Firefox does not (button stays hidden).
 // Audio goes to the browser vendor's recognition service (Google/Apple) —
 // fine for internal-comment use but worth noting.
+// v189: Edge needs special handling — its SpeechRecognition uses Microsoft's
+// online speech service which requires Windows "Online speech recognition"
+// to be enabled and a non-blocked Microsoft endpoint. Both often fail on
+// corporate networks. Targeted guidance + recommend Chrome as fallback.
+const _isEdgeBrowser = /Edg\//.test(navigator.userAgent || '');
 let _cmtRecog = null;        // current SpeechRecognition instance (one per session)
 let _cmtRecogActive = false; // are we currently listening?
 
@@ -5298,6 +5303,22 @@ function _showMicPermissionHelp(){
     '3. Change it from "Block" to "Allow" (or "Ask")\n' +
     '4. Reload this page and click the 🎤 Dictate button again\n\n' +
     'In Chrome, you can also visit chrome://settings/content/microphone to manage permissions for every site at once.'
+  );
+}
+
+// v189: Edge-specific guidance. Edge's webkitSpeechRecognition uses Microsoft's
+// online speech service which has stricter requirements than Chrome's.
+function _showEdgeSpeechHelp(){
+  alert(
+    'Edge\'s voice dictation uses Microsoft\'s online speech service, which has a few extra requirements:\n\n' +
+    'On Windows:\n' +
+    '1. Open Settings → Privacy & security → Speech\n' +
+    '2. Turn ON "Online speech recognition"\n' +
+    '3. Restart Edge and try again\n\n' +
+    'If that doesn\'t fix it:\n' +
+    '• Your network may be blocking Microsoft\'s speech endpoint (common on corporate networks).\n' +
+    '• Try the same page in Chrome — Chrome uses Google\'s speech service which is usually accessible.\n' +
+    '• Safari (on macOS / iOS) also tends to work without extra setup.'
   );
 }
 
@@ -5373,12 +5394,19 @@ async function toggleCommentDictation(){
     } else if (code === 'no-speech'){
       _voiceMsg('No speech detected — try speaking again.', 'warn');
     } else if (code === 'network'){
-      // v188: Chrome's webkitSpeechRecognition returns 'network' for several
-      // unrelated conditions including mic-blocked, transient connection
-      // issues, and corporate-firewall blocks of Google's speech endpoint.
-      // We've already gated on getUserMedia above so if we land here it's
-      // almost certainly an actual network/firewall issue.
-      _voiceMsg('Voice recognition can\'t reach the speech service. Check your internet connection — corporate networks sometimes block Google\'s speech endpoint.', 'err');
+      // v188/v189: getUserMedia already succeeded above so it's not the mic.
+      // On Edge specifically this is often Microsoft's online speech service —
+      // either Windows "Online speech recognition" is off, or the corporate
+      // network is blocking the endpoint. Edge users get a targeted message.
+      if (_isEdgeBrowser){
+        const post = document.getElementById('post-msg');
+        if (post){
+          post.innerHTML = '<span style="color:#D6202B">Edge\'s speech service couldn\'t connect.</span> ' +
+            '<a href="#" onclick="event.preventDefault();_showEdgeSpeechHelp()" style="color:#2E99CE;text-decoration:underline">How to fix?</a>';
+        }
+      } else {
+        _voiceMsg('Voice recognition can\'t reach the speech service. Check your internet connection — corporate networks sometimes block Google\'s speech endpoint.', 'err');
+      }
     } else if (code === 'audio-capture'){
       _voiceMsg('Microphone capture failed. Is another app using the mic?', 'err');
     } else if (code){
