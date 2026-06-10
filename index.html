@@ -802,7 +802,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v189</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v191</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -2550,7 +2550,11 @@ function loadingStateMessage(title, subtitle) {
   </div>`;
 }
 
-function getFiltered(forPerson){
+// v191: optional `opts.includeDone` bypasses the showDone filter so callers
+// can compute Done-row counts (badge + body) even when Show Done is unticked.
+// Done row in matrix views always renders with a true count, expanding it
+// auto-enables Show Done (mirrors v157 Team-view behaviour).
+function getFiltered(forPerson, opts){
   const search=(document.getElementById("search-input")?.value||"").toLowerCase();
   const priFilter=document.getElementById("priority-filter")?.value||"";
   const statFilter=document.getElementById("status-filter-ctrl")?.value||"";
@@ -2571,7 +2575,8 @@ function getFiltered(forPerson){
     if(statFilter&&normStatus(i.status)!==normStatus(statFilter))return false;
     if(unassigned&&i.assignee!=="Unassigned")return false;
     // Show Done filter — hide Done items unless toggle is on (or status filter explicitly picks Done)
-    if(!showDone && normStatus(i.status)==='Done' && normStatus(statFilter)!=='Done') return false;
+    // v191: opts.includeDone bypasses this filter so the Done-row count badge stays honest.
+    if(!(opts && opts.includeDone) && !showDone && normStatus(i.status)==='Done' && normStatus(statFilter)!=='Done') return false;
     // v156: Show Cancelled filter — hide cancelled items unless toggle is on
     if(!showCancelled && isCancelledStatus(i.status) && !isCancelledStatus(statFilter)) return false;
     return true;
@@ -2588,10 +2593,14 @@ function cardHtml(issue,showActiveBtn=false,compact=false,draggable=false){
   const par=issue.parent_key?`<span style="font-size:10px;color:#C9CACC">↑</span>${klink(issue.parent_key)}${issue.parent_summary?`<span style="font-size:10px;color:#C9CACC"> ${issue.parent_summary.slice(0,20)}${issue.parent_summary.length>20?"…":""}</span>`:""}`:""
   const dragAttr=draggable?`draggable="true" ondragstart="onDragStart(event,'${issue.key}')" ondragend="onDragEnd(event)"`:"";
   const activeBtnHtml=showActiveBtn?`<button onclick="event.stopPropagation();(async()=>{await toggleActive('${issue.assignee.replace(/'/g,"\\'")}','${issue.key}');renderMain()})()" style="font-size:10px;padding:3px 9px;border-radius:12px;border:none;cursor:pointer;font-weight:700;margin-left:4px;${isActive?'background:#5E8E38;color:#fff':'background:#EEF1F3;color:#5D7987;border:1px solid #C9CACC'}">${isActive?"● Active":"Make Active"}</button>`:""
+  // v190: always show the assignee avatar, regardless of compact mode. The
+  // old behaviour hid it in matrix-style views (My Tasks matrix, Epics matrix,
+  // Epics Team) which made it impossible to scan who owned what — the user
+  // explicitly asked for the assignee on every card for consistency.
   return`<div class="card ${stateCls} ${isActive?"is-active":""} ${isDone?"is-done":""}" style="border-left:3px solid ${lc}" onclick="openPane('${issue.key}')" ${dragAttr}>
     <div class="card-keyrow">${klink(issue.key)}${par}${activeBtnHtml}</div>
     <div class="card-summary">${issue.summary}</div>
-    <div class="card-meta">${tbadge(issue.type)}${pbadge(issue.priority)}${!compact?ava(issue.assignee,20):""}<span style="display:inline-flex;align-items:center;gap:6px;margin-left:auto">${issueIconRow(issue)}</span></div>
+    <div class="card-meta">${tbadge(issue.type)}${pbadge(issue.priority)}${ava(issue.assignee, compact?18:20)}<span style="display:inline-flex;align-items:center;gap:6px;margin-left:auto">${issueIconRow(issue)}</span></div>
   </div>`;
 }
 
@@ -3413,9 +3422,14 @@ function renderMyTasks(){
   }
   const ns=i=>normStatus(i.status);
   const useMatrix = document.getElementById("matrix-toggle")?.checked !== false;
+  // v191: build a Done-inclusive list so the Done row count is always honest,
+  // even when Show Done is unticked. Used only for the Done-row header badge.
+  const issuesIncludingDone = getFiltered(person, {includeDone:true});
   let html=`<thead><tr><th style="min-width:110px;text-align:left;position:sticky;left:0;z-index:3">Status</th>${useMatrix?PRI_COLS.map(p=>`<th class="pri-${p}">${p}</th>`).join(""):'<th>Tasks</th>'}</tr></thead><tbody>`;
   STATUS_ROWS.forEach(rowStatus=>{
-    const rowIssues=issues.filter(i=>ns(i)===rowStatus);
+    // v191: Done row uses the inclusive list for both count and (if expanded) cards.
+    const rowSource = (rowStatus === 'Done') ? issuesIncludingDone : issues;
+    const rowIssues=rowSource.filter(i=>ns(i)===rowStatus);
     const collapsed=rowCollapsed[rowStatus];
     const sc=SC[rowStatus]||SC.Backlog;
     html+=`<tr class="row-hdr" onclick="toggleRowCollapse('${rowStatus}')"><td colspan="5" style="position:sticky;left:0;background:#F7F8F9">
@@ -3453,7 +3467,21 @@ function renderMyTasks(){
   });
   html+="</tbody>";table.innerHTML=html;
 }
-function toggleRowCollapse(s){rowCollapsed[s]=!rowCollapsed[s];saveAll();renderMain();}
+// v191: expanding the Done row auto-enables Show Done so the cards inside
+// actually appear (matches the v157 Team-view swimlane behaviour). The badge
+// count is already honest via getFiltered({includeDone:true}); flipping
+// showDone here means the matrix actually populates the body cells too.
+function toggleRowCollapse(s){
+  const expanding = rowCollapsed[s] === true;
+  rowCollapsed[s] = !rowCollapsed[s];
+  if (expanding && s === 'Done' && !showDone){
+    showDone = true;
+    showDoneByView = {mytasks:true, myepics:true, team:true, prioritise:true, manager:true};
+    try { syncGlobalShowDoneCheckbox(); } catch{}
+  }
+  saveAll();
+  renderMain();
+}
 
 // v167: handler for the Priority cols toggle. Updates the compact-toggle's
 // visibility (compact only makes sense when matrix is OFF) and re-renders.
@@ -3743,8 +3771,14 @@ function renderEpicFocus(){
   // Don't include hierarchy-level descendants (epics under initiatives etc.)
   const hierTypes = ['Epic','Milestone','Initiative','Legend'];
   issues = issues.filter(i => !hierTypes.includes(i.type));
+  // v191: build Done-inclusive list for the Done-row count badge to always
+  // reflect reality. Cards-in-body still respect Show Done — that's gated below.
+  const issuesIncludingDone = issues.slice();
   if (!showDone) issues = issues.filter(i => normStatus(i.status) !== 'Done');
-  if (!showCancelled) issues = issues.filter(i => !isCancelledStatus(i.status));
+  if (!showCancelled){
+    issues = issues.filter(i => !isCancelledStatus(i.status));
+    // For Done row count, keep cancelled excluded (consistent with body rendering)
+  }
 
   // v172: route to the right renderer based on the dropdown.
   if (epicFocusView === 'team'){
@@ -3760,7 +3794,9 @@ function renderEpicFocus(){
     (useMatrix ? PRI_COLS.map(p => '<th class="pri-' + p + '">' + p + '</th>').join('') : '<th>Tasks</th>') +
     '</tr></thead><tbody>';
   STATUS_ROWS.forEach(rowStatus => {
-    const rowIssues = issues.filter(i => ns(i) === rowStatus);
+    // v191: Done row uses the inclusive list for header count + body cards.
+    const rowSource = (rowStatus === 'Done') ? issuesIncludingDone : issues;
+    const rowIssues = rowSource.filter(i => ns(i) === rowStatus);
     const collapsed = rowCollapsed[rowStatus];
     const sc = SC[rowStatus] || SC.Backlog;
     html += `<tr class="row-hdr" onclick="toggleRowCollapse('${rowStatus}')"><td colspan="${useMatrix?5:2}" style="position:sticky;left:0;background:#F7F8F9">
@@ -4228,7 +4264,7 @@ function renderManager(){
 
   // ── Person header row (sticky top) ──
   html += `<div style="display:flex;flex-shrink:0;position:sticky;top:0;z-index:10;background:#fff;border-bottom:2px solid #E4E6E8;min-width:max-content">
-    <div style="min-width:140px;width:140px;padding:10px 12px;background:#F7F8F9;border-right:1px solid #E4E6E8;font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.06em;display:flex;align-items:center;position:sticky;left:0;z-index:11">Stage</div>
+    <div style="min-width:140px;width:140px;padding:10px 12px;background:#F7F8F9;border-right:1px solid #E4E6E8;font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.06em;display:flex;align-items:center;position:sticky;left:0;z-index:11">Status</div>
     ${vt.map(person=>`
       <div style="min-width:220px;width:220px;padding:8px 10px;border-right:1px solid #E4E6E8;display:flex;align-items:center;gap:7px;background:#fff">
         ${ava(person,26)}
@@ -5234,7 +5270,7 @@ function renderPaneCommentList(key){
     : `<div style="font-size:13px;color:#9EA0A4;font-style:italic">No comments yet.</div>`;
 }
 
-// v187: Voice dictation for the comment textarea via Web Speech API.
+// v187: Voice dictation for textareas via Web Speech API.
 // Chrome / Edge / Safari support; Firefox does not (button stays hidden).
 // Audio goes to the browser vendor's recognition service (Google/Apple) —
 // fine for internal-comment use but worth noting.
@@ -5242,35 +5278,37 @@ function renderPaneCommentList(key){
 // online speech service which requires Windows "Online speech recognition"
 // to be enabled and a non-blocked Microsoft endpoint. Both often fail on
 // corporate networks. Targeted guidance + recommend Chrome as fallback.
+// v190: generalised to support any textarea + multiple dictate buttons on
+// the page (Create-task modal has Description + Comment, plus the existing
+// detail-pane Comment box). Per-textarea state is keyed by the textarea ID.
 const _isEdgeBrowser = /Edg\//.test(navigator.userAgent || '');
-let _cmtRecog = null;        // current SpeechRecognition instance (one per session)
-let _cmtRecogActive = false; // are we currently listening?
+let _voiceActive = null; // {taIid, btnId, postMsgId, recog} or null when idle
+let _voicePulse = null;  // setInterval id for the recording-button pulse
 
-function setupCommentVoiceButton(){
-  const btn = document.getElementById('cmt-mic-btn');
-  if (!btn) return;
-  const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!Ctor){
-    // Browser doesn't support it — leave the button hidden.
-    btn.style.display = 'none';
-    return;
-  }
-  btn.style.display = 'inline-flex';
-  // Stop any leftover recognition when the pane is re-rendered with a new key
-  if (_cmtRecogActive){ try { _cmtRecog && _cmtRecog.stop(); } catch{} _cmtRecogActive = false; }
-  _setMicButtonIdle();
+// v190: voice-input is browser-supported gating. Call once per render of a
+// mic button to either reveal it (if SpeechRecognition is available) or
+// leave it hidden (Firefox / unsupported browsers).
+function _voiceSupported(){
+  return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
 }
-function _setMicButtonIdle(){
-  const btn = document.getElementById('cmt-mic-btn');
+function _voiceShowButton(btnId){
+  const btn = document.getElementById(btnId);
+  if (!btn) return;
+  if (!_voiceSupported()){ btn.style.display = 'none'; return; }
+  btn.style.display = 'inline-flex';
+  _voiceResetButton(btnId);
+}
+function _voiceResetButton(btnId){
+  const btn = document.getElementById(btnId);
   if (!btn) return;
   btn.innerHTML = '🎤 Dictate';
   btn.style.background = '#fff';
   btn.style.color = '#5D7987';
   btn.style.borderColor = '#C9CACC';
-  btn.title = 'Dictate comment with your voice';
+  btn.title = 'Dictate with your voice';
 }
-function _setMicButtonRecording(){
-  const btn = document.getElementById('cmt-mic-btn');
+function _voiceMarkRecording(btnId){
+  const btn = document.getElementById(btnId);
   if (!btn) return;
   btn.innerHTML = '● Stop';
   btn.style.background = '#D6202B';
@@ -5278,11 +5316,20 @@ function _setMicButtonRecording(){
   btn.style.borderColor = '#D6202B';
   btn.title = 'Click to stop dictation';
 }
+
+// Backwards-compat shims so the existing detail-pane wiring still works.
+function setupCommentVoiceButton(){ _voiceShowButton('cmt-mic-btn'); }
+function _setMicButtonIdle(){ _voiceResetButton('cmt-mic-btn'); }
+function _setMicButtonRecording(){ _voiceMarkRecording('cmt-mic-btn'); }
+// v190: messages render into the active dictation's status-text slot if any,
+// else fall back to the original #post-msg slot used by the detail-pane comment box.
+function _voiceMsgSlot(){
+  const id = (_voiceActive && _voiceActive.postMsgId) || 'post-msg';
+  return document.getElementById(id) || document.getElementById('post-msg');
+}
 function _voiceMsg(text, kind){
-  const post = document.getElementById('post-msg');
+  const post = _voiceMsgSlot();
   if (!post) return;
-  post.textContent = '';
-  // Use innerHTML so we can include the link in the denied-state message
   post.innerHTML = '';
   const span = document.createElement('span');
   span.textContent = text;
@@ -5290,7 +5337,7 @@ function _voiceMsg(text, kind){
   post.appendChild(span);
 }
 function _voiceMsgDenied(){
-  const post = document.getElementById('post-msg');
+  const post = _voiceMsgSlot();
   if (!post) return;
   post.innerHTML = '<span style="color:#D6202B">Microphone is blocked for this site.</span> ' +
     '<a href="#" onclick="event.preventDefault();_showMicPermissionHelp()" style="color:#2E99CE;text-decoration:underline">How do I re-enable it?</a>';
@@ -5322,33 +5369,40 @@ function _showEdgeSpeechHelp(){
   );
 }
 
-async function toggleCommentDictation(){
-  const ta = document.getElementById('cmt-text');
+// v190: generic dictation. Pass the textarea ID, the button ID, and an optional
+// status-text element ID for error messages (defaults to '#post-msg' on the
+// detail pane). The backwards-compat shim toggleCommentDictation() routes
+// to this with the detail-pane IDs.
+async function toggleVoiceDictation(taId, btnId, postMsgId){
+  taId = taId || 'cmt-text';
+  btnId = btnId || 'cmt-mic-btn';
+  const ta = document.getElementById(taId);
   if (!ta) return;
   const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!Ctor){ alert('Voice dictation isn\'t supported in this browser. Try Chrome, Edge, or Safari.'); return; }
-  if (_cmtRecogActive){
-    try { _cmtRecog && _cmtRecog.stop(); } catch{}
-    return; // onend will reset the UI
+  if (!Ctor){ alert('Voice dictation isn\'t supported in this browser. Try Chrome or Safari.'); return; }
+  // Stop any currently-active dictation first — even if it's targeting a
+  // different textarea (only one mic stream at a time on the page).
+  if (_voiceActive){
+    try { _voiceActive.recog && _voiceActive.recog.stop(); } catch{}
+    // If the user clicked the SAME button to toggle, we're done — let onend reset UI.
+    if (_voiceActive.btnId === btnId) return;
   }
+  // Temporarily mark "active" so the status-msg slot lookup works during the
+  // permission flow even before recognition has technically started.
+  _voiceActive = { taId, btnId, postMsgId, recog: null };
 
-  // v188: explicitly request the microphone via getUserMedia FIRST. This gives
-  // us a clean, unambiguous permission flow:
-  //   - User Allows  → permission stored, recognition starts cleanly
-  //   - User Blocks  → catch a NotAllowedError immediately (instead of Chrome's
-  //                     misleading "network" error from webkitSpeechRecognition)
-  //   - Already blocked → permissions.query short-circuits with a clear message
-  // We immediately close the audio track since SpeechRecognition opens its own.
+  // v188: explicit getUserMedia pre-flight. Gives a clean, unambiguous
+  // permission prompt and surfaces a clear NotAllowedError when the user
+  // blocks the mic — avoiding Chrome/Edge's misleading 'network' error.
   if (navigator.permissions && navigator.permissions.query){
     try {
       const st = await navigator.permissions.query({name:'microphone'});
-      if (st.state === 'denied'){ _voiceMsgDenied(); return; }
-    } catch(e){ /* not all browsers expose 'microphone' to permissions.query — ignore */ }
+      if (st.state === 'denied'){ _voiceMsgDenied(); _voiceActive = null; return; }
+    } catch(e){ /* some browsers don't expose 'microphone' — ignore */ }
   }
   if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia){
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      // Immediately stop the tracks — SpeechRecognition will request its own.
       try { stream.getTracks().forEach(t => t.stop()); } catch{}
     } catch(e){
       const code = e && (e.name || e.message) || '';
@@ -5360,15 +5414,17 @@ async function toggleCommentDictation(){
       } else {
         _voiceMsg('Couldn\'t access the microphone: ' + code, 'err');
       }
+      _voiceActive = null;
       return;
     }
   }
 
   // Start a fresh recognition instance each session — Chrome misbehaves if reused.
-  _cmtRecog = new Ctor();
+  const _cmtRecog = new Ctor();
   _cmtRecog.lang = (navigator.language || 'en-GB');
   _cmtRecog.continuous = true;
   _cmtRecog.interimResults = true;
+  _voiceActive.recog = _cmtRecog;
   // Remember the textarea content at the moment we started so we can rebuild
   // it cleanly each interim result (interim → final transitions otherwise
   // produce duplicated words).
@@ -5385,6 +5441,10 @@ async function toggleCommentDictation(){
     ta.value = baseline + baselinePad + finalText + interim;
     // Move cursor to end so the user sees the latest text.
     try { ta.scrollTop = ta.scrollHeight; ta.setSelectionRange(ta.value.length, ta.value.length); } catch{}
+    // v190: dispatch input event so any oninput= handler runs. Critical for
+    // the Create-task modal which mirrors textarea changes into createState
+    // via oninput — without this, dictated text wouldn't be saved to state.
+    try { ta.dispatchEvent(new Event('input', {bubbles:true})); } catch{}
   };
   _cmtRecog.onerror = (e) => {
     const code = e && e.error;
@@ -5399,7 +5459,7 @@ async function toggleCommentDictation(){
       // either Windows "Online speech recognition" is off, or the corporate
       // network is blocking the endpoint. Edge users get a targeted message.
       if (_isEdgeBrowser){
-        const post = document.getElementById('post-msg');
+        const post = _voiceMsgSlot();
         if (post){
           post.innerHTML = '<span style="color:#D6202B">Edge\'s speech service couldn\'t connect.</span> ' +
             '<a href="#" onclick="event.preventDefault();_showEdgeSpeechHelp()" style="color:#2E99CE;text-decoration:underline">How to fix?</a>';
@@ -5414,21 +5474,23 @@ async function toggleCommentDictation(){
     }
   };
   _cmtRecog.onend = () => {
-    _cmtRecogActive = false;
-    _setMicButtonIdle();
+    _voiceResetButton(btnId);
+    _voiceActive = null;
     // Leave the dictated text in the textarea; user can edit then post.
     if (ta) ta.focus();
   };
   try {
     _cmtRecog.start();
-    _cmtRecogActive = true;
-    _setMicButtonRecording();
+    _voiceMarkRecording(btnId);
   } catch(e){
     appLogMsg('warn','voice','start failed: ' + (e.message || e));
-    _cmtRecogActive = false;
-    _setMicButtonIdle();
+    _voiceResetButton(btnId);
+    _voiceActive = null;
   }
 }
+
+// v190: backwards-compat — the detail-pane comment box still calls this.
+function toggleCommentDictation(){ return toggleVoiceDictation('cmt-text','cmt-mic-btn','post-msg'); }
 
 async function submitPaneComment(key){
   const ta = document.getElementById("cmt-text");
@@ -6813,8 +6875,16 @@ function renderCreateModal() {
     </div>
     <div style="margin-bottom:12px"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Labels</div>
       <div class="pane-lbl-wrap" id="cr-labels-wrap">${renderCreateLabels()}</div></div>
-    <div style="margin-bottom:12px"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Description</div>
-      <textarea id="cr-desc" placeholder="Add details…" oninput="createState.description=this.value" style="width:100%;min-height:60px;padding:10px 12px;border:1px solid #E4E6E8;border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box">${s.description}</textarea></div>
+    <div style="margin-bottom:12px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em">Description</div>
+      <!-- v190: dictate into the description on creation only (no equivalent on
+           the Edit-description path, which would risk overwriting existing
+           content). Hidden automatically on browsers without SpeechRecognition. -->
+      <button id="cr-desc-mic-btn" type="button" onclick="toggleVoiceDictation('cr-desc','cr-desc-mic-btn','cr-desc-mic-msg')"
+        title="Dictate description with your voice"
+        style="display:none;font-size:11px;padding:3px 9px;border:1px solid #C9CACC;background:#fff;color:#5D7987;border-radius:5px;cursor:pointer;font-weight:700">🎤 Dictate</button></div>
+      <textarea id="cr-desc" placeholder="Add details…" oninput="createState.description=this.value" style="width:100%;min-height:60px;padding:10px 12px;border:1px solid #E4E6E8;border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box">${s.description}</textarea>
+      <div id="cr-desc-mic-msg" style="font-size:11px;margin-top:4px;min-height:14px"></div></div>
     <!-- v153: parity with the detail-pane Attachments section. Files queued
          in createState.attachments and links queued in createState.remoteLinks
          get uploaded to the new issue after the POST /issue call succeeds. -->
@@ -6828,8 +6898,13 @@ function renderCreateModal() {
       </div>
       <div id="cr-attach-list">${renderCreateAttachments()}</div>
     </div>
-    <div style="margin-bottom:4px"><div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Comment</div>
-      <textarea id="cr-comment" placeholder="Add a comment…" oninput="createState.comment=this.value" style="width:100%;min-height:50px;padding:10px 12px;border:1px solid #E4E6E8;border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box">${s.comment||''}</textarea></div>
+    <div style="margin-bottom:4px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <div style="font-size:10px;font-weight:700;color:#9EA0A4;text-transform:uppercase;letter-spacing:.04em">Comment</div>
+      <button id="cr-comment-mic-btn" type="button" onclick="toggleVoiceDictation('cr-comment','cr-comment-mic-btn','cr-comment-mic-msg')"
+        title="Dictate comment with your voice"
+        style="display:none;font-size:11px;padding:3px 9px;border:1px solid #C9CACC;background:#fff;color:#5D7987;border-radius:5px;cursor:pointer;font-weight:700">🎤 Dictate</button></div>
+      <textarea id="cr-comment" placeholder="Add a comment…" oninput="createState.comment=this.value" style="width:100%;min-height:50px;padding:10px 12px;border:1px solid #E4E6E8;border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box">${s.comment||''}</textarea>
+      <div id="cr-comment-mic-msg" style="font-size:11px;margin-top:4px;min-height:14px"></div></div>
     `}`;
   if(s.showHierarchy && s.projectKey) setTimeout(()=>renderHierarchyRows(),10);
   setTimeout(updateCreateButtonState, 20);
@@ -6837,6 +6912,9 @@ function renderCreateModal() {
   setTimeout(() => {
     attachMentionTypeahead('cr-desc');
     attachMentionTypeahead('cr-comment');
+    // v190: reveal mic buttons only on browsers that support SpeechRecognition
+    _voiceShowButton('cr-desc-mic-btn');
+    _voiceShowButton('cr-comment-mic-btn');
   }, 50);
 }
 
@@ -9894,9 +9972,12 @@ async function renderPriEpicMatrix(){
   const unassignedOnly = document.getElementById('pri-unassigned-only')?.checked || false;
   // Filter the epic list the same way as the other views
   let epics = [...(priEpics||[])].map(gm).filter(e => ['Epic','Milestone'].includes(e.type));
-  if (!showDoneME) epics = epics.filter(e => normStatus(e.status) !== 'Done');
   if (!showCancelled) epics = epics.filter(e => !isCancelledStatus(e.status)); // v181
   if (unassignedOnly) epics = epics.filter(e => e.assignee === 'Unassigned');
+  // v191: keep Done-inclusive list so the Done row header count is honest
+  // even when Show Done is unchecked. Body cards are still gated on showDoneME.
+  const epicsIncludingDone = epics.slice();
+  if (!showDoneME) epics = epics.filter(e => normStatus(e.status) !== 'Done');
   // Apply user-saved order so cells inherit the same ordering
   epics = applyPriEpicOrder(epics);
 
@@ -9916,8 +9997,11 @@ async function renderPriEpicMatrix(){
   html += '</tr></thead><tbody>';
 
   ROWS.forEach(rowStatus => {
-    if (!showDoneME && rowStatus === 'Done') return; // skip Done row when show-done is off
-    const rowEpics = epics.filter(e => normStatus(e.status) === rowStatus);
+    // v191: Done row always renders with a true count from the inclusive list.
+    // Body cells still show nothing if Show Done is off — clicking the row to
+    // expand auto-enables Show Done (handled in togglePriMatrixRow).
+    const rowSource = (rowStatus === 'Done') ? epicsIncludingDone : epics;
+    const rowEpics = rowSource.filter(e => normStatus(e.status) === rowStatus);
     const sc = SC[rowStatus] || SC.Backlog;
     const collapsed = !!priMatrixRowCollapsed[rowStatus];
     const statParamHdr = rowStatus.replace(/'/g, "\\'");
@@ -9984,8 +10068,22 @@ async function renderPriEpicMatrix(){
 }
 
 // v182: toggle a status row in the Epics-Only matrix (collapsible).
+// v191: expanding the Done row auto-enables Show Done so the body cards
+// actually appear. Also refetches priEpics since Done items were JQL-filtered
+// out at load time (loadPriBoard JQL has `AND statusCategory != Done` when
+// Show Done is off — without a refetch, the row stays empty even with the
+// flag flipped). Mirrors the Team-view swimlane v157 behaviour.
 function togglePriMatrixRow(status){
+  const expanding = priMatrixRowCollapsed[status] === true;
   priMatrixRowCollapsed[status] = !priMatrixRowCollapsed[status];
+  if (expanding && status === 'Done' && !showDone){
+    showDone = true;
+    showDoneByView = {mytasks:true, myepics:true, team:true, prioritise:true, manager:true};
+    try { syncGlobalShowDoneCheckbox(); } catch{}
+    saveAll();
+    // Refetch so priEpics actually includes the Done items
+    try { loadPriBoard(true); return; } catch(e){}
+  }
   saveAll();
   renderPriEpicMatrix();
 }
