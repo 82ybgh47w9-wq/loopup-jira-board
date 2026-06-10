@@ -802,7 +802,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v186</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v187</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -812,11 +812,14 @@ button,select,textarea,input{font-family:inherit}
 
 <!-- STATS -->
 <div id="statsbar">
+  <!-- v187: counter cards now mirror the v185 SC status palette so a card's
+       background + text colour match the badge of the same status seen elsewhere.
+       New Comments keeps its amber tint (notification colour, not a status). -->
   <div class="stat-card" style="background:#FFF8E0;cursor:pointer" onclick="setView('activity')" title="Click to view Activity"><div style="font-size:20px;font-weight:700;color:#C9CACC" id="cnt-newcomments">—</div><div style="font-size:10px;font-weight:700;color:#E08000">New Comments</div></div>
-  <div class="stat-card" style="background:#E0F0F8"><div style="font-size:20px;font-weight:700;color:#2E99CE" id="cnt-ip">—</div><div style="font-size:10px;font-weight:700;color:#2E99CE">In Progress</div></div>
-  <div class="stat-card" style="background:#F1F7EC"><div style="font-size:20px;font-weight:700;color:#5E8E38" id="cnt-sel">—</div><div style="font-size:10px;font-weight:700;color:#5E8E38">Selected</div></div>
-  <div class="stat-card" style="background:#EEF1F3"><div style="font-size:20px;font-weight:700;color:#9EA0A4" id="cnt-back">—</div><div style="font-size:10px;font-weight:700;color:#9EA0A4">Backlog</div></div>
-  <div class="stat-card" style="background:#F4F4F5"><div style="font-size:20px;font-weight:700;color:#73777C" id="cnt-done">—</div><div style="font-size:10px;font-weight:700;color:#73777C">Done</div></div>
+  <div class="stat-card" style="background:#FFEDD5"><div style="font-size:20px;font-weight:700;color:#A04A00" id="cnt-ip">—</div><div style="font-size:10px;font-weight:700;color:#A04A00">In Progress</div></div>
+  <div class="stat-card" style="background:#E0F0F8"><div style="font-size:20px;font-weight:700;color:#185FA5" id="cnt-sel">—</div><div style="font-size:10px;font-weight:700;color:#185FA5">Selected</div></div>
+  <div class="stat-card" style="background:#EEF1F3"><div style="font-size:20px;font-weight:700;color:#5D7987" id="cnt-back">—</div><div style="font-size:10px;font-weight:700;color:#5D7987">Backlog</div></div>
+  <div class="stat-card" style="background:#E8F5E0"><div style="font-size:20px;font-weight:700;color:#2D7A2D" id="cnt-done">—</div><div style="font-size:10px;font-weight:700;color:#2D7A2D">Done</div></div>
 </div>
 
 <!-- CONTROLS -->
@@ -4090,24 +4093,29 @@ function getDynamicSwimRows(){
   if (!seen.has('Done')) byCat.done.push('Done');
   for (const c of Object.keys(byCat)) byCat[c].sort((a,b)=>a.localeCompare(b));
 
-  // Palette for known LoopUp statuses; unknowns use category fallback.
+  // v187: swimlane palette now mirrors the v185 SC table so a lane header,
+  // its background, and the badge for the same status all read the same hue.
+  //   In Progress = orange   On Hold/Blocked = red   Selected = blue
+  //   Done = green            Cancelled = grey       Backlog = neutral slate
   const PALETTE = {
-    'In Progress': { color:'#2E99CE', bg:'#E0F0F8' },
-    'On Hold':     { color:'#E08000', bg:'#FFF4E0' },
-    'Blocked':     { color:'#D6202B', bg:'#FCEBEB' },
-    'In Review':   { color:'#8F6AC8', bg:'#F3EEFF' },
-    'QA':          { color:'#2E99CE', bg:'#E0F0F8' },
-    'Selected':    { color:'#8F6AC8', bg:'#F3EEFF' },
-    'Selected for Development': { color:'#8F6AC8', bg:'#F3EEFF' },
-    'Backlog':     { color:'#9EA0A4', bg:'#EEF1F3' },
-    'Done':        { color:'#73777C', bg:'#F4F4F5' },
-    'Cancelled':   { color:'#A11820', bg:'#FCEBEB' },
+    'In Progress': { color:'#A04A00', bg:'#FFEDD5' },
+    'On Hold':     { color:'#A32D2D', bg:'#FCE6E8' },
+    'Blocked':     { color:'#A32D2D', bg:'#FCE6E8' },
+    'In Review':   { color:'#A04A00', bg:'#FFEDD5' },
+    'QA':          { color:'#A04A00', bg:'#FFEDD5' },
+    'Selected':    { color:'#185FA5', bg:'#E0F0F8' },
+    'Selected for Development': { color:'#185FA5', bg:'#E0F0F8' },
+    'Backlog':     { color:'#5D7987', bg:'#EEF1F3' },
+    'Done':        { color:'#2D7A2D', bg:'#E8F5E0' },
+    'Cancelled':   { color:'#5D6770', bg:'#E4E6E8' },
+    'Won\'t Do':   { color:'#5D6770', bg:'#E4E6E8' },
+    'Abandoned':   { color:'#5D6770', bg:'#E4E6E8' },
     'Resolved':    { color:'#2D7A2D', bg:'#E8F5E0' }
   };
   const CAT_DEFAULT = {
-    indeterminate: { color:'#2E99CE', bg:'#E0F0F8' },
-    new:           { color:'#9EA0A4', bg:'#EEF1F3' },
-    done:          { color:'#73777C', bg:'#F4F4F5' }
+    indeterminate: { color:'#A04A00', bg:'#FFEDD5' }, // in-progress-ish
+    new:           { color:'#5D7987', bg:'#EEF1F3' }, // backlog-ish
+    done:          { color:'#2D7A2D', bg:'#E8F5E0' }  // done-ish
   };
   const slugify = s => 'st_' + (s || '').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
   const rows = [];
@@ -5077,6 +5085,11 @@ async function renderPaneMain(){
         <textarea class="cmt-input" id="cmt-text" placeholder="Add a comment…" style="min-height:75px"></textarea>
         <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:6px">
           <span id="post-msg" style="font-size:12px;margin-right:auto"></span>
+          <!-- v187: mic button → Web Speech API dictation into the comment box.
+               Hidden automatically on browsers without SpeechRecognition support
+               (see attachVoiceButton). -->
+          <button id="cmt-mic-btn" type="button" onclick="toggleCommentDictation()" title="Dictate comment with your voice"
+            style="display:none;font-size:13px;padding:6px 11px;border:1px solid #C9CACC;background:#fff;color:#5D7987;border-radius:6px;cursor:pointer;font-weight:700">🎤 Dictate</button>
           <a href="${BASE()}${i.key}" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;padding:7px 12px;border:1px solid #2E99CE;border-radius:6px;white-space:nowrap">View in Jira ↗</a>
           <button class="post-btn" id="post-btn" onclick="submitPaneComment('${i.key}')">Post to Jira</button>
         </div>
@@ -5085,6 +5098,8 @@ async function renderPaneMain(){
     </div>`;
     // Attach @mention typeahead now that cmt-text textarea exists
     attachMentionTypeahead('cmt-text');
+    // v187: show the mic button only on browsers that support SpeechRecognition
+    setupCommentVoiceButton();
     loadPaneComments(i.key);
     // v92: also fire attachment lookup (independent of comments — they can
     // both load in parallel, neither blocks the rest of the pane)
@@ -5217,6 +5232,104 @@ function renderPaneCommentList(key){
         </div>`;
       }).join('')
     : `<div style="font-size:13px;color:#9EA0A4;font-style:italic">No comments yet.</div>`;
+}
+
+// v187: Voice dictation for the comment textarea via Web Speech API.
+// Chrome / Edge / Safari support; Firefox does not (button stays hidden).
+// Audio goes to the browser vendor's recognition service (Google/Apple) —
+// fine for internal-comment use but worth noting.
+let _cmtRecog = null;        // current SpeechRecognition instance (one per session)
+let _cmtRecogActive = false; // are we currently listening?
+
+function setupCommentVoiceButton(){
+  const btn = document.getElementById('cmt-mic-btn');
+  if (!btn) return;
+  const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Ctor){
+    // Browser doesn't support it — leave the button hidden.
+    btn.style.display = 'none';
+    return;
+  }
+  btn.style.display = 'inline-flex';
+  // Stop any leftover recognition when the pane is re-rendered with a new key
+  if (_cmtRecogActive){ try { _cmtRecog && _cmtRecog.stop(); } catch{} _cmtRecogActive = false; }
+  _setMicButtonIdle();
+}
+function _setMicButtonIdle(){
+  const btn = document.getElementById('cmt-mic-btn');
+  if (!btn) return;
+  btn.innerHTML = '🎤 Dictate';
+  btn.style.background = '#fff';
+  btn.style.color = '#5D7987';
+  btn.style.borderColor = '#C9CACC';
+  btn.title = 'Dictate comment with your voice';
+}
+function _setMicButtonRecording(){
+  const btn = document.getElementById('cmt-mic-btn');
+  if (!btn) return;
+  btn.innerHTML = '● Stop';
+  btn.style.background = '#D6202B';
+  btn.style.color = '#fff';
+  btn.style.borderColor = '#D6202B';
+  btn.title = 'Click to stop dictation';
+}
+function toggleCommentDictation(){
+  const ta = document.getElementById('cmt-text');
+  if (!ta) return;
+  const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Ctor){ alert('Voice dictation isn\'t supported in this browser. Try Chrome, Edge, or Safari.'); return; }
+  if (_cmtRecogActive){
+    try { _cmtRecog && _cmtRecog.stop(); } catch{}
+    return; // onend will reset the UI
+  }
+  // Start a fresh recognition instance each session — Chrome misbehaves if reused.
+  _cmtRecog = new Ctor();
+  _cmtRecog.lang = (navigator.language || 'en-GB');
+  _cmtRecog.continuous = true;
+  _cmtRecog.interimResults = true;
+  // Remember the textarea content at the moment we started so we can rebuild
+  // it cleanly each interim result (interim → final transitions otherwise
+  // produce duplicated words).
+  const baseline = ta.value || '';
+  const baselinePad = baseline && !/\s$/.test(baseline) ? ' ' : '';
+  let finalText = '';
+  _cmtRecog.onresult = (e) => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++){
+      const tr = e.results[i][0].transcript;
+      if (e.results[i].isFinal) finalText += tr;
+      else interim += tr;
+    }
+    ta.value = baseline + baselinePad + finalText + interim;
+    // Move cursor to end so the user sees the latest text.
+    try { ta.scrollTop = ta.scrollHeight; ta.setSelectionRange(ta.value.length, ta.value.length); } catch{}
+  };
+  _cmtRecog.onerror = (e) => {
+    const code = e && e.error;
+    let msg = 'Dictation failed';
+    if (code === 'not-allowed' || code === 'service-not-allowed') msg = 'Microphone access denied. Allow it in your browser settings to use voice dictation.';
+    else if (code === 'no-speech') msg = 'No speech detected — try again.';
+    else if (code === 'network') msg = 'Network problem — voice recognition needs an internet connection.';
+    else if (code) msg = 'Dictation error: ' + code;
+    appLogMsg('warn','voice', msg);
+    const post = document.getElementById('post-msg');
+    if (post){ post.textContent = msg; post.style.color = '#D6202B'; setTimeout(() => { if (post) post.textContent = ''; }, 4000); }
+  };
+  _cmtRecog.onend = () => {
+    _cmtRecogActive = false;
+    _setMicButtonIdle();
+    // Leave the dictated text in the textarea; user can edit then post.
+    if (ta) ta.focus();
+  };
+  try {
+    _cmtRecog.start();
+    _cmtRecogActive = true;
+    _setMicButtonRecording();
+  } catch(e){
+    appLogMsg('warn','voice','start failed: ' + (e.message || e));
+    _cmtRecogActive = false;
+    _setMicButtonIdle();
+  }
 }
 
 async function submitPaneComment(key){
