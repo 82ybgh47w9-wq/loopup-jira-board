@@ -836,7 +836,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v192</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v193</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -1051,7 +1051,10 @@ button,select,textarea,input{font-family:inherit}
       </div>
       <!-- v172: Excel export, only shown in Compact mode -->
       <button id="epicfocus-export-btn" onclick="exportEpicFocusToExcel()" style="display:none;font-size:11px;padding:5px 12px;border-radius:6px;border:1px solid #5E8E38;background:#fff;color:#3B6D11;cursor:pointer;font-weight:700">📊 Export to Excel</button>
-      <button id="epicfocus-create-btn" onclick="epicFocusCreateTask()" class="primary-btn" style="font-size:11px;padding:5px 14px" disabled>+ Create task in epic</button>
+      <!-- v193: + New Epic creates a new Epic/Milestone in the currently selected project,
+           pre-filling the project from epicfocus-proj-sel. Always enabled. -->
+      <button id="epicfocus-new-epic-btn" onclick="epicFocusCreateEpic()" style="font-size:11px;padding:5px 14px;border-radius:6px;border:1px solid #6B3FA0;background:#fff;color:#6B3FA0;cursor:pointer;font-weight:700">+ New Epic</button>
+      <button id="epicfocus-create-btn" onclick="epicFocusCreateTask()" class="primary-btn" style="font-size:11px;padding:5px 14px" disabled>+ Add task to epic</button>
     </div>
     <div class="matrix-wrap"><table class="matrix-table" id="epicfocus-table"></table></div>
   </div>
@@ -3735,6 +3738,39 @@ function epicFocusCreateTask(){
   if (typeof quickAddTask === 'function'){
     quickAddTask(epicFocusKey, epic ? (epic.summary||'') : '', epic ? (epic.project||'') : '');
   }
+}
+
+// v193: Open the Create modal pre-configured to make a new Epic in the
+// currently selected project on the Epics tab. The user can switch type to
+// Milestone in the modal if needed; everything else (assignee, hierarchy
+// pickers) follows the normal create flow.
+function epicFocusCreateEpic(){
+  // Resolve the project to pre-fill: explicit Epics-tab project filter wins,
+  // otherwise fall back to the global project filter, otherwise blank (user picks).
+  let proj = epicFocusProjectFilter || currentProjFilter || '';
+  // If user has an epic focused, default to its project for continuity.
+  if (!proj && epicFocusKey){
+    const focused = (allIssues || []).find(i => i.key === epicFocusKey);
+    if (focused && focused.project) proj = focused.project;
+  }
+  createState = {
+    projectKey: proj,
+    issueType: 'Epic',
+    assignee: currentIam || '',
+    priority: 'Medium',
+    status: 'Selected',
+    summary: '', description: '', comment: '', dueDate: '',
+    selLegend: '', selInit: '', selEpic: '',
+    legends: [], initiatives: [], epics: [],
+    aiSuggestions: [], aiLoading: false,
+    showHierarchy: true,
+    epicExpanded: false, epicFilter: '',
+    makeActive: false,
+    labels: [],
+    attachments: [], remoteLinks: []
+  };
+  document.getElementById('create-overlay').classList.add('open');
+  renderCreateModal();
 }
 
 // v172: change the active view mode. Drives renderEpicFocus dispatch.
