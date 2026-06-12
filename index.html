@@ -839,7 +839,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v194</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v195</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -1397,7 +1397,26 @@ let showDoneByView = {mytasks:true, myepics:true, team:true, prioritise:true, ma
 let showCancelled = false;
 
 /* ══ PERSISTENCE ══ */
-function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,groupProjectAssignment,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed,doneDays,commentReadState,priViewMode,priLayoutMode,priMatrixRowCollapsed,priBandCollapsed,showDone,showDoneByView,showCancelled,epicFocusKey,epicFocusUserFilter,epicFocusView,epicFocusProjectFilter,sharedTeams:[...sharedTeams],priProjKey,localDoneDate,doneDayCollapsed}));}catch{}}
+function saveAll(){
+  try {
+    localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,groupProjectAssignment,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed,doneDays,commentReadState,priViewMode,priLayoutMode,priMatrixRowCollapsed,priBandCollapsed,showDone,showDoneByView,showCancelled,epicFocusKey,epicFocusUserFilter,epicFocusView,epicFocusProjectFilter,sharedTeams:[...sharedTeams],priProjKey,localDoneDate,doneDayCollapsed}));
+  } catch(e) {
+    // v195: log persistence failures instead of swallowing — typically quota
+    // exceeded (5MB localStorage limit). Without this the user just sees their
+    // settings silently fail to persist across reloads.
+    try { appLogMsg('error','storage','saveAll failed: ' + (e && (e.name+': '+e.message))); } catch{}
+    try { console.error('[LoopUp] saveAll failed', e); } catch{}
+  }
+}
+// v195: dedicated setter for localDoneDate to centralise the persistence path
+// and make failures easy to investigate. Pass null to clear an override.
+function setLocalDoneDate(key, dateStr){
+  if (!key) return;
+  if (dateStr) localDoneDate[key] = dateStr;
+  else delete localDoneDate[key];
+  saveAll();
+  try { appLogMsg('info','done','setLocalDoneDate ' + key + ' = ' + (dateStr||'(cleared)')); } catch{}
+}
 function loadAll(){try{const d=JSON.parse(localStorage.getItem(STOR)||"{}");if(d.cfg)cfg=d.cfg;if(d.locStat)locStat=d.locStat;if(d.locPri)locPri=d.locPri;if(d.currentIam)currentIam=d.currentIam;if(d.currentProjFilter)currentProjFilter=d.currentProjFilter;
 if(d.currentProjectGroup)currentProjectGroup=d.currentProjectGroup;if(d.currentGroup)currentGroup=d.currentGroup;if(d.teamMembers)teamMembers=d.teamMembers;if(d.adminUsers)adminUsers=d.adminUsers;if(d.groups)groups=d.groups;
 if(d.groupProjectAssignment)groupProjectAssignment=d.groupProjectAssignment;if(d.excludedProjects)excludedProjects=d.excludedProjects;if(d.currentView)currentView=d.currentView;if(d.currentLevel)currentLevel=d.currentLevel;if(d.rowCollapsed)rowCollapsed={...rowCollapsed,...d.rowCollapsed};if(d.swimCollapsed)swimCollapsed={...swimCollapsed,...d.swimCollapsed};
@@ -4528,8 +4547,9 @@ function renderDone(){
   const grandTotal = done.length;
 
   // ── Render header bar (last N days indicator + grand total) ────────────────
+  // v195: sticky so it stays visible while scrolling. Higher z than thead.
   let html = `
-    <div style="display:flex;align-items:center;gap:14px;padding:10px 14px;background:#fff;border-bottom:1px solid #E4E6E8;flex-wrap:wrap">
+    <div style="position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:14px;padding:10px 14px;background:#fff;border-bottom:1px solid #E4E6E8;flex-wrap:wrap;box-shadow:0 1px 2px rgba(0,0,0,0.04)">
       <span style="font-size:13px;font-weight:700;color:#125462">Done — last ${doneDays} day${doneDays===1?'':'s'}</span>
       <span class="badge" style="background:#E8F5E0;color:#2D7A2D">${grandTotal} task${grandTotal===1?'':'s'} completed</span>
       <span style="margin-left:auto;font-size:11px;color:#9EA0A4">Drag a task into a different day to override its "done" date locally.</span>
@@ -4547,17 +4567,20 @@ function renderDone(){
   }
 
   // ── Render the grid ────────────────────────────────────────────────────────
+  // v195: no inner wrapper. The page container (#page-done) is the scroll
+  // root, so position:sticky on thead actually pins to the visible top as you
+  // scroll. The previous nested overflow:auto captured the sticky scope.
   const colMin = 200;
-  html += `<div style="overflow:auto;padding:8px 14px 24px">
+  html += `<div style="padding:8px 14px 24px;min-width:max-content">
     <table id="done-grid" style="border-collapse:separate;border-spacing:0;width:100%;min-width:${(people.length+1)*colMin}px">
       <thead>
         <tr>
-          <th style="position:sticky;left:0;top:0;background:#F7F8F9;z-index:5;padding:8px 10px;font-size:10px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.04em;border-right:2px solid #C9CACC;border-bottom:1px solid #E4E6E8;text-align:left;min-width:140px">Day</th>
+          <th style="position:sticky;left:0;top:42px;background:#F7F8F9;z-index:5;padding:8px 10px;font-size:10px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.04em;border-right:2px solid #C9CACC;border-bottom:1px solid #E4E6E8;text-align:left;min-width:140px">Day</th>
           ${people.map(p => {
             const cnt = totalPerPerson[p] || 0;
             const cntCol = cnt === 0 ? '#9EA0A4' : '#2D7A2D';
             const cntBg = cnt === 0 ? '#F4F4F5' : '#E8F5E0';
-            return `<th style="position:sticky;top:0;background:#F7F8F9;z-index:4;padding:8px 10px;border-bottom:1px solid #E4E6E8;border-right:1px solid #E4E6E8;text-align:left;min-width:${colMin}px">
+            return `<th style="position:sticky;top:42px;background:#F7F8F9;z-index:4;padding:8px 10px;border-bottom:1px solid #E4E6E8;border-right:1px solid #E4E6E8;text-align:left;min-width:${colMin}px">
               <div style="display:flex;align-items:center;gap:8px">
                 ${ava(p, 24)}
                 <span style="font-size:12px;font-weight:700;color:#292E37;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_escHtml(p)}</span>
@@ -4598,17 +4621,21 @@ function renderDone(){
                 ondragover="doneCellDragOver(event)" ondragleave="doneCellDragLeave(event)" ondrop="doneCellDrop(event,'${safeDateStr}','${p.replace(/'/g,"\\'")}')"
                 style="padding:6px;vertical-align:top;border-right:1px solid #EEF1F3;border-bottom:1px solid #EEF1F3;min-width:${colMin}px;background:${cellItems.length?'#fff':'#FBFBFB'}">
                 ${cellItems.length
-                  ? cellItems.map(i => `
+                  ? cellItems.map(i => {
+                    const hasOverride = !!localDoneDate[i.key];
+                    const displayDate = _doneDateOf(i);
+                    return `
                     <div class="done-card" draggable="true" ondragstart="doneCardDragStart(event,'${i.key.replace(/'/g,"\\'")}')" ondragend="doneCardDragEnd(event)"
                       onclick="openPane('${i.key.replace(/'/g,"\\'")}')"
                       style="background:#E8F5E0;border:1px solid #C2E0AF;border-radius:6px;padding:5px 7px;margin-bottom:4px;cursor:pointer;font-size:11px;line-height:1.3">
                       <div style="display:flex;align-items:center;gap:5px;margin-bottom:2px">
                         <a href="${BASE()}${i.key}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;font-family:monospace;font-weight:700;color:#257AA5;text-decoration:none">${_escHtml(i.key)}</a>
                         ${i.parent_key?`<span style="font-size:9px;color:#C9CACC;font-family:monospace">↑${_escHtml(i.parent_key)}</span>`:''}
-                        ${localDoneDate[i.key]?`<span title="Done date overridden locally" style="font-size:9px;color:#A04A00">●</span>`:''}
+                        <span title="Done date used for this view${hasOverride?' — locally overridden':''}" style="margin-left:auto;font-size:9px;color:${hasOverride?'#A04A00':'#9EA0A4'};font-weight:${hasOverride?'700':'400'}">${hasOverride?'✎ ':''}${displayDate}</span>
                       </div>
                       <div style="color:#2D7A2D;text-decoration:line-through;overflow:hidden;text-overflow:ellipsis">${_escHtml(i.summary || '')}</div>
-                    </div>`).join('')
+                    </div>`;
+                  }).join('')
                   : '<div style="font-size:11px;color:#C9CACC;font-style:italic;padding:8px 4px;text-align:center">—</div>'}
               </td>`;
             }).join('')}
@@ -4661,13 +4688,8 @@ function doneCellDrop(e, dateStr, person){
     appLogMsg('info','done','Ignored cross-person drop on Done board (assignee unchanged)');
     return;
   }
-  if (dateStr === 'earlier'){
-    // Clear any override and accept Jira's natural date again.
-    delete localDoneDate[key];
-  } else {
-    localDoneDate[key] = dateStr;
-  }
-  saveAll();
+  // v195: route through setLocalDoneDate so persistence is centralised.
+  setLocalDoneDate(key, dateStr === 'earlier' ? null : dateStr);
   renderDone();
 }
 function toggleDoneDay(dateStr){
