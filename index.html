@@ -134,7 +134,10 @@ button,select,textarea,input{font-family:inherit}
 #page-people{flex:1;display:none;flex-direction:column;gap:8px;overflow-y:auto;padding:12px;min-height:0}
 
 /* Done view */
-#page-done{display:none;flex-direction:column;flex:1;display:none;flex-direction:column;gap:8px;overflow-y:auto;padding:12px;min-height:0}
+#page-done{display:none;flex-direction:column;flex:1;display:none;flex-direction:column;gap:0;overflow-y:auto;padding:0;min-height:0}
+/* v194: Done grid drag-target highlight */
+#done-grid .done-cell.drag-over{outline:2px dashed #5E8E38;outline-offset:-2px;background:#F1FAEB !important}
+#done-grid .done-card.dragging{opacity:.4}
 
 /* Loading/error/welcome */
 #page-welcome,#page-loading,#page-error{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:32px;text-align:center}
@@ -836,7 +839,7 @@ button,select,textarea,input{font-family:inherit}
        search box's flex:1 was the only thing pushing them right, and removing it collapsed them left. -->
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto">
     <a id="jira-link" href="https://loopup.atlassian.net" target="_blank" style="font-size:12px;color:#2E99CE;font-weight:700;display:none;white-space:nowrap">Jira ↗</a>
-    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v193</span>
+    <span style="font-size:11px;color:#C9CACC;white-space:nowrap">v194</span>
     <span id="sync-time" style="font-size:11px;color:#C9CACC;display:none"></span>
     <button class="icon-btn" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
     <button class="primary-btn" onclick="openCreate(null)">+ Create</button>
@@ -1343,6 +1346,13 @@ let myEpicsViewPerson="";
 let ctrlProjFilter="";
 let priStatusFilters=new Set();
 let doneViewPerson="";
+// v194: per-issue "done date" override for the Done board so users can drag
+// a task into a different day if Jira's `updated` timestamp doesn't reflect
+// when they actually finished it. Map: issueKey → 'YYYY-MM-DD'. Local-only;
+// does not modify Jira.
+let localDoneDate = {};
+// v194: per-day collapse state for the Done view's rows. Map: 'YYYY-MM-DD' → true.
+let doneDayCollapsed = {};
 let activityData=[]; // cached activity entries
 let activityLoaded=false;
 let commentReadState={}; // key->lastReadTime (ISO)
@@ -1387,7 +1397,7 @@ let showDoneByView = {mytasks:true, myepics:true, team:true, prioritise:true, ma
 let showCancelled = false;
 
 /* ══ PERSISTENCE ══ */
-function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,groupProjectAssignment,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed,doneDays,commentReadState,priViewMode,priLayoutMode,priMatrixRowCollapsed,priBandCollapsed,showDone,showDoneByView,showCancelled,epicFocusKey,epicFocusUserFilter,epicFocusView,epicFocusProjectFilter,sharedTeams:[...sharedTeams],priProjKey}));}catch{}}
+function saveAll(){try{localStorage.setItem(STOR,JSON.stringify({cfg,locStat,locPri,currentIam,currentProjFilter,currentGroup,currentProjectGroup,teamMembers,adminUsers,groups,groupProjectAssignment,excludedProjects,currentView,currentLevel,rowCollapsed,swimCollapsed,doneDays,commentReadState,priViewMode,priLayoutMode,priMatrixRowCollapsed,priBandCollapsed,showDone,showDoneByView,showCancelled,epicFocusKey,epicFocusUserFilter,epicFocusView,epicFocusProjectFilter,sharedTeams:[...sharedTeams],priProjKey,localDoneDate,doneDayCollapsed}));}catch{}}
 function loadAll(){try{const d=JSON.parse(localStorage.getItem(STOR)||"{}");if(d.cfg)cfg=d.cfg;if(d.locStat)locStat=d.locStat;if(d.locPri)locPri=d.locPri;if(d.currentIam)currentIam=d.currentIam;if(d.currentProjFilter)currentProjFilter=d.currentProjFilter;
 if(d.currentProjectGroup)currentProjectGroup=d.currentProjectGroup;if(d.currentGroup)currentGroup=d.currentGroup;if(d.teamMembers)teamMembers=d.teamMembers;if(d.adminUsers)adminUsers=d.adminUsers;if(d.groups)groups=d.groups;
 if(d.groupProjectAssignment)groupProjectAssignment=d.groupProjectAssignment;if(d.excludedProjects)excludedProjects=d.excludedProjects;if(d.currentView)currentView=d.currentView;if(d.currentLevel)currentLevel=d.currentLevel;if(d.rowCollapsed)rowCollapsed={...rowCollapsed,...d.rowCollapsed};if(d.swimCollapsed)swimCollapsed={...swimCollapsed,...d.swimCollapsed};
@@ -1396,6 +1406,8 @@ if(d.commentReadState)commentReadState=d.commentReadState;
 if(d.priViewMode)priViewMode=d.priViewMode;
 if(d.priLayoutMode)priLayoutMode=d.priLayoutMode;
 if(d.priMatrixRowCollapsed && typeof d.priMatrixRowCollapsed === 'object') priMatrixRowCollapsed = d.priMatrixRowCollapsed;
+if(d.localDoneDate && typeof d.localDoneDate === 'object') localDoneDate = d.localDoneDate;
+if(d.doneDayCollapsed && typeof d.doneDayCollapsed === 'object') doneDayCollapsed = d.doneDayCollapsed;
 if(d.priBandCollapsed)priBandCollapsed={...priBandCollapsed,...d.priBandCollapsed};
 // v105: hydrate the single global flag. If the saved settings still carry the
 // legacy per-view object (from v104 and earlier), migrate by OR-ing all values
@@ -4454,14 +4466,21 @@ function renderPeople(){
 function togglePersonExpand(p){expandState[p]=expandState[p]===false?true:false;renderPeople();}
 
 /* ══ DONE VIEW ══ */
+// v194: Done view rebuilt as a people × days grid.
+// People are columns (sticky header with avatar + name + total count). Days
+// are rows (collapsible, with a per-day total). Cells show that person's
+// tasks completed on that day, with a clear blank-cell affordance so days
+// when someone shipped nothing stand out. Drag a task to a different day
+// cell to override its "done date" locally (stored in localDoneDate).
+function _doneDateOf(issue){
+  // localDoneDate override wins; falls back to Jira's `updated` (YYYY-MM-DD).
+  return localDoneDate[issue.key] || (issue.updated || '').slice(0,10);
+}
 function renderDone(){
   const el=document.getElementById("done-content")||document.getElementById("page-done");
   const dsel=document.getElementById("done-person-sel");
   if(dsel){
-    // v101: Team-first dropdown. "Team (all)" is the default and what the
-    // user said matters most. Then "Me — <name>" pinned second, then the
-    // rest of the visible team alphabetically. Visual labels make scope
-    // obvious at a glance.
+    // Team-first dropdown — restored from earlier behaviour.
     const p = doneViewPerson || '';
     const me = currentIam || '';
     const others = (getVisibleTeam()||[]).filter(m => m && m !== me).sort();
@@ -4474,15 +4493,12 @@ function renderDone(){
     }
     dsel.innerHTML = html;
   }
-  const vt=getVisibleTeam();
-  let done=getFiltered(null).filter(i=>normStatus(i.status)==="Done"&&vt.includes(i.assignee)).sort((a,b)=>b.updated.localeCompare(a.updated));
-  if(doneViewPerson) done=done.filter(i=>i.assignee===doneViewPerson);
-  if(!done.length){
-    el.innerHTML = emptyStateMessage('✓','Nothing done recently','No items have been moved to Done in the last '+doneDays+' days. Choose a different person above, or try a longer Done window in Settings → Admin.');
-    return;
-  }
 
-  // Group by day
+  const vt = getVisibleTeam();
+  let done = getFiltered(null, {includeDone:true}).filter(i => normStatus(i.status) === 'Done' && vt.includes(i.assignee));
+  if(doneViewPerson) done = done.filter(i => i.assignee === doneViewPerson);
+
+  // Build the day list (full window — show every day even when empty so blanks pop visually)
   const today = new Date();
   const days = [];
   for(let d=0; d<doneDays; d++){
@@ -4490,48 +4506,174 @@ function renderDone(){
     date.setDate(date.getDate()-d);
     const dateStr = date.toISOString().slice(0,10);
     const dayName = d===0 ? 'Today' : d===1 ? 'Yesterday' : date.toLocaleDateString('en-GB',{weekday:'short', day:'numeric', month:'short'});
-    const dayItems = done.filter(i=>i.updated===dateStr);
-    if(dayItems.length > 0) days.push({dateStr, dayName, items:dayItems});
+    days.push({dateStr, dayName, idx:d});
   }
-  // Catch any items with dates outside the day-by-day range
+  // Any items whose done-date falls outside the doneDays window bucket into "Earlier".
   const coveredDates = new Set(days.map(d=>d.dateStr));
-  const older = done.filter(i=>!coveredDates.has(i.updated));
-  if(older.length) days.push({dateStr:'older', dayName:'Earlier', items:older});
+  const hasEarlier = done.some(i => !coveredDates.has(_doneDateOf(i)));
+  if (hasEarlier) days.push({dateStr:'earlier', dayName:'Earlier', idx:doneDays});
 
-  el.innerHTML = days.map(day=>{
-    // Group items by person within each day
-    const byPerson = {};
-    day.items.forEach(i=>{(byPerson[i.assignee]=byPerson[i.assignee]||[]).push(i);});
+  // People = columns. Each column gets a total count across the whole window.
+  // When a specific person is selected in the dropdown, the grid narrows to one column.
+  const people = doneViewPerson ? [doneViewPerson] : (vt || []).filter(p => p && p !== 'Unassigned');
+  // Stable sort: me first, then alphabetical
+  const meName = currentIam || '';
+  people.sort((a,b) => {
+    if (a === meName) return -1;
+    if (b === meName) return 1;
+    return a.localeCompare(b);
+  });
+  const totalPerPerson = {};
+  for (const p of people) totalPerPerson[p] = done.filter(i => i.assignee === p).length;
+  const grandTotal = done.length;
 
-    return `<div style="margin-bottom:16px">
-      <div style="display:flex;align-items:center;gap:10px;padding:10px 15px;background:linear-gradient(90deg,#F0F9FF,#fff);border-bottom:2px solid #2E99CE;position:sticky;top:0;z-index:2">
-        <span style="font-size:14px;font-weight:700;color:#125462">${day.dayName}</span>
-        <span style="font-size:11px;color:#9EA0A4">${day.dateStr!=='older'?day.dateStr:''}</span>
-        <span style="font-size:11px;font-weight:700;color:#2E99CE;margin-left:auto">${day.items.length} task${day.items.length!==1?'s':''} completed</span>
-      </div>
-      <div style="display:flex;flex-wrap:wrap;gap:8px;padding:10px 15px">
-        ${Object.entries(byPerson).map(([person, items])=>`
-          <div style="flex:1;min-width:250px;max-width:400px;border:1px solid #E4E6E8;border-radius:10px;overflow:hidden;background:#fff">
-            <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#F7F8F9;border-bottom:1px solid #E4E6E8">
-              ${ava(person,24)}
-              <span style="font-size:12px;font-weight:700;color:#292E37">${person}</span>
-              <span class="badge" style="margin-left:auto;background:#F1F7EC;color:#5E8E38">${items.length}</span>
-            </div>
-            <div style="padding:6px 8px;display:flex;flex-direction:column;gap:2px">
-              ${items.map(i=>`
-                <div class="done-row" onclick="openPane('${i.key}')" style="display:flex;align-items:center;gap:6px;padding:5px 6px;border-radius:6px;cursor:pointer">
-                  <a href="${BASE()}${i.key}" target="_blank" onclick="event.stopPropagation()" class="card-key" style="font-size:10px">${i.key}</a>
-                  ${i.parent_key?`<span style="font-size:9px;color:#C9CACC;font-family:monospace">↑${i.parent_key}</span>`:''}
-                  <span style="font-size:12px;color:#292E37;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${i.summary}</span>
-                  ${i.commentCount?`<span style="font-size:10px;color:#9EA0A4">💬${i.commentCount}</span>`:''}
-                </div>
-              `).join('')}
-            </div>
-          </div>
-        `).join('')}
-      </div>
+  // ── Render header bar (last N days indicator + grand total) ────────────────
+  let html = `
+    <div style="display:flex;align-items:center;gap:14px;padding:10px 14px;background:#fff;border-bottom:1px solid #E4E6E8;flex-wrap:wrap">
+      <span style="font-size:13px;font-weight:700;color:#125462">Done — last ${doneDays} day${doneDays===1?'':'s'}</span>
+      <span class="badge" style="background:#E8F5E0;color:#2D7A2D">${grandTotal} task${grandTotal===1?'':'s'} completed</span>
+      <span style="margin-left:auto;font-size:11px;color:#9EA0A4">Drag a task into a different day to override its "done" date locally.</span>
     </div>`;
-  }).join('');
+
+  if (!people.length){
+    html += emptyStateMessage('👥','No team members visible','Add team members in Settings → Team to populate the Done board.');
+    el.innerHTML = html;
+    return;
+  }
+  if (grandTotal === 0){
+    html += emptyStateMessage('✓','Nothing done recently','No items have been moved to Done in the last '+doneDays+' days. Try a longer Done window in Settings → Admin.');
+    el.innerHTML = html;
+    return;
+  }
+
+  // ── Render the grid ────────────────────────────────────────────────────────
+  const colMin = 200;
+  html += `<div style="overflow:auto;padding:8px 14px 24px">
+    <table id="done-grid" style="border-collapse:separate;border-spacing:0;width:100%;min-width:${(people.length+1)*colMin}px">
+      <thead>
+        <tr>
+          <th style="position:sticky;left:0;top:0;background:#F7F8F9;z-index:5;padding:8px 10px;font-size:10px;font-weight:700;color:#5D7987;text-transform:uppercase;letter-spacing:.04em;border-right:2px solid #C9CACC;border-bottom:1px solid #E4E6E8;text-align:left;min-width:140px">Day</th>
+          ${people.map(p => {
+            const cnt = totalPerPerson[p] || 0;
+            const cntCol = cnt === 0 ? '#9EA0A4' : '#2D7A2D';
+            const cntBg = cnt === 0 ? '#F4F4F5' : '#E8F5E0';
+            return `<th style="position:sticky;top:0;background:#F7F8F9;z-index:4;padding:8px 10px;border-bottom:1px solid #E4E6E8;border-right:1px solid #E4E6E8;text-align:left;min-width:${colMin}px">
+              <div style="display:flex;align-items:center;gap:8px">
+                ${ava(p, 24)}
+                <span style="font-size:12px;font-weight:700;color:#292E37;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_escHtml(p)}</span>
+                <span class="badge" style="background:${cntBg};color:${cntCol};font-size:11px;padding:2px 8px">${cnt}</span>
+              </div>
+            </th>`;
+          }).join('')}
+        </tr>
+      </thead>
+      <tbody>
+        ${days.map(day => {
+          const dayItemsAll = done.filter(i => {
+            if (day.dateStr === 'earlier') return !coveredDates.has(_doneDateOf(i));
+            return _doneDateOf(i) === day.dateStr;
+          });
+          const collapsed = !!doneDayCollapsed[day.dateStr];
+          const safeDateStr = day.dateStr.replace(/'/g, "\\'");
+          // Header row spans whole grid: chevron + day name + total
+          let rowHtml = `<tr class="done-day-hdr" onclick="toggleDoneDay('${safeDateStr}')">
+            <td colspan="${people.length+1}" style="padding:6px 10px;background:#F7F8F9;cursor:pointer;border-top:1px solid #E4E6E8;border-bottom:1px solid #E4E6E8;position:sticky;left:0;z-index:2">
+              <div style="display:flex;align-items:center;gap:10px">
+                <span style="font-size:13px;color:#9EA0A4;transition:.15s;display:inline-block;transform:${collapsed?'none':'rotate(90deg)'}">›</span>
+                <span style="font-size:12px;font-weight:700;color:#125462">${_escHtml(day.dayName)}</span>
+                ${day.dateStr!=='earlier' ? `<span style="font-size:10px;color:#9EA0A4;font-family:monospace">${day.dateStr}</span>` : ''}
+                <span class="badge" style="background:${dayItemsAll.length?'#E8F5E0':'#F4F4F5'};color:${dayItemsAll.length?'#2D7A2D':'#9EA0A4'};font-size:10px">${dayItemsAll.length} task${dayItemsAll.length===1?'':'s'}</span>
+              </div>
+            </td>
+          </tr>`;
+          if (collapsed) return rowHtml;
+          // Cell row: per-person cells with that day's items
+          rowHtml += `<tr>
+            <td style="position:sticky;left:0;background:#fff;z-index:1;border-right:2px solid #C9CACC;border-bottom:1px solid #EEF1F3;padding:6px 10px;font-size:11px;color:#9EA0A4;vertical-align:top">
+              ${day.dateStr === 'earlier' ? 'Earlier' : day.dayName}
+            </td>
+            ${people.map(p => {
+              const cellItems = dayItemsAll.filter(i => i.assignee === p);
+              return `<td class="done-cell" data-day="${_escHtml(day.dateStr)}" data-person="${_escHtml(p)}"
+                ondragover="doneCellDragOver(event)" ondragleave="doneCellDragLeave(event)" ondrop="doneCellDrop(event,'${safeDateStr}','${p.replace(/'/g,"\\'")}')"
+                style="padding:6px;vertical-align:top;border-right:1px solid #EEF1F3;border-bottom:1px solid #EEF1F3;min-width:${colMin}px;background:${cellItems.length?'#fff':'#FBFBFB'}">
+                ${cellItems.length
+                  ? cellItems.map(i => `
+                    <div class="done-card" draggable="true" ondragstart="doneCardDragStart(event,'${i.key.replace(/'/g,"\\'")}')" ondragend="doneCardDragEnd(event)"
+                      onclick="openPane('${i.key.replace(/'/g,"\\'")}')"
+                      style="background:#E8F5E0;border:1px solid #C2E0AF;border-radius:6px;padding:5px 7px;margin-bottom:4px;cursor:pointer;font-size:11px;line-height:1.3">
+                      <div style="display:flex;align-items:center;gap:5px;margin-bottom:2px">
+                        <a href="${BASE()}${i.key}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;font-family:monospace;font-weight:700;color:#257AA5;text-decoration:none">${_escHtml(i.key)}</a>
+                        ${i.parent_key?`<span style="font-size:9px;color:#C9CACC;font-family:monospace">↑${_escHtml(i.parent_key)}</span>`:''}
+                        ${localDoneDate[i.key]?`<span title="Done date overridden locally" style="font-size:9px;color:#A04A00">●</span>`:''}
+                      </div>
+                      <div style="color:#2D7A2D;text-decoration:line-through;overflow:hidden;text-overflow:ellipsis">${_escHtml(i.summary || '')}</div>
+                    </div>`).join('')
+                  : '<div style="font-size:11px;color:#C9CACC;font-style:italic;padding:8px 4px;text-align:center">—</div>'}
+              </td>`;
+            }).join('')}
+          </tr>`;
+          return rowHtml;
+        }).join('')}
+      </tbody>
+    </table>
+  </div>`;
+
+  el.innerHTML = html;
+}
+
+// v194: drag-to-different-day. Updates localDoneDate so the next render
+// puts the card in the chosen cell. Local override only — does not touch Jira.
+function doneCardDragStart(e, key){
+  window._doneDragKey = key;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', key);
+  setTimeout(() => e.currentTarget.classList.add('dragging'), 0);
+}
+function doneCardDragEnd(e){
+  setTimeout(() => { window._doneDragKey = null; }, 100);
+  e.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('#done-grid .done-cell.drag-over').forEach(c => c.classList.remove('drag-over'));
+}
+function doneCellDragOver(e){
+  if (!window._doneDragKey) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  document.querySelectorAll('#done-grid .done-cell.drag-over').forEach(c => c.classList.remove('drag-over'));
+  e.currentTarget.classList.add('drag-over');
+}
+function doneCellDragLeave(e){
+  if (!e.currentTarget.contains(e.relatedTarget)){
+    e.currentTarget.classList.remove('drag-over');
+  }
+}
+function doneCellDrop(e, dateStr, person){
+  e.preventDefault();
+  const key = window._doneDragKey;
+  window._doneDragKey = null;
+  document.querySelectorAll('#done-grid .done-cell.drag-over').forEach(c => c.classList.remove('drag-over'));
+  if (!key) return;
+  // If dropping into a different person's column, ignore — we don't reassign here
+  // (use the detail-pane assignee picker for that). Only the day changes.
+  const issue = (allIssues || []).find(i => i.key === key);
+  if (!issue) return;
+  if (issue.assignee !== person){
+    appLogMsg('info','done','Ignored cross-person drop on Done board (assignee unchanged)');
+    return;
+  }
+  if (dateStr === 'earlier'){
+    // Clear any override and accept Jira's natural date again.
+    delete localDoneDate[key];
+  } else {
+    localDoneDate[key] = dateStr;
+  }
+  saveAll();
+  renderDone();
+}
+function toggleDoneDay(dateStr){
+  doneDayCollapsed[dateStr] = !doneDayCollapsed[dateStr];
+  saveAll();
+  renderDone();
 }
 
 
